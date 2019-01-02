@@ -14,8 +14,11 @@
 package com.facebook.presto.operator.project;
 
 import com.facebook.presto.array.ReferenceCountMap;
+import com.facebook.presto.memory.context.LocalMemoryContext;
 import com.facebook.presto.operator.DriverYieldSignal;
 import com.facebook.presto.operator.Work;
+import com.facebook.presto.operator.WorkProcessor;
+import com.facebook.presto.operator.WorkProcessor.ProcessState;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
@@ -24,13 +27,13 @@ import com.facebook.presto.spi.block.DictionaryId;
 import com.facebook.presto.spi.block.LazyBlock;
 import com.facebook.presto.sql.gen.ExpressionProfiler;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.AbstractIterator;
 import io.airlift.slice.SizeOf;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
 import static java.lang.Math.max;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,12 +43,14 @@ import java.util.HashSet;
 import java.util.OptionalInt;
 import java.util.function.Function;
 
-import static com.facebook.presto.operator.project.PageProcessorOutput.EMPTY_PAGE_PROCESSOR_OUTPUT;
+import static com.facebook.presto.operator.WorkProcessor.ProcessState.finished;
+import static com.facebook.presto.operator.WorkProcessor.ProcessState.ofResult;
+import static com.facebook.presto.operator.WorkProcessor.ProcessState.yield;
 import static com.facebook.presto.operator.project.SelectedPositions.positionsRange;
 import static com.facebook.presto.spi.block.DictionaryId.randomDictionaryId;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static com.google.common.collect.Iterators.singletonIterator;
 import static java.util.Objects.requireNonNull;
 
 @NotThreadSafe
@@ -149,90 +154,51 @@ public class PageProcessor
     {
         filterPushedDown = true;
     }
-    
-    public PageProcessorOutput process(ConnectorSession session, DriverYieldSignal yieldSignal, Page page)
+
+    public Iterator<Optional<Page>> process(ConnectorSession session, DriverYieldSignal yieldSignal, LocalMemoryContext memoryContext, Page page)
+    {
+        WorkProcessor<Page> processor = createWorkProcessor(session, yieldSignal, memoryContext, page);
+        return processor.yieldingIterator();
+    }
+
+    private WorkProcessor<Page> createWorkProcessor(ConnectorSession session, DriverYieldSignal yieldSignal, LocalMemoryContext memoryContext, Page page)
     {
         // limit the scope of the dictionary ids to just one page
         dictionarySourceIdFunction.reset();
 
         if (page.getPositionCount() == 0) {
-            return EMPTY_PAGE_PROCESSOR_OUTPUT;
+            return WorkProcessor.of();
         }
 
         if (!filterPushedDown && filter.isPresent()) {
             SelectedPositions selectedPositions = filter.get().filter(session, filter.get().getInputChannels().getInputChannels(page));
             if (selectedPositions.isEmpty()) {
-                return EMPTY_PAGE_PROCESSOR_OUTPUT;
+                return WorkProcessor.of();
             }
 
             if (projections.isEmpty()) {
-                return new PageProcessorOutput(() -> calculateRetainedSizeWithoutLoading(page), singletonIterator(Optional.of(new Page(selectedPositions.size()))));
+                // retained memory for empty page is negligible
+                return WorkProcessor.of(new Page(selectedPositions.size()));
             }
 
             if (selectedPositions.size() != page.getPositionCount()) {
-                PositionsPageProcessorIterator pages = new PositionsPageProcessorIterator(session, yieldSignal, page, selectedPositions);
-                return new PageProcessorOutput(pages::getRetainedSizeInBytes, pages);
+                return WorkProcessor.create(new ProjectSelectedPositions(session, yieldSignal, memoryContext, page, selectedPositions));
             }
         }
 
-        PositionsPageProcessorIterator pages = new PositionsPageProcessorIterator(session, yieldSignal, page, positionsRange(0, page.getPositionCount()));
-        return new PageProcessorOutput(pages::getRetainedSizeInBytes, pages);
+        return WorkProcessor.create(new ProjectSelectedPositions(session, yieldSignal, memoryContext, page, positionsRange(0, page.getPositionCount())));
     }
 
-    // Returns the channel numbers of the PageSource in the order they
-    // are in the result Page. If this is non-null the projection is
-    // pushed down into the PageSource.
-    public int[] getIdentityInputToOutputChannel()
-    {
-        return inputToOutputChannel;
-    }
-
-    // Returns the channels of the PageSource that need to have a
-    // Block for use in projection. Channels that only serve for
-    // pushed down filters are not included.
-    public int[] getOutputChannels()
-    {
-        HashSet<Integer> channels = new HashSet();
-        for (PageProjection projection : projections) {
-            for (Integer channel : projection.getInputChannels().getInputChannels()) {
-                channels.add(channel);
-            }
-        }
-        return channels.stream().mapToInt(Integer::intValue).toArray();
-    }
-
-    @VisibleForTesting
-    public List<PageProjection> getProjections()
-    {
-        return projections;
-    }
-
-    private static boolean isUnloadedLazyBlock(Block block)
-    {
-        return (block instanceof LazyBlock) && !((LazyBlock) block).isLoaded();
-    }
-
-    private static long calculateRetainedSizeWithoutLoading(Page page)
-    {
-        long retainedSizeInBytes = Page.INSTANCE_SIZE + SizeOf.sizeOfObjectArray(page.getChannelCount());
-        for (int channel = 0; channel < page.getChannelCount(); channel++) {
-            Block block = page.getBlock(channel);
-            if (!isUnloadedLazyBlock(block)) {
-                retainedSizeInBytes += block.getRetainedSizeInBytes();
-            }
-        }
-        return retainedSizeInBytes;
-    }
-
-    private class PositionsPageProcessorIterator
-            extends AbstractIterator<Optional<Page>>
+    private class ProjectSelectedPositions
+            implements WorkProcessor.Process<Page>
     {
         private final ConnectorSession session;
         private final DriverYieldSignal yieldSignal;
-        private final Page page;
+        private final LocalMemoryContext memoryContext;
 
+        private Page page;
+        private Block[] previouslyComputedResults;
         private SelectedPositions selectedPositions;
-        private final Block[] previouslyComputedResults;
         private long retainedSizeInBytes;
 
         // remember if we need to re-use the same batch size if we yield last time
@@ -240,30 +206,26 @@ public class PageProcessor
         private int lastComputeBatchSize;
         private Work<Block> pageProjectWork;
 
-        public PositionsPageProcessorIterator(ConnectorSession session, DriverYieldSignal yieldSignal, Page page, SelectedPositions selectedPositions)
+        private ProjectSelectedPositions(ConnectorSession session, DriverYieldSignal yieldSignal, LocalMemoryContext memoryContext, Page page, SelectedPositions selectedPositions)
         {
+            checkArgument(!selectedPositions.isEmpty(), "selectedPositions is empty");
+
             this.session = session;
             this.yieldSignal = yieldSignal;
             this.page = page;
+            this.memoryContext = memoryContext;
             this.selectedPositions = selectedPositions;
             this.previouslyComputedResults = new Block[projections.size()];
-            updateRetainedSize();
-        }
-
-        public long getRetainedSizeInBytes()
-        {
-            return retainedSizeInBytes;
         }
 
         @Override
-        protected Optional<Page> computeNext()
+        public ProcessState<Page> process()
         {
             int batchSize;
             while (true) {
                 if (selectedPositions.isEmpty()) {
-                    updateRetainedSize();
                     verify(!lastComputeYielded);
-                    return endOfData();
+                    return finished();
                 }
 
                 // we always process one chunk
@@ -283,7 +245,8 @@ public class PageProcessor
                     // if we are running out of time, save the batch size and continue next time
                     lastComputeYielded = true;
                     lastComputeBatchSize = batchSize;
-                    return Optional.empty();
+                    updateRetainedSize();
+                    return yield();
                 }
 
                 if (result.isPageTooLarge()) {
@@ -294,11 +257,11 @@ public class PageProcessor
                 }
 
                 verify(result.isSuccess());
-                Page page = result.getPage();
+                Page resultPage = result.getPage();
 
                 // if we produced a large page or if the expression is expensive, halve the batch size for the next call
-                long pageSize = page.getSizeInBytes();
-                if (page.getPositionCount() > 1 && (pageSize > MAX_PAGE_SIZE_IN_BYTES || expressionProfiler.isExpressionExpensive())) {
+                long pageSize = resultPage.getSizeInBytes();
+                if (resultPage.getPositionCount() > 1 && (pageSize > MAX_PAGE_SIZE_IN_BYTES || expressionProfiler.isExpressionExpensive())) {
                     projectBatchSize = projectBatchSize / 2;
                 }
 
@@ -318,8 +281,19 @@ public class PageProcessor
                     }
                 }
 
-                updateRetainedSize();
-                return Optional.of(page);
+                if (!selectedPositions.isEmpty()) {
+                    // there are still some positions to process therefore we need to retain page and account its memory
+                    updateRetainedSize();
+                }
+                else {
+                    page = null;
+                    for (int i = 0; i < previouslyComputedResults.length; i++) {
+                        previouslyComputedResults[i] = null;
+                    }
+                    memoryContext.setBytes(0);
+                }
+
+                return ofResult(resultPage);
             }
         }
 
@@ -330,7 +304,7 @@ public class PageProcessor
             ReferenceCountMap referenceCountMap = new ReferenceCountMap();
             for (int channel = 0; channel < page.getChannelCount(); channel++) {
                 Block block = page.getBlock(channel);
-                if (!isUnloadedLazyBlock(block)) {
+                if (!isNotLoadedLazyBlock(block)) {
                     block.retainedBytesForEachPart((object, size) -> {
                         if (referenceCountMap.incrementAndGet(object) == 1) {
                             retainedSizeInBytes += size;
@@ -347,6 +321,8 @@ public class PageProcessor
                     });
                 }
             }
+
+            memoryContext.setBytes(retainedSizeInBytes);
         }
 
         private ProcessBatchResult processBatch(int batchSize)
@@ -387,6 +363,56 @@ public class PageProcessor
             }
             return ProcessBatchResult.processBatchSuccess(new Page(positionsBatch.size(), blocks));
         }
+    }
+
+    // Returns the channel numbers of the PageSource in the order they
+    // are in the result Page. If this is non-null the projection is
+    // pushed down into the PageSource.
+    public int[] getIdentityInputToOutputChannel()
+    {
+        return inputToOutputChannel;
+    }
+
+    // Returns the channels of the PageSource that need to have a
+    // Block for use in projection. Channels that only serve for
+    // pushed down filters are not included.
+    public int[] getOutputChannels()
+    {
+        HashSet<Integer> channels = new HashSet();
+        for (PageProjection projection : projections) {
+            for (Integer channel : projection.getInputChannels().getInputChannels()) {
+                channels.add(channel);
+            }
+        }
+        return channels.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    private static boolean isNotLoadedLazyBlock(Block block)
+    {
+        return (block instanceof LazyBlock) && !((LazyBlock) block).isLoaded();
+    }
+
+    private static long calculateRetainedSizeWithoutLoading(Page page)
+    {
+        long retainedSizeInBytes = Page.INSTANCE_SIZE + SizeOf.sizeOfObjectArray(page.getChannelCount());
+        for (int channel = 0; channel < page.getChannelCount(); channel++) {
+            Block block = page.getBlock(channel);
+            if (!isUnloadedLazyBlock(block)) {
+                retainedSizeInBytes += block.getRetainedSizeInBytes();
+            }
+        }
+        return retainedSizeInBytes;
+    }
+
+    @VisibleForTesting
+    public List<PageProjection> getProjections()
+    {
+        return projections;
+    }
+
+    private static boolean isUnloadedLazyBlock(Block block)
+    {
+        return (block instanceof LazyBlock) && !((LazyBlock) block).isLoaded();
     }
 
     @NotThreadSafe

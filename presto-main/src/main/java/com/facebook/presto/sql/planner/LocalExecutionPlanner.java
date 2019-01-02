@@ -20,7 +20,6 @@ import com.facebook.presto.execution.StageId;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.execution.buffer.OutputBuffer;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
-import com.facebook.presto.execution.warnings.WarningCollector;
 import com.facebook.presto.index.IndexManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
@@ -79,6 +78,8 @@ import com.facebook.presto.operator.ValuesOperator.ValuesOperatorFactory;
 import com.facebook.presto.operator.WindowFunctionDefinition;
 import com.facebook.presto.operator.WindowOperator.WindowOperatorFactory;
 import com.facebook.presto.operator.aggregation.AccumulatorFactory;
+import com.facebook.presto.operator.aggregation.InternalAggregationFunction;
+import com.facebook.presto.operator.aggregation.LambdaProvider;
 import com.facebook.presto.operator.exchange.LocalExchange.LocalExchangeFactory;
 import com.facebook.presto.operator.exchange.LocalExchangeSinkOperator.LocalExchangeSinkOperatorFactory;
 import com.facebook.presto.operator.exchange.LocalExchangeSourceOperator.LocalExchangeSourceOperatorFactory;
@@ -96,6 +97,7 @@ import com.facebook.presto.operator.window.FrameInfo;
 import com.facebook.presto.operator.window.WindowFunctionSupplier;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorIndex;
+import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.PrestoException;
@@ -160,16 +162,20 @@ import com.facebook.presto.sql.planner.plan.UnnestNode;
 import com.facebook.presto.sql.planner.plan.ValuesNode;
 import com.facebook.presto.sql.planner.plan.WindowNode;
 import com.facebook.presto.sql.planner.plan.WindowNode.Frame;
+import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
 import com.facebook.presto.sql.relational.RowExpression;
 import com.facebook.presto.sql.relational.SqlToRowExpressionTranslator;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FieldReference;
 import com.facebook.presto.sql.tree.FunctionCall;
+import com.facebook.presto.sql.tree.LambdaArgumentDeclaration;
+import com.facebook.presto.sql.tree.LambdaExpression;
 import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.OrderBy;
 import com.facebook.presto.sql.tree.SortItem;
 import com.facebook.presto.sql.tree.SymbolReference;
+import com.facebook.presto.type.FunctionType;
 import com.google.common.base.VerifyException;
 import com.google.common.collect.ContiguousSet;
 import com.google.common.collect.HashMultimap;
@@ -213,6 +219,7 @@ import static com.facebook.presto.SystemSessionProperties.getTaskConcurrency;
 import static com.facebook.presto.SystemSessionProperties.getTaskWriterCount;
 import static com.facebook.presto.SystemSessionProperties.isExchangeCompressionEnabled;
 import static com.facebook.presto.SystemSessionProperties.isSpillEnabled;
+import static com.facebook.presto.execution.warnings.WarningCollector.NOOP;
 import static com.facebook.presto.metadata.FunctionKind.SCALAR;
 import static com.facebook.presto.operator.DistinctLimitOperator.DistinctLimitOperatorFactory;
 import static com.facebook.presto.operator.NestedLoopBuildOperator.NestedLoopBuildOperatorFactory;
@@ -232,6 +239,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.TypeUtils.writeNativeValue;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypes;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypesFromInput;
+import static com.facebook.presto.sql.gen.LambdaBytecodeGenerator.compileLambdaProvider;
 import static com.facebook.presto.sql.planner.ExpressionNodeInliner.replaceExpression;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.COORDINATOR_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_ARBITRARY_DISTRIBUTION;
@@ -250,6 +258,7 @@ import static com.facebook.presto.sql.planner.plan.TableWriterNode.WriterTarget;
 import static com.facebook.presto.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static com.facebook.presto.sql.tree.ComparisonExpression.Operator.LESS_THAN;
 import static com.facebook.presto.sql.tree.ComparisonExpression.Operator.LESS_THAN_OR_EQUAL;
+import static com.facebook.presto.util.Reflection.constructorMethodHandle;
 import static com.facebook.presto.util.SpatialJoinUtils.ST_CONTAINS;
 import static com.facebook.presto.util.SpatialJoinUtils.ST_DISTANCE;
 import static com.facebook.presto.util.SpatialJoinUtils.ST_INTERSECTS;
@@ -1213,7 +1222,7 @@ public class LocalExecutionPlanner
                            rewrittenFilterWithoutTupleDomain.map(ImmutableList::of).orElse(ImmutableList.of()),
                            rewrittenProjections),
                     emptyList(),
-                    WarningCollector.NOOP);
+                    NOOP);
 
             Optional<RowExpression> translatedFilter = rewrittenFilter.map(filter -> toRowExpression(filter, expressionTypes));
             Optional<RowExpression> translatedFilterWithoutTupleDomain = rewrittenFilterWithoutTupleDomain.map(filter -> toRowExpression(filter, expressionTypes));
@@ -1308,7 +1317,7 @@ public class LocalExecutionPlanner
                         TypeProvider.empty(),
                         ImmutableList.copyOf(row),
                         emptyList(),
-                        WarningCollector.NOOP,
+                        NOOP,
                         false);
                 for (int i = 0; i < row.size(); i++) {
                     // evaluate the literal value
@@ -1908,7 +1917,7 @@ public class LocalExecutionPlanner
             PhysicalOperation probeSource = probeNode.accept(this, context);
 
             // Plan build
-            JoinBridgeManager<LookupSourceFactory> lookupSourceFactory =
+            JoinBridgeManager<PartitionedLookupSourceFactory> lookupSourceFactory =
                     createLookupSourceFactory(node, buildNode, buildSymbols, buildHashSymbol, probeSource, context);
 
             OperatorFactory operator = createLookupJoin(node, probeSource, probeSymbols, probeHashSymbol, lookupSourceFactory, context);
@@ -1923,7 +1932,7 @@ public class LocalExecutionPlanner
             return new PhysicalOperation(operator, outputMappings.build(), context, probeSource);
         }
 
-        private JoinBridgeManager<LookupSourceFactory> createLookupSourceFactory(
+        private JoinBridgeManager<PartitionedLookupSourceFactory> createLookupSourceFactory(
                 JoinNode node,
                 PlanNode buildNode,
                 List<Symbol> buildSymbols,
@@ -1984,7 +1993,7 @@ public class LocalExecutionPlanner
             ImmutableList<Type> buildOutputTypes = buildOutputChannels.stream()
                     .map(buildSource.getTypes()::get)
                     .collect(toImmutableList());
-            JoinBridgeManager<LookupSourceFactory> lookupSourceFactoryManager = new JoinBridgeManager<>(
+            JoinBridgeManager<PartitionedLookupSourceFactory> lookupSourceFactoryManager = new JoinBridgeManager<>(
                     buildOuter,
                     probeSource.getPipelineExecutionStrategy(),
                     buildSource.getPipelineExecutionStrategy(),
@@ -2046,7 +2055,7 @@ public class LocalExecutionPlanner
                     sourceTypes,
                     rewrittenFilter,
                     emptyList(), /* parameters have already been replaced */
-                    WarningCollector.NOOP);
+                    NOOP);
 
             RowExpression translatedFilter = toRowExpression(rewrittenFilter, expressionTypes);
             return joinFilterFunctionCompiler.compileJoinFilterFunction(translatedFilter, buildLayout.size());
@@ -2068,7 +2077,7 @@ public class LocalExecutionPlanner
                 PhysicalOperation probeSource,
                 List<Symbol> probeSymbols,
                 Optional<Symbol> probeHashSymbol,
-                JoinBridgeManager<LookupSourceFactory> lookupSourceFactory,
+                JoinBridgeManager<? extends LookupSourceFactory> lookupSourceFactoryManager,
                 LocalExecutionPlanContext context)
         {
             List<Type> probeTypes = probeSource.getTypes();
@@ -2083,13 +2092,13 @@ public class LocalExecutionPlanner
 
             switch (node.getType()) {
                 case INNER:
-                    return lookupJoinOperators.innerJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactory, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
+                    return lookupJoinOperators.innerJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactoryManager, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
                 case LEFT:
-                    return lookupJoinOperators.probeOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactory, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
+                    return lookupJoinOperators.probeOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactoryManager, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
                 case RIGHT:
-                    return lookupJoinOperators.lookupOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactory, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
+                    return lookupJoinOperators.lookupOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactoryManager, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
                 case FULL:
-                    return lookupJoinOperators.fullOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactory, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
+                    return lookupJoinOperators.fullOuterJoin(context.getNextOperatorId(), node.getId(), lookupSourceFactoryManager, probeTypes, probeJoinChannels, probeHashChannel, Optional.of(probeOutputChannels), totalOperatorsCount, partitioningSpillerFactory);
                 default:
                     throw new UnsupportedOperationException("Unsupported join type: " + node.getType());
             }
@@ -2504,10 +2513,82 @@ public class LocalExecutionPlanner
                 PhysicalOperation source,
                 Aggregation aggregation)
         {
-            List<Integer> arguments = new ArrayList<>();
+            InternalAggregationFunction internalAggregationFunction = metadata
+                    .getFunctionRegistry()
+                    .getAggregateFunctionImplementation(aggregation.getSignature());
+
+            List<Integer> valueChannels = new ArrayList<>();
             for (Expression argument : aggregation.getCall().getArguments()) {
-                Symbol argumentSymbol = Symbol.from(argument);
-                arguments.add(source.getLayout().get(argumentSymbol));
+                if (!(argument instanceof LambdaExpression)) {
+                    Symbol argumentSymbol = Symbol.from(argument);
+                    valueChannels.add(source.getLayout().get(argumentSymbol));
+                }
+            }
+
+            List<LambdaProvider> lambdaProviders = new ArrayList<>();
+            List<LambdaExpression> lambdaExpressions = aggregation.getCall().getArguments().stream()
+                    .filter(LambdaExpression.class::isInstance)
+                    .map(LambdaExpression.class::cast)
+                    .collect(toImmutableList());
+            if (!lambdaExpressions.isEmpty()) {
+                List<FunctionType> functionTypes = aggregation.getSignature().getArgumentTypes().stream()
+                        .filter(typeSignature -> typeSignature.getBase().equals(FunctionType.NAME))
+                        .map(typeSignature -> (FunctionType) (metadata.getTypeManager().getType(typeSignature)))
+                        .collect(toImmutableList());
+                List<Class> lambdaInterfaces = internalAggregationFunction.getLambdaInterfaces();
+                verify(lambdaExpressions.size() == functionTypes.size());
+                verify(lambdaExpressions.size() == lambdaInterfaces.size());
+
+                for (int i = 0; i < lambdaExpressions.size(); i++) {
+                    LambdaExpression lambdaExpression = lambdaExpressions.get(i);
+                    FunctionType functionType = functionTypes.get(i);
+
+                    // To compile lambda, LambdaDefinitionExpression needs to be generated from LambdaExpression,
+                    // which requires the types of all sub-expressions.
+                    //
+                    // In project and filter expression compilation, ExpressionAnalyzer.getExpressionTypesFromInput
+                    // is used to generate the types of all sub-expressions. (see visitScanFilterAndProject and visitFilter)
+                    //
+                    // This does not work here since the function call representation in final aggregation node
+                    // is currently a hack: it takes intermediate type as input, and may not be a valid
+                    // function call in Presto.
+                    //
+                    // TODO: Once the final aggregation function call representation is fixed,
+                    // the same mechanism in project and filter expression should be used here.
+                    verify(lambdaExpression.getArguments().size() == functionType.getArgumentTypes().size());
+                    Map<NodeRef<Expression>, Type> lambdaArgumentExpressionTypes = new HashMap<>();
+                    Map<Symbol, Type> lambdaArgumentSymbolTypes = new HashMap<>();
+                    for (int j = 0; j < lambdaExpression.getArguments().size(); j++) {
+                        LambdaArgumentDeclaration argument = lambdaExpression.getArguments().get(j);
+                        Type type = functionType.getArgumentTypes().get(j);
+                        lambdaArgumentExpressionTypes.put(NodeRef.of(argument), type);
+                        lambdaArgumentSymbolTypes.put(new Symbol(argument.getName().getValue()), type);
+                    }
+                    Map<NodeRef<Expression>, Type> expressionTypes = ImmutableMap.<NodeRef<Expression>, Type>builder()
+                            // the lambda expression itself
+                            .put(NodeRef.of(lambdaExpression), functionType)
+                            // expressions from lambda arguments
+                            .putAll(lambdaArgumentExpressionTypes)
+                            // expressions from lambda body
+                            .putAll(getExpressionTypes(
+                                    session,
+                                    metadata,
+                                    sqlParser,
+                                    TypeProvider.copyOf(lambdaArgumentSymbolTypes),
+                                    lambdaExpression.getBody(),
+                                    emptyList(),
+                                    NOOP))
+                            .build();
+
+                    LambdaDefinitionExpression lambda = (LambdaDefinitionExpression) toRowExpression(lambdaExpression, expressionTypes);
+                    Class<? extends LambdaProvider> lambdaProviderClass = compileLambdaProvider(lambda, metadata.getFunctionRegistry(), lambdaInterfaces.get(i));
+                    try {
+                        lambdaProviders.add((LambdaProvider) constructorMethodHandle(lambdaProviderClass, ConnectorSession.class).invoke(session.toConnectorSession()));
+                    }
+                    catch (Throwable t) {
+                        throw new RuntimeException(t);
+                    }
+                }
             }
 
             Optional<Integer> maskChannel = aggregation.getMask().map(value -> source.getLayout().get(value));
@@ -2526,10 +2607,17 @@ public class LocalExecutionPlanner
                         .collect(toImmutableList());
             }
 
-            return metadata
-                    .getFunctionRegistry()
-                    .getAggregateFunctionImplementation(aggregation.getSignature())
-                    .bind(arguments, maskChannel, source.getTypes(), getChannelsForSymbols(sortKeys, source.getLayout()), sortOrders, pagesIndexFactory, aggregation.getCall().isDistinct(), joinCompiler, session);
+            return internalAggregationFunction.bind(
+                    valueChannels,
+                    maskChannel,
+                    source.getTypes(),
+                    getChannelsForSymbols(sortKeys, source.getLayout()),
+                    sortOrders,
+                    pagesIndexFactory,
+                    aggregation.getCall().isDistinct(),
+                    joinCompiler,
+                    lambdaProviders,
+                    session);
         }
 
         private PhysicalOperation planGlobalAggregation(AggregationNode node, PhysicalOperation source, LocalExecutionPlanContext context)
