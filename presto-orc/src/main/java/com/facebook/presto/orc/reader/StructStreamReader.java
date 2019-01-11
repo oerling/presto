@@ -14,17 +14,23 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
+import com.facebook.presto.orc.ColumnGroupReader;
+import com.facebook.presto.orc.Filter;
+import com.facebook.presto.orc.Filters;
+import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
 import com.facebook.presto.orc.metadata.ColumnEncoding;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
 import com.facebook.presto.orc.stream.InputStreamSources;
+import com.facebook.presto.spi.ReferencePath;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.RowBlock;
 import com.facebook.presto.spi.block.RunLengthEncodedBlock;
 import com.facebook.presto.spi.type.RowType;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.io.Closer;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.joda.time.DateTimeZone;
 import org.openjdk.jol.info.ClassLayout;
 
@@ -33,6 +39,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,7 +54,8 @@ import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.util.Objects.requireNonNull;
 
 public class StructStreamReader
-        implements StreamReader
+    extends ColumnReader
+    implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(StructStreamReader.class).instanceSize();
 
@@ -62,7 +70,27 @@ public class StructStreamReader
     @Nullable
     private BooleanInputStream presentStream;
 
-    private boolean rowGroupOpen;
+    ColumnGroupReader reader;
+    int[] fieldBlockOffset;
+    boolean[] valueIsNull;
+    // Number of rows in field blocks. This is < numValues if there
+    // are null structs in the result.
+    int fieldBlockSize;
+    int[] fieldSurviving;
+    QualifyingSet fieldQualifyingSet;
+    // Passing rows of field filters are returned here, null if no field filters.
+    QualifyingSet fieldOutputQualifyingSet;
+    // Copy of inputQualifyingSet. Needed when continuing after
+    // truncation since the original input may have been changed.
+    QualifyingSet inputCopy;
+    // Position in row group of first unprocessed field row.
+    int posInFields;
+    StreamReader[] streamReaders;
+    // For each position in fieldQualifyingSet, the corresponding
+    // position in inputQualifyingSet.
+    int[] innerToOuter;
+    int[] orgFieldRows;
+    int numFieldRows;
 
     StructStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -132,12 +160,13 @@ public class StructStreamReader
         return rowBlock;
     }
 
-    private void openRowGroup()
+    @Override
+    protected void openRowGroup()
             throws IOException
     {
         presentStream = presentStreamSource.openStream();
-
-        rowGroupOpen = true;
+        posInFields = 0;
+        super.openRowGroup();
     }
 
     @Override
@@ -241,5 +270,328 @@ public class StructStreamReader
             retainedSizeInBytes += structField.getRetainedSizeInBytes();
         }
         return retainedSizeInBytes;
+    }
+
+    private void setupForScan ()
+    {
+        RowType rowType = (RowType) type;
+        int numFields = rowType.getFields().size();
+        int[] fieldColumns = new int[numFields];
+        streamReaders = new StreamReader[numFields];
+        HashMap<Integer, Filter> filters = new HashMap();
+        for (int i = 0; i < numFields; i++) {
+            fieldColumns[i] = i;
+            Optional<String> fieldName = rowType.getFields().get(i).getName();
+            Type fieldType = rowType.getFields().get(i).getType();
+
+            if (!fieldName.isPresent()) {
+                throw new IllegalArgumentException("Missing struct field name in type " + rowType);
+            }
+
+            if (filter != null) {
+                Filters.StructFilter structFilter = (Filters.StructFilter) filter;
+                Filter fieldFilter = structFilter.getMember(new ReferencePath.PathElement(fieldName.get(), 0));
+                if (fieldFilter != null) {
+                    filters.put(i, fieldFilter);
+                }
+            }
+            String lowerCaseFieldName = fieldName.get().toLowerCase(Locale.ENGLISH);
+            StreamReader streamReader = structFields.get(lowerCaseFieldName);
+            if (streamReader != null) {
+                streamReaders[i] = streamReader;
+            }
+        }
+        reader = new ColumnGroupReader(streamReaders,
+                                       null,
+                                       fieldColumns,
+                                       rowType.getTypeParameters(),
+                                       fieldColumns,
+                                       filters,
+                                       null,
+                                       true,
+                                       true,
+                                       0);
+    }
+
+    @Override
+    public void setResultSizeBudget(long bytes)
+    {
+        if (reader == null) {
+            setupForScan();
+        }
+        reader.setResultSizeBudget(bytes);
+    }
+
+    @Override
+    public void erase(int end)
+    {
+        if (reader != null) {
+            if (valueIsNull != null) {
+                int fieldEnd = 0;
+                for (int i = 0; i < end; i++) {
+                    if (!valueIsNull[i]) {
+                        fieldEnd++;
+                    }
+                }
+                end = fieldEnd;
+            }
+            fieldBlockSize -= end;
+            reader.newBatch(end);
+        }
+        numValues -= end;
+    }
+
+    @Override
+    public void compactValues(int[] surviving, int base, int numSurviving)
+    {
+        if (outputChannel != -1) {
+            if (fieldSurviving == null || fieldSurviving.length < numSurviving) {
+                fieldSurviving = new int[numSurviving];
+            }
+            int fieldBase = fieldBlockOffset[base];
+            int numFieldSurviving = 0;
+            for (int i = 0; i < numSurviving; i++) {
+                if (valueIsNull != null && valueIsNull[base + surviving[i]]) {
+                    valueIsNull[base + i] = true;
+                    fieldBlockOffset[i] = fieldBase;
+                }
+                else {
+                    fieldSurviving[numFieldSurviving++] = fieldBlockOffset[base + surviving[i]];
+                    fieldBase++;
+                    if (valueIsNull != null) {
+                        valueIsNull[base + i] = false;
+                    }
+                    fieldBlockOffset[i] = fieldBase;
+                }
+            }
+            for (StreamReader reader : streamReaders) {
+                if (reader != null) {
+                    reader.compactValues(fieldSurviving, base, numFieldSurviving);
+                }
+            }
+            numValues = base + numSurviving;
+        }
+        compactQualifyingSet(surviving, numSurviving);
+    }
+
+    @Override
+    public int getResultSizeInBytes()
+    {
+        if (reader == null) {
+            return 0;
+        }
+        return reader.getResultSizeInBytes();
+    }
+
+    public int getAverageResultSize()
+    {
+        if (reader == null) {
+            return 10 * structFields.size();
+        }
+        return reader.getAverageResultSize();
+    }
+
+    private int innerDistance(int from, int to)
+    {
+        if (presentStream == null) {
+            return to - from;
+        }
+        int distance = 0;
+        for (int i = from; i < to; i++) {
+            if (present[i - posInRowGroup]) {
+                distance++;
+            }
+        }
+        return distance;
+    }
+
+    @Override
+    public void scan()
+        throws IOException
+    {
+        if (!rowGroupOpen) {
+            openRowGroup();
+        }
+        beginScan(presentStream, null);
+        QualifyingSet input = inputQualifyingSet;
+        QualifyingSet output = outputQualifyingSet;
+        if (fieldBlockOffset == null) {
+            inputCopy = new QualifyingSet();
+            fieldQualifyingSet = new QualifyingSet();
+            if (filter != null) {
+                fieldOutputQualifyingSet = new QualifyingSet();
+            }
+        }
+        int initialFieldResults = reader.getNumResults();
+        if (reader.hasUnfetchedRows()) {
+            fieldQualifyingSet.clearTruncationPosition();
+            reader.advance();
+            int newTruncation = reader.getTruncationRow();
+            if (newTruncation != -1) {
+                truncationRow = innerToOuterRow(newTruncation);
+                inputQualifyingSet.setTruncationRow(truncationRow);
+            }
+            else {
+                posInFields = fieldQualifyingSet.getEnd();
+            }
+        }
+        else {
+            inputCopy.copyFrom(inputQualifyingSet);
+            int numInput = input.getPositionCount();
+            int[] inputRows = input.getPositions();
+            int end = input.getEnd();
+            int rowsInRange = end - posInRowGroup;
+            int[] fieldRows = fieldQualifyingSet.getMutablePositions(numInput);
+            int prevFieldRow = posInFields;
+            int prevRow = posInRowGroup;
+            numFieldRows = 0;
+            if (innerToOuter == null || innerToOuter.length < numInput) {
+                innerToOuter = new int [numInput + 100];
+            }
+            for (int i = 0; i < numInput; i++) {
+                int activeRow = inputRows[i];
+                if (presentStream == null || present[activeRow - posInRowGroup]) {
+                    int numSkip = innerDistance(prevRow, activeRow);
+                    fieldRows[numFieldRows] = prevFieldRow + numSkip;
+                    innerToOuter[numFieldRows] = i;
+                    numFieldRows++;
+                    prevFieldRow += numSkip;
+                }
+                prevRow = activeRow;
+            }
+            int skip = innerDistance(prevRow, end);
+            fieldQualifyingSet.setEnd(skip + prevFieldRow);
+            fieldQualifyingSet.setPositionCount(numFieldRows);
+            fieldQualifyingSet.clearTruncationPosition();
+            if (orgFieldRows == null || orgFieldRows.length < numFieldRows) {
+                orgFieldRows = new int[numFieldRows];
+            }
+            System.arraycopy(fieldRows, 0, orgFieldRows, 0, numFieldRows);
+            reader.setQualifyingSets(fieldQualifyingSet, fieldOutputQualifyingSet);
+            reader.advance();
+            int truncated = reader.getTruncationRow();
+            if (truncated != -1) {
+                posInFields = truncated;
+                truncationRow = innerToOuterRow(truncated);
+                inputQualifyingSet.setTruncationRow(truncationRow);
+            }
+            else {
+                truncationRow = -1;
+                posInFields = fieldQualifyingSet.getEnd();
+            }
+        }
+        int[] resultRows = null;
+        int[] inputNumbers = null;
+        int[] inputRows = inputCopy.getPositions();
+        int numInput = inputCopy.getPositionCount();
+        if (output != null) {
+            resultRows = output.getMutablePositions(numInput);
+            inputNumbers = output.getMutableInputNumbers(numInput);
+        }
+        QualifyingSet structQualified = fieldOutputQualifyingSet;
+        int[] fieldQualifyingRows = null;
+        if (structQualified != null) {
+            fieldQualifyingRows = structQualified.getPositions();
+        }
+        ensureOutput(numInput);
+        int lastFieldQualified = 0;
+        int numFieldResults = reader.getNumResults() - initialFieldResults;
+        for (int i = 0; i < numInput; i++) {
+            if (presentStream != null && !present[i]) {
+                if (filter == null || filter.testNull()) {
+                    valueIsNull[numValues] = true;
+                    fieldBlockOffset[numValues] = numValues + numResults > 0 ? fieldBlockOffset[numValues + numResults - 1] : 0;
+                    if (resultRows != null) {
+                        resultRows[numResults] = inputRows[i];
+                        inputNumbers[numResults] = i;
+                    }
+                    numResults++;
+                }
+            }
+            else {
+                // A non null struct in the input qualifying set.
+                if (filter != null) {
+                    if (lastFieldQualified >= numFieldResults) {
+                        break;
+                    }
+                    if (fieldQualifyingRows[lastFieldQualified] == orgFieldRows[i]) {
+                        lastFieldQualified++;
+                        resultRows[numResults] = inputRows[i];
+                        inputNumbers[numResults] = i;
+                        addStructResult();
+                    }
+                }
+                else {
+                    addStructResult();
+                    if (--numFieldResults == 0) {
+                        break;
+                    }
+                }
+            }
+        }
+        endScan(presentStream);
+    }
+
+    void addStructResult()
+    {
+        fieldBlockOffset[numValues + numResults] = fieldBlockSize;
+        fieldBlockOffset[numValues + numResults + 1] = fieldBlockSize + 1;
+        if (valueIsNull != null) {
+            valueIsNull[numValues + numResults] = false;
+        }
+        fieldBlockSize++;
+        numResults++;
+    }
+
+    // Returns the enclosing row number for a field column row number.
+    int innerToOuterRow(int inner)
+    {
+        for (int i = 0; i < numFieldRows; i++) {
+            if (inner == orgFieldRows[i]) {
+                return inputCopy.getPositions()[innerToOuter[i]];
+            }
+        }
+        throw new IllegalArgumentException("Can't translate from struct truncation row to enclosing truncation row");
+    }
+
+    void ensureOutput(int numAdded)
+    {
+        int newSize = numValues + numAdded * 2;
+        if (presentStream != null && valueIsNull == null) {
+            valueIsNull = new boolean[newSize];
+        }
+        if (valueIsNull != null && valueIsNull.length < numValues + numAdded) {
+            valueIsNull = Arrays.copyOf(valueIsNull, newSize);
+        }
+        if (fieldBlockOffset == null) {
+            fieldBlockOffset = new int[newSize];
+        } else if (fieldBlockOffset.length < numValues + numAdded + 1) {
+            fieldBlockOffset = Arrays.copyOf(fieldBlockOffset, newSize);
+        }
+    }
+
+    @Override
+    public Block getBlock(int numFirstRows, boolean mayReuse)
+    {
+        int innerFirstRows = 0;
+        for (int i = 0; i < numFirstRows; i++) {
+            if (valueIsNull == null || !valueIsNull[i]) {
+                innerFirstRows++;
+            }
+            }
+        if (innerFirstRows == 0) {
+            return getNullBlock(type, numFirstRows);
+        }
+        Block[] blocks = reader.getBlocks(innerFirstRows, mayReuse, true);
+        int[] offsets = mayReuse ? fieldBlockOffset : Arrays.copyOf(fieldBlockOffset, numFirstRows + 1);
+        boolean[] nulls = valueIsNull == null ? null
+            : mayReuse ? valueIsNull : Arrays.copyOf(valueIsNull, numFirstRows);
+        return new RowBlock(0, numFirstRows, nulls, offsets, blocks);
+    }
+
+    @Override
+    public void maybeReorderFilters()
+    {
+        reader.maybeReorderFilters();
     }
 }
