@@ -15,6 +15,7 @@ package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.OrcCorruptionException;
+import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
 import com.facebook.presto.orc.metadata.ColumnEncoding;
 import com.facebook.presto.orc.stream.BooleanInputStream;
@@ -45,7 +46,8 @@ import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
 public class MapDirectStreamReader
-        implements StreamReader
+    extends ColumnReader
+    implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(MapDirectStreamReader.class).instanceSize();
 
@@ -65,7 +67,7 @@ public class MapDirectStreamReader
     @Nullable
     private LongInputStream lengthStream;
 
-    private boolean rowGroupOpen;
+    QualifyingSet keySet;
 
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -209,13 +211,13 @@ public class MapDirectStreamReader
         return false;
     }
 
-    private void openRowGroup()
+    protected void openRowGroup()
             throws IOException
     {
         presentStream = presentStreamSource.openStream();
         lengthStream = lengthStreamSource.openStream();
 
-        rowGroupOpen = true;
+        super.openRowGroup();
     }
 
     @Override
