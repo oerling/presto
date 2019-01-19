@@ -45,6 +45,8 @@ public class QueryManagerConfig
     private int maxQueryHistory = 100;
     private int maxQueryLength = 1_000_000;
     private int maxStageCount = 100;
+    private int stageCountSoftLimit = 50;
+
     private Duration clientTimeout = new Duration(5, TimeUnit.MINUTES);
 
     private int queryManagerExecutorPoolSize = 5;
@@ -183,6 +185,20 @@ public class QueryManagerConfig
     public QueryManagerConfig setMaxStageCount(int maxStageCount)
     {
         this.maxStageCount = maxStageCount;
+        return this;
+    }
+
+    @Min(1)
+    public int getStageCountSoftLimit()
+    {
+        return stageCountSoftLimit;
+    }
+
+    @Config("query.stage-count-soft-limit")
+    @ConfigDescription("Emit a warning when stage count exceeds the soft limit")
+    public QueryManagerConfig setStageCountSoftLimit(int stageCountSoftLimit)
+    {
+        this.stageCountSoftLimit = stageCountSoftLimit;
         return this;
     }
 
