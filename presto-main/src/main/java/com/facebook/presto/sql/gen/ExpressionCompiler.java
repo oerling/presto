@@ -14,12 +14,17 @@
 package com.facebook.presto.sql.gen;
 
 import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.operator.project.CursorProcessor;
 import com.facebook.presto.operator.project.PageFilter;
 import com.facebook.presto.operator.project.PageProcessor;
 import com.facebook.presto.operator.project.PageProjection;
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.sql.relational.CallExpression;
+import com.facebook.presto.sql.relational.InputReferenceExpression;
+import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
 import com.facebook.presto.sql.relational.RowExpression;
+import com.facebook.presto.sql.tree.Expression;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -33,7 +38,10 @@ import org.weakref.jmx.Nested;
 import javax.inject.Inject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -238,13 +246,76 @@ public class ExpressionCompiler
         }
     }
 
+    private void collectConjuncts(RowExpression expression, ArrayList<RowExpression> conjuncts)
+    {
+        if (expression instanceof CallExpression && ((CallExpression) expression).getSignature().getName().equals("AND")) {
+            for (RowExpression argument : ((CallExpression) expression).getArguments()) {
+                collectConjuncts(argument, conjuncts);
+            }
+        }
+        else {
+            conjuncts.add(expression);
+        }
+    }
+
+    private void collectInputs(RowExpression expression, HashSet<InputReferenceExpression> inputs)
+    {
+        if (expression instanceof InputReferenceExpression) {
+            inputs.add((InputReferenceExpression) expression);
+        }
+        else if (expression instanceof CallExpression) {
+            for (RowExpression argument : ((CallExpression) expression).getArguments()) {
+                collectInputs(argument, inputs);
+            }
+        }
+        else if (expression instanceof LambdaDefinitionExpression) {
+            collectInputs(((LambdaDefinitionExpression) expression).getBody(), inputs);
+        }
+    }
+
+    // Splits filter into top level conjuncts and groups the conjuncts
+    // that depend on the same set of inputs into their own
+    // PageFilter. Within each PageFilter, the conjuncts are ordered
+    // left to right.
     List<Supplier<PageFilter>> makeReorderableFilters(Optional<RowExpression> filter, Optional<String> classNameSuffix)
     {
         ArrayList<Supplier<PageFilter>> result = new ArrayList();
         if (!filter.isPresent()) {
             return result;
         }
-        result.add(pageFunctionCompiler.compileFilter(filter.get(), classNameSuffix));
-        return result;
+        ArrayList<RowExpression> conjuncts = new ArrayList();
+        collectConjuncts(filter.get(), conjuncts);
+        if (conjuncts.size() == 1) {
+            result.add(pageFunctionCompiler.compileFilter(filter.get(), classNameSuffix));
+        }
+        else {
+            CallExpression topAnd = (CallExpression) filter.get();
+            HashMap<HashSet<InputReferenceExpression>, ArrayList<RowExpression>> inputsToConjuncts = new HashMap();
+            for (RowExpression conjunct : conjuncts) {
+                HashSet<InputReferenceExpression> inputs = new HashSet();
+                collectInputs(conjunct, inputs);
+                ArrayList<RowExpression> list = inputsToConjuncts.get(inputs);
+                if (list == null) {
+                    list = new ArrayList();
+                    list.add(conjunct);
+                    inputsToConjuncts.put(inputs, list);
+                }
+                else {
+                    list.add(conjunct);
+                }
+            }
+            for (Map.Entry<HashSet<InputReferenceExpression>, ArrayList<RowExpression>> entry : inputsToConjuncts.entrySet()) {
+                ArrayList<RowExpression> list = entry.getValue();
+                RowExpression conjunct = list.get(0);
+                for (int i = 1; i < list.size(); i++) {
+                    ArrayList<RowExpression> arguments = new ArrayList();
+                    arguments.add(conjunct);
+                    arguments.add(conjuncts.get(i));
+                    conjunct = new CallExpression(topAnd.getSignature(), topAnd.getType(), arguments);
+                }
+                result.add(pageFunctionCompiler.compileFilter(conjunct, classNameSuffix));
+            }
+        }
+            return result;
     }
 }

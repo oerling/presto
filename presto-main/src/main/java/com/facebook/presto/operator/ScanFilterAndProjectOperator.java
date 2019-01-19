@@ -329,10 +329,8 @@ public class ScanFilterAndProjectOperator
                 filters = new FilterExpression[pageFilters.size()];
                 for (int i = 0; i < pageFilters.size(); i++) {
                     filters[i] = new FilterExpression(operatorContext.getSession().toConnectorSession(), pageFilters.get(i));
-                for (FilterExpression filterExpression : filters) {
-                    channels = addFilterChannels(filterExpression, channels);
+                    channels = addFilterChannels(filters[i], channels);
                 }
-            }
             }
             boolean reorderFilters = SystemSessionProperties.ariaReorderFilters(operatorContext.getSession());
             int ariaFlags = SystemSessionProperties.ariaFlags(operatorContext.getSession());
@@ -358,6 +356,14 @@ public class ScanFilterAndProjectOperator
         int[] filterInputs = filter.getInputChannels();
         for (int i = 0; i < filterInputs.length; i++) {
             int channel = filterInputs[i];
+            if (channels.length <= channel) {
+                // The channel is to the right of the last projected one. Resize channels and pad with -1.
+                int prevLength = channels.length;
+                channels = Arrays.copyOf(channels, channel + 1);
+                for (int newIdx = prevLength; newIdx < channels.length; newIdx++) {
+                    channels[newIdx] = -1;
+                }
+            }
             if (channels[channel] == -1) {
                 channels[channel] = channel;
             }
