@@ -282,8 +282,7 @@ public abstract class AbstractOrcDataSource
                     cacheEntry = cache.get(0, diskRange.getLength());
                     if (cacheEntry.needFetch()) {
                         buffer = cacheEntry.getData();
-                        readFully(diskRange.getOffset(), buffer);
-
+                        readFully(diskRange.getOffset(), buffer, 0, diskRange.getLength());
                         cacheEntry.setFetched();
                     }
                     else {
@@ -297,7 +296,7 @@ public abstract class AbstractOrcDataSource
                     buffer = new byte[diskRange.getLength()];
                     readFully(diskRange.getOffset(), buffer);
                 }
-                    bufferSlice = Slices.wrappedBuffer(buffer);
+                bufferSlice = Slices.wrappedBuffer(buffer, 0, diskRange.getLength());
             }
             catch (IOException e) {
                 throw new UncheckedIOException(e);
