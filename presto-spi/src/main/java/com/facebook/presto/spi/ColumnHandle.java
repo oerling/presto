@@ -29,24 +29,24 @@ public interface ColumnHandle
     /* Returns a ColumnHandle that refers to the subfield at
      * 'path'. Such a ColumnHandle may occur as a key in a TupleDomain
      * for filtering non-top level columns */
-    default ColumnHandle createSubfieldColumnHandle(ReferencePath path)
+    default ColumnHandle createSubfieldColumnHandle(SubfieldPath path)
     {
         throw new UnsupportedOperationException();
     }
 
     /* Returns an equivalent ColumnHandle where the connector is free
      * to leave out any subfields not in the 'paths'. Such a ColumnHandle may occur in the list of projected columns for a PageSource.  */
-    default ColumnHandle createSubfieldPruningColumnHandle(ArrayList<ReferencePath> referencedSubfields)
+    default ColumnHandle createSubfieldPruningColumnHandle(ArrayList<SubfieldPath> referencedSubfields)
     {
         return this;
     }
 
-    default ReferencePath getSubfieldPath()
+    default SubfieldPath getSubfieldPath()
     {
         return null;
     }
 
-    default ArrayList<ReferencePath> getReferencedSubfields()
+    default ArrayList<SubfieldPath> getReferencedSubfields()
     {
         return null;
     }

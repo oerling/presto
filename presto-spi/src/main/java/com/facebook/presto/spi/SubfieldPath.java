@@ -20,24 +20,28 @@ import java.util.ArrayList;
 import static java.util.Objects.requireNonNull;
 
 
-public class ReferencePath
+public class SubfieldPath
 {
 
     public static class PathElement
     {
+        // Indicates that all elements of a map/list are accessed. A
+        // nexct PathElement may still prune fields in deeper nested
+        // elements.
+        public static final long allSubscripts = -1;
         private final String field;
         private final long subscript;
-        private final boolean isMap;
+        private final boolean isSubscript;
 
         @JsonCreator
         public PathElement(
                            @JsonProperty("field")String field,
                            @JsonProperty("subscript") long subscript,
-                           @JsonProperty("isMap") boolean isMap)
+                           @JsonProperty("isSubscript") boolean isSubscript)
         {
             this.field = field;
             this.subscript = subscript;
-            this.isMap = isMap;
+            this.isSubscript = isSubscript;
         }
 
         public PathElement(String field, long subscript)
@@ -57,10 +61,10 @@ public class ReferencePath
             return subscript;
         }
 
-                @JsonProperty("isMap")
-        public boolean getIsMap()
+                @JsonProperty("isSubscript")
+        public boolean getIsSubscript()
         {
-            return isMap;
+            return isSubscript;
         }
 
         @Override
@@ -73,6 +77,9 @@ public class ReferencePath
                 return false;
             }
             PathElement other = (PathElement) o;
+            if (isSubscript != other.isSubscript) {
+                return false;
+            }
             if (field == null && other.field == null) {
                 return subscript == other.subscript;
             }
@@ -102,7 +109,7 @@ public class ReferencePath
     private final ArrayList<PathElement> path;
 
     @JsonCreator
-    public ReferencePath(
+    public SubfieldPath(
                          @JsonProperty("path") ArrayList<PathElement> path)
     {
         requireNonNull(path, "path is null");
@@ -134,7 +141,7 @@ public class ReferencePath
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        ReferencePath otherPath = (ReferencePath) o;
+        SubfieldPath otherPath = (SubfieldPath) o;
 
         if (otherPath.path.size() != path.size()) {
             return false;

@@ -23,8 +23,8 @@ import com.facebook.presto.orc.metadata.ColumnEncoding;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
 import com.facebook.presto.orc.stream.InputStreamSources;
-import com.facebook.presto.spi.ReferencePath;
-import com.facebook.presto.spi.ReferencePath.PathElement;
+import com.facebook.presto.spi.SubfieldPath;
+import com.facebook.presto.spi.SubfieldPath.PathElement;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.RowBlock;
 import com.facebook.presto.spi.block.RunLengthEncodedBlock;
@@ -108,11 +108,11 @@ public class StructStreamReader
     }
 
     @Override
-    public void setReferencedSubfields(List<ReferencePath> subfields, int depth)
+    public void setReferencedSubfields(List<SubfieldPath> subfields, int depth)
     {
-        HashMap<String, ArrayList<ReferencePath>> subfieldPaths = new HashMap();
+        HashMap<String, ArrayList<SubfieldPath>> subfieldPaths = new HashMap();
         referencedFields = new HashSet();
-        for (ReferencePath subfield : subfields) {
+        for (SubfieldPath subfield : subfields) {
             List<PathElement> pathElements = subfield.getPath();
             PathElement immediateSubfield = pathElements.get(depth + 1);
             String fieldName = immediateSubfield.getField();
@@ -120,7 +120,7 @@ public class StructStreamReader
             StreamReader fieldReader = structFields.get(fieldName);
             if (fieldReader instanceof StructStreamReader || fieldReader instanceof MapStreamReader || fieldReader instanceof ListStreamReader) {
                 if (pathElements.size() > depth + 1) {
-                    ArrayList<ReferencePath> pathsForSubfield = subfieldPaths.get(fieldName);
+                    ArrayList<SubfieldPath> pathsForSubfield = subfieldPaths.get(fieldName);
                     if (pathsForSubfield == null) {
                         pathsForSubfield = new ArrayList();
                         subfieldPaths.put(fieldName, pathsForSubfield);
@@ -129,7 +129,7 @@ public class StructStreamReader
                 }
             }
         }
-        for (Map.Entry<String, ArrayList<ReferencePath>> entry : subfieldPaths.entrySet()) {
+        for (Map.Entry<String, ArrayList<SubfieldPath>> entry : subfieldPaths.entrySet()) {
             StreamReader fieldReader =  structFields.get(entry.getKey());
             fieldReader.setReferencedSubfields(entry.getValue(), depth + 1);
         }
@@ -331,7 +331,7 @@ public class StructStreamReader
             fieldTypes[i] = fieldType;
             if (filter != null) {
                 Filters.StructFilter structFilter = (Filters.StructFilter) filter;
-                Filter fieldFilter = structFilter.getMember(new ReferencePath.PathElement(fieldName.get(), 0));
+                Filter fieldFilter = structFilter.getMember(new SubfieldPath.PathElement(fieldName.get(), 0));
                 if (fieldFilter != null) {
                     filters.put(i, fieldFilter);
                 }

@@ -28,7 +28,7 @@ import com.facebook.presto.spi.predicate.SortedRangeSet;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.predicate.Utils;
 import com.facebook.presto.spi.predicate.ValueSet;
-import com.facebook.presto.spi.ReferencePath;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.ExpressionUtils;
 import com.facebook.presto.sql.InterpretedFunctionInvoker;
@@ -65,18 +65,18 @@ public class SubfieldUtils
         return expression instanceof DereferenceExpression || expression instanceof SubscriptExpression;
     }
 
-    public static ReferencePath subfieldToReferencePath(Node expr)
+    public static SubfieldPath subfieldToSubfieldPath(Node expr)
     {
-        ArrayList<ReferencePath.PathElement> steps = new ArrayList();
+        ArrayList<SubfieldPath.PathElement> steps = new ArrayList();
         for (;;) {
             if (expr instanceof SymbolReference) {
                 SymbolReference symbolReference = (SymbolReference)expr;
-                steps.add(new ReferencePath.PathElement(symbolReference.getName(), 0));
+                steps.add(new SubfieldPath.PathElement(symbolReference.getName(), 0));
                 break;
             }
             else if (expr instanceof DereferenceExpression) {
                 DereferenceExpression dereference = (DereferenceExpression) expr;
-                steps.add(new ReferencePath.PathElement(dereference.getField().getValue(), 0));
+                steps.add(new SubfieldPath.PathElement(dereference.getField().getValue(), 0));
                 expr = dereference.getBase();
             }
             else if (expr instanceof SubscriptExpression) {
@@ -88,10 +88,10 @@ public class SubfieldUtils
                 GenericLiteral literalIndex = (GenericLiteral) index;
                 String type = literalIndex.getType();
                 if (type.equals("BIGINT")) {
-                    steps.add(new ReferencePath.PathElement(null, new Integer(literalIndex.getValue()).intValue(), true));
+                    steps.add(new SubfieldPath.PathElement(null, new Integer(literalIndex.getValue()).intValue(), true));
                 }
                 else if (type.equals("VARCHAR")) {
-                    steps.add(new ReferencePath.PathElement(literalIndex.getValue().toString(), 0, true));
+                    steps.add(new SubfieldPath.PathElement(literalIndex.getValue().toString(), 0, true));
                 }
                 else {
                     return null;
@@ -103,7 +103,7 @@ public class SubfieldUtils
             }
         }
         reverse(steps);
-        return new ReferencePath(steps);
+        return new SubfieldPath(steps);
     }
 
     public static Node getSubfieldBase(Node expr)

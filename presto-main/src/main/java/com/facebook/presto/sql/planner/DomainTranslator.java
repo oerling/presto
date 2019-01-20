@@ -28,7 +28,7 @@ import com.facebook.presto.spi.predicate.SortedRangeSet;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.predicate.Utils;
 import com.facebook.presto.spi.predicate.ValueSet;
-import com.facebook.presto.spi.ReferencePath;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.ExpressionUtils;
 import com.facebook.presto.sql.InterpretedFunctionInvoker;
@@ -118,12 +118,12 @@ public final class DomainTranslator
     {
         if (symbol instanceof SymbolWithSubfieldPath) {
             SymbolWithSubfieldPath subfieldPath = (SymbolWithSubfieldPath)symbol;
-            ReferencePath path = subfieldPath.getPath();
+            SubfieldPath path = subfieldPath.getPath();
             Expression base = new SymbolReference(path.getPath().get(0).getField());
             for (int i = 1; i < path.getPath().size(); i++) {
-                ReferencePath.PathElement element = path.getPath().get(i);
+                SubfieldPath.PathElement element = path.getPath().get(i);
                 String field = element.getField();
-                if (element.getIsMap()) {
+                if (element.getIsSubscript()) {
                     base = new SubscriptExpression(base, field != null ? new StringLiteral(field) : new LongLiteral(Long.valueOf(element.getSubscript()).toString()));
                 }
                 else if (field != null) {
@@ -483,7 +483,7 @@ public final class DomainTranslator
                 return super.visitComparisonExpression(node, complement);
             }
             else if (includeSubfields && SubfieldUtils.isSubfieldPath(symbolExpression)) {
-                ReferencePath path = SubfieldUtils.subfieldToReferencePath(symbolExpression);
+                SubfieldPath path = SubfieldUtils.subfieldToSubfieldPath(symbolExpression);
                 if (path == null) {
                     return super.visitComparisonExpression(node, complement);
                 }

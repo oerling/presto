@@ -15,7 +15,7 @@ package com.facebook.presto.hive;
 
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
-import com.facebook.presto.spi.ReferencePath;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -62,8 +62,8 @@ public class HiveColumnHandle
     private final int hiveColumnIndex;
     private final ColumnType columnType;
     private final Optional<String> comment;
-    private final ReferencePath subfieldPath;
-    private final ArrayList<ReferencePath> referencedSubfields;
+    private final SubfieldPath subfieldPath;
+    private final ArrayList<SubfieldPath> referencedSubfields;
 
     @JsonCreator
     public HiveColumnHandle(
@@ -73,8 +73,8 @@ public class HiveColumnHandle
             @JsonProperty("hiveColumnIndex") int hiveColumnIndex,
             @JsonProperty("columnType") ColumnType columnType,
             @JsonProperty("comment") Optional<String> comment,
-            @JsonProperty("subfieldPath") ReferencePath subfieldPath,
-            @JsonProperty("referencedSubfields") ArrayList<ReferencePath> referencedSubfields)
+            @JsonProperty("subfieldPath") SubfieldPath subfieldPath,
+            @JsonProperty("referencedSubfields") ArrayList<SubfieldPath> referencedSubfields)
     {
         this.name = requireNonNull(name, "name is null");
         checkArgument(hiveColumnIndex >= 0 || columnType == PARTITION_KEY || columnType == SYNTHESIZED, "hiveColumnIndex is negative");
@@ -150,13 +150,13 @@ public class HiveColumnHandle
     }
 
     @JsonProperty
-    public ReferencePath getSubfieldPath()
+    public SubfieldPath getSubfieldPath()
     {
         return subfieldPath;
     }
 
     @JsonProperty
-    public ArrayList<ReferencePath> getReferencedSubfields()
+    public ArrayList<SubfieldPath> getReferencedSubfields()
     {
         return referencedSubfields;
     }
@@ -239,13 +239,13 @@ public class HiveColumnHandle
     }
 
     @Override
-public ColumnHandle createSubfieldColumnHandle(ReferencePath path)
+public ColumnHandle createSubfieldColumnHandle(SubfieldPath path)
     {
         return new HiveColumnHandle(name, hiveType, typeName, hiveColumnIndex, columnType, comment, path, null);
     }
 
     @Override
-public ColumnHandle createSubfieldPruningColumnHandle(ArrayList<ReferencePath> referencedSubfields)
+public ColumnHandle createSubfieldPruningColumnHandle(ArrayList<SubfieldPath> referencedSubfields)
     {
         return new HiveColumnHandle(name, hiveType, typeName, hiveColumnIndex, columnType, comment, null, referencedSubfields);
     }

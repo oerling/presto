@@ -208,7 +208,7 @@ public class ColumnGroupReader
             }
         }
         Arrays.sort(streamOrder, (StreamReader a, StreamReader b) -> compareReaders(a, b));
-        if (numFilters < 2) {
+        if (numFilters + filterFunctions.length < 2) {
             reorderFilters = false;
         }
         setupFilterFunctions();
@@ -242,8 +242,8 @@ public class ColumnGroupReader
     // come before the next best.
     private void setupFilterFunctions()
     {
+        filterFunctionOrder = new FilterFunction[0][];
         if (filterFunctions.length == 0) {
-            filterFunctionOrder = new FilterFunction[0][];
             return;
         }
         Arrays.sort(filterFunctions, (FilterFunction a, FilterFunction b) -> compareFunctions(a, b));
@@ -286,6 +286,7 @@ public class ColumnGroupReader
     {
         double time = 0;
         boolean reorder = false;
+        boolean reorderFunctions = false;
         if (!reorderFilters) {
             return;
         }
@@ -299,7 +300,18 @@ public class ColumnGroupReader
             filter.decayStats();
             streamOrder[i].maybeReorderFilters();
         }
-        if (!reorder) {
+        time = 0;
+        for (int i = 0; i < filterFunctions.length; i++) {
+            FilterFunction filter = filterFunctions[i];
+            double filterTime = filter.getTimePerDroppedValue();
+            if (filterTime < time) {
+                reorderFunctions = true;
+            }
+            time = filterTime;
+            filter.decayStats();
+        }
+
+        if (!reorder && !reorderFunctions) {
             return;
         }
         Arrays.sort(streamOrder, 0, numFilters, (StreamReader a, StreamReader b) -> compareReaders(a, b));

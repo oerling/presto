@@ -22,10 +22,14 @@ import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
 import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.orc.stream.LongInputStream;
+import com.facebook.presto.spi.SubfieldPath;
+import com.facebook.presto.spi.SubfieldPath.PathElement;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.MapType;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.io.Closer;
+import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.joda.time.DateTimeZone;
 import org.openjdk.jol.info.ClassLayout;
@@ -34,6 +38,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,6 +48,7 @@ import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
@@ -67,6 +74,11 @@ public class MapDirectStreamReader
     @Nullable
     private LongInputStream lengthStream;
 
+    Type keyType;
+    Type valueType;
+    HashSet<Long> longSubscripts;
+    HashSet<Slice> sliceSubscripts;
+    
     QualifyingSet keySet;
 
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
@@ -74,6 +86,52 @@ public class MapDirectStreamReader
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.keyStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(0), hiveStorageTimeZone, systemMemoryContext);
         this.valueStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(1), hiveStorageTimeZone, systemMemoryContext);
+    }
+
+    @Override
+    public void setReferencedSubfields(List<SubfieldPath> subfields, int depth)
+    {
+        HashSet<Long> referencedSubscripts = new HashSet();
+        boolean mayPruneKey = true;
+        boolean mayPruneElement = true;
+        ArrayList<SubfieldPath> pathsForElement = new ArrayList();
+        for (SubfieldPath subfield : subfields) {
+            List<PathElement> pathElements = subfield.getPath();
+            PathElement subscript = pathElements.get(depth + 1);
+            if (!subscript.getIsSubscript()) {
+                throw new IllegalArgumentException("List reader needs a PathElement with a subscript");
+            }
+            if (subscript.getSubscript() == PathElement.allSubscripts) {
+                mayPruneKey = false;
+            }
+            else {
+                if (subscript.getField() != null) {
+                    if (sliceSubscripts == null) {
+                        sliceSubscripts = new HashSet();
+                    }
+                    sliceSubscripts.add(Slices.copiedBuffer(subscript.getField(), UTF_8));
+                }
+                else {
+                    if (longSubscripts == null) {
+                        longSubscripts = new HashSet();
+                    }
+                    longSubscripts.add(subscript.getSubscript());
+                }
+            }
+                if (pathElements.size() > depth + 1) {
+                pathsForElement.add(subfield);
+            }
+            else {
+                mayPruneElement = false;
+            }
+        }
+        if (mayPruneElement) {
+            valueStreamReader.setReferencedSubfields(pathsForElement, depth + 1);
+        }
+        if (!mayPruneKey)  {
+            sliceSubscripts = null;
+            longSubscripts = null;
+        }
     }
 
     @Override
@@ -130,8 +188,8 @@ public class MapDirectStreamReader
         }
 
         MapType mapType = (MapType) type;
-        Type keyType = mapType.getKeyType();
-        Type valueType = mapType.getValueType();
+        keyType = mapType.getKeyType();
+        valueType = mapType.getValueType();
 
         // Calculate the entryCount. Note that the values in the offsetVector are still length values now.
         int entryCount = 0;
@@ -169,9 +227,20 @@ public class MapDirectStreamReader
         return mapType.createBlockFromKeyValue(Optional.ofNullable(nullVector), offsetVector, keyValueBlock[0], keyValueBlock[1]);
     }
 
-    private static Block[] createKeyValueBlock(int positionCount, Block keys, Block values, int[] lengths)
+    boolean canPruneKeys(Block keys)
     {
-        if (!hasNull(keys)) {
+        return longSubscripts != null || sliceSubscripts != null;
+    }
+    
+    private boolean keyIsPruned(Block keys, int position)
+    {
+        return (longSubscripts != null && !longSubscripts.contains(keyType.getLong(keys, position))) ||
+            (sliceSubscripts != null && !sliceSubscripts.contains(keyType.getSlice(keys, position)));
+    }
+
+    private Block[] createKeyValueBlock(int positionCount, Block keys, Block values, int[] lengths)
+    {
+        if (!hasNull(keys) && !canPruneKeys(keys)) {
             return new Block[] {keys, values};
         }
 
@@ -185,7 +254,7 @@ public class MapDirectStreamReader
         for (int mapIndex = 0; mapIndex < positionCount; mapIndex++) {
             int length = lengths[mapIndex];
             for (int entryIndex = 0; entryIndex < length; entryIndex++) {
-                if (keys.isNull(position)) {
+                if (keys.isNull(position) || keyIsPruned(keys, position)) {
                     // key is null, so remove this entry from the map
                     lengths[mapIndex]--;
                 }

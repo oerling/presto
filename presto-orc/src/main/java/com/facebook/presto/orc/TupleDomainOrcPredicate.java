@@ -18,7 +18,7 @@ import com.facebook.presto.orc.metadata.statistics.ColumnStatistics;
 import com.facebook.presto.orc.metadata.statistics.HiveBloomFilter;
 import com.facebook.presto.orc.metadata.statistics.RangeStatistics;
 import com.facebook.presto.spi.ColumnHandle;
-import com.facebook.presto.spi.ReferencePath;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.predicate.Domain;
 import com.facebook.presto.spi.predicate.Marker;
 import com.facebook.presto.spi.predicate.Range;
@@ -322,7 +322,7 @@ public class TupleDomainOrcPredicate<C>
                 return null;
             }
             ColumnHandle columnHandle = (ColumnHandle) column;
-            ReferencePath subfield = columnHandle.getSubfieldPath();
+            SubfieldPath subfield = columnHandle.getSubfieldPath();
             ColumnHandle topLevelColumn = subfield == null ? columnHandle : columnHandle.createSubfieldColumnHandle(null);
             ColumnReference<C> columnReference = null;
             for (ColumnReference<C> c : columnReferences) {
@@ -363,7 +363,7 @@ public class TupleDomainOrcPredicate<C>
         return filters;
     }
 
-    private static void addFilter(Integer ordinal, ReferencePath subfield, Filter filter, Map<Integer, Filter> filters)
+    private static void addFilter(Integer ordinal, SubfieldPath subfield, Filter filter, Map<Integer, Filter> filters)
     {
         if (subfield == null) {
             filters.put(ordinal, filter);

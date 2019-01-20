@@ -13,7 +13,7 @@
  */
 package com.facebook.presto.orc;
 
-import com.facebook.presto.spi.ReferencePath;
+import com.facebook.presto.spi.SubfieldPath;
 import java.util.Arrays;
 import java.util.HashMap;
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;;
@@ -161,14 +161,14 @@ public class Filters
     public static class StructFilter
             extends Filter
     {
-        private final HashMap<ReferencePath.PathElement, Filter> filters = new HashMap();
+        private final HashMap<SubfieldPath.PathElement, Filter> filters = new HashMap();
 
-        public Filter getMember(ReferencePath.PathElement member)
+        public Filter getMember(SubfieldPath.PathElement member)
         {
             return filters.get(member);
         }
 
-        public void addMember(ReferencePath.PathElement member, Filter filter)
+        public void addMember(SubfieldPath.PathElement member, Filter filter)
         {
             filters.put(member, filter);
         }
