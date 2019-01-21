@@ -54,3 +54,21 @@ select count (*) from hive.tpch.lineitem_s where partkey < 19000000 and suppkey 
 -- Example of expression filter
 select count (*), max(partkey) from hive.tpch.lineitem_s where partkey + 1 < 2000000;
 
+
+select count (*), max(partkey) from hive.tpch.lineitem_s where comment like '%fur%' and partkey + 1 < 19000000 and suppkey < 100000;
+
+
+select count (*), max(partkey) from hive.tpch.lineitem_s where comment like '%fur%' and partkey + 1 < 19000000 and suppkey < 100000;
+select count (*), max(partkey) from hive.tpch.lineitem_s where comment like '%fur%' and partkey + 1 < 19000000 and suppkey + 1 < 100000;
+select count (*), max(partkey) from hive.tpch.lineitem_s where comment like '%fur%' and partkey + 1 < 19000000 and suppkey + 1 < 100000 and suppkey + partkey < 2000000;
+
+
+-- Errors
+
+-- Find some partkeys that do not occur with comment like %fur%.
+select partkey from hive.tpch.lineitem_s where partkey < 100 and comment like '%fur%' order by partkey;
+
+-- Example with mutually masking errors
+select count (*) from hive.tpch.lineitem_s where
+if (linenumber = 2, false, suppkey / (linenumber - 3) > 0)
+and if (linenumber = 3, false, partkey / (linenumber - 2) > 0);

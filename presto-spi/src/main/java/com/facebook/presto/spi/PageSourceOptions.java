@@ -146,6 +146,9 @@ public class PageSourceOptions
             }
             errors[position] = error;
             if (position >= positionCount) {
+                for (int i = positionCount; i < position; i++) {
+                    errors[i] = null;
+                }
                 positionCount = position + 1;
             }
         }

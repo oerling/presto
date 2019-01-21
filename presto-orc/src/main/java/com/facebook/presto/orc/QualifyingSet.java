@@ -244,6 +244,14 @@ public class QualifyingSet
         return errorSet;
     }
 
+    public ErrorSet getOrCreateErrorSet()
+    {
+        if (errorSet == null) {
+            errorSet = new ErrorSet();
+        }
+        return errorSet;
+    }
+    
     public void setErrorSet(ErrorSet errorSet)
     {
         this.errorSet = errorSet;
@@ -257,6 +265,12 @@ public class QualifyingSet
     public void eraseBelowRow(int row)
     {
         if (positionCount == 0 || positions[positionCount - 1] < row) {
+            if (errorSet != null) {
+                Throwable error = errorSet.getFirstError(positionCount);
+                if (error != null) {
+                    throw new PrestoException(GENERIC_USER_ERROR, error);
+                }
+            }
             positionCount = 0;
             return;
         }

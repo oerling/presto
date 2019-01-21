@@ -118,3 +118,5 @@ group by c_custkey;
 
 select o_orderkey from    hive.tpch.cust_order_line cross join unnest c_orders where c_custkey = 4448479;
 
+
+select export.s_nation from export_info where export.s_nation = 2;

@@ -511,13 +511,25 @@ public class ColumnGroupReader
         StreamReader reader = streamOrder[streamIdx];
         qualifyingSet = reader.getOrCreateOutputQualifyingSet();
         long start = System.nanoTime();
-        int numHits = function.filter(new Page(numRows, blocks), filterResults, null);
+        int numHits = function.filter(new Page(numRows, blocks), filterResults, qualifyingSet.getOrCreateErrorSet());
         function.updateStats(numRows, numHits, System.nanoTime() - start);
         if (reader.getFilter() == null && isFirstFunction) {
             qualifyingSet.copyFrom(reader.getInputQualifyingSet());
+            int end = qualifyingSet.getEnd();
+            // If the reader stopped because of space budget, the
+            // truncation is recorded in the reader, the output qset
+            // just has the output that was produced and ends at the
+            // truncation row of the end of the input qset.
+            qualifyingSet.clearTruncationPosition();
+            qualifyingSet.setEnd(end);
+            // inputNumbers[i] is the offset of the qualifying row within the input qualifying set.
+            int[] inputNumbers= qualifyingSet.getMutableInputNumbers(numHits);
+            System.arraycopy(filterResults, 0, inputNumbers, 0, numHits);
         }
-        qualifyingSet.compactInputNumbers(filterResults, numHits);
-        reader.compactValues(filterResults, numRowsInResult, numHits);
+        else {
+            qualifyingSet.compactInputNumbers(filterResults, numHits);
+        }
+            reader.compactValues(filterResults, numRowsInResult, numHits);
         if (numHits == 0) {
             return qualifyingSet;
         }
@@ -545,7 +557,7 @@ public class ColumnGroupReader
                 if (numRowsInResult > 0) {
                     // Offset the map to point to values added in this batch.
                     if (mustCopyMap) {
-                        map = copyMap(rowNumberMaps, streamIdx, numRows, map);
+                        map = copyMap(rowNumberMaps, channelIdx, numRows, map);
                     }
                     for (int i = 0; i < numRows; i++) {
                         map[i] += numRowsInResult;
@@ -553,7 +565,7 @@ public class ColumnGroupReader
                 }
                 return new DictionaryBlock(numRows, block, map);
             }
-            if (hasFilter(operandIdx)) {
+            if (needRowNumberMap(operandIdx, function)) {
                 QualifyingSet filterSet = streamOrder[operandIdx].getOutputQualifyingSet();
                 int[] inputNumbers = filterSet.getInputNumbers();
                 if (map == null) {
@@ -574,7 +586,29 @@ public class ColumnGroupReader
         throw new IllegalArgumentException("Filter function input channel not found");
     }
 
-    void initMap(int base, int size, int[] map)
+    // Returns true if the reader at operandIdx should add a row
+    // number mapping for an input of filterFunction that is produced
+    // by a reader to the left of operandIdx.
+    private boolean needRowNumberMap(int operandIdx, FilterFunction filterFunction)
+    {
+        // If there is a non-function filter, this introduces a row number mapping.
+        if (streamOrder[operandIdx].getFilter() != null) {
+            return true;
+        }
+        // If the filter function is the first of the filter functions
+        // at operandIdx and the reader at operandIdx has no filter,
+        // there is no qset in effect at operandIdx until the first
+        // filter is evaluated. Hence the first filter needs no row
+        // number mapping but any non-first filter will use the
+        // mapping produced by the previous one.
+        if (filterFunctionOrder[operandIdx] != null &&
+            filterFunctionOrder[operandIdx][0] == filterFunction) {
+            return false;
+        }
+        return true;
+    }
+
+    private void initMap(int base, int size, int[] map)
     {
         for (int i = 0; i < size; i++) {
             map[i] = i + base;
@@ -627,6 +661,7 @@ public class ColumnGroupReader
     private void alignResultsAndRemoveFromQualifyingSet(int numAdded, int lastStreamIdx)
     {
         boolean needCompact = false;
+        boolean hasErrors = false;
         int numSurviving = numAdded;
         for (int streamIdx = lastStreamIdx; streamIdx >= 0; --streamIdx) {
             StreamReader reader = streamOrder[streamIdx];
@@ -634,6 +669,9 @@ public class ColumnGroupReader
                 reader.compactValues(survivingRows, numRowsInResult, numSurviving);
             }
             QualifyingSet output = reader.getOutputQualifyingSet();
+            if (output != null && output.hasErrors()) {
+                hasErrors = true;
+            }
             QualifyingSet input = reader.getInputQualifyingSet();
             int truncationRow = reader.getTruncationRow();
             if (truncationRow == -1 &&
@@ -678,6 +716,11 @@ public class ColumnGroupReader
         }
         StreamReader lastReader = streamOrder[lastStreamIdx];
         int endRow = getCurrentRow(lastReader);
+        QualifyingSet lastOutput = lastReader.getOutputQualifyingSet();
+        if (hasErrors && lastOutput != null) {
+            // Signals errors if any left.
+            lastOutput.eraseBelowRow(endRow);
+        }
         lastReader.getInputQualifyingSet().clearTruncationPosition();
         for (int streamIdx = lastStreamIdx - 1; streamIdx >= 0; --streamIdx) {
             StreamReader reader = streamOrder[streamIdx];
