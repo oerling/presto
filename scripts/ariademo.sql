@@ -65,10 +65,9 @@ select count (*), max(partkey) from hive.tpch.lineitem_s where comment like '%fu
 
 -- Errors
 
--- Find some partkeys that do not occur with comment like %fur%.
-select partkey from hive.tpch.lineitem_s where partkey < 100 and comment like '%fur%' order by partkey;
 
 -- Example with mutually masking errors
 select count (*) from hive.tpch.lineitem_s where
 if (linenumber = 2, false, suppkey / (linenumber - 3) > 0)
-and if (linenumber = 3, false, partkey / (linenumber - 2) > 0);
+and if (linenumber = 3, false, partkey / (linenumber - 2) > 0)
+and orderkey < 1000000;

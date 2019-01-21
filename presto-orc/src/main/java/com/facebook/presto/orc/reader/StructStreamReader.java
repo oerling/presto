@@ -376,7 +376,7 @@ public class StructStreamReader
     public void erase(int end)
     {
         // Without a reader there is nothing to erase, even if the struct is all nulls.
-        if (reader == null) {
+        if (reader == null || outputChannel == -1) {
             return;
         }
         int fieldEnd;
@@ -476,6 +476,9 @@ public class StructStreamReader
     public void scan()
         throws IOException
     {
+        if (reader == null) {
+            setupForScan();
+        }
         if (!rowGroupOpen) {
             openRowGroup();
         }
@@ -525,8 +528,8 @@ public class StructStreamReader
                     innerToOuter[numFieldRows] = i;
                     numFieldRows++;
                     prevFieldRow += numSkip;
+                    prevRow = activeRow;
                 }
-                prevRow = activeRow;
             }
             int skip = innerDistance(prevRow, end);
             fieldQualifyingSet.setEnd(skip + prevFieldRow);
@@ -559,14 +562,21 @@ public class StructStreamReader
             resultRows = output.getMutablePositions(numInput);
             inputNumbers = output.getMutableInputNumbers(numInput);
         }
-        QualifyingSet structQualified = fieldOutputQualifyingSet;
         int[] fieldQualifyingRows = null;
-        if (structQualified != null) {
-            fieldQualifyingRows = structQualified.getPositions();
+        if (fieldOutputQualifyingSet != null) {
+            fieldQualifyingRows = fieldOutputQualifyingSet.getPositions();
         }
         ensureOutput(numInput);
-        int lastFieldQualified = 0;
+        // Ranges over positions in the fieldQualifyingSet.
+        int fieldInIdx = 0;
+        // Ranges over positions in fieldOutputQualifyingSet.
+        int fieldOutIdx = 0;
         int numFieldResults = reader.getNumResults() - initialFieldResults;
+        // We loop over the input rows: Either 1. the struct was null
+        // and we emit a null or do nothing. 2. There was a struct and
+        // it is in the field reader qualifying set (or there is no
+        // filter). It goes to the result. 3. There was a struct but
+        // it was dropped by a filter. We move on.
         for (int i = 0; i < numInput; i++) {
             int presentIdx = inputRows[i] - posInRowGroup;
             if (presentStream != null && !present[presentIdx]) {
@@ -583,14 +593,18 @@ public class StructStreamReader
             else {
                 // A non null struct in the input qualifying set.
                 if (filter != null) {
-                    if (lastFieldQualified >= numFieldResults) {
+                    if (fieldOutIdx >= numFieldResults) {
                         break;
                     }
-                    if (fieldQualifyingRows[lastFieldQualified] == orgFieldRows[i]) {
-                        lastFieldQualified++;
+                    if (fieldQualifyingRows[fieldOutIdx] == orgFieldRows[fieldInIdx]) {
+                        fieldInIdx++;
+                        fieldOutIdx++;
                         resultRows[numResults] = inputRows[i];
                         inputNumbers[numResults] = i;
                         addStructResult();
+                    }
+                    else {
+                        fieldInIdx++;
                     }
                 }
                 else {
