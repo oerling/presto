@@ -48,9 +48,10 @@ import com.facebook.presto.sql.tree.IsNullPredicate;
 import com.facebook.presto.sql.tree.LogicalBinaryExpression;
 import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.NotExpression;
-import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.DereferenceExpression;
+import com.facebook.presto.sql.tree.LongLiteral;
 import com.facebook.presto.sql.tree.Node;
+import com.facebook.presto.sql.tree.StringLiteral;
 import com.facebook.presto.sql.tree.SubscriptExpression;
 import com.facebook.presto.sql.tree.SymbolReference;
 
@@ -82,16 +83,13 @@ public class SubfieldUtils
             else if (expr instanceof SubscriptExpression) {
                 SubscriptExpression subscript = (SubscriptExpression) expr;
                 Expression index = subscript.getIndex();
-                if (!(index instanceof GenericLiteral)) {
-                    return null;
+                if (index instanceof LongLiteral) {
+                    LongLiteral literal = (LongLiteral) index;
+                    steps.add(new SubfieldPath.PathElement(null, literal.getValue(), true));
                 }
-                GenericLiteral literalIndex = (GenericLiteral) index;
-                String type = literalIndex.getType();
-                if (type.equals("BIGINT")) {
-                    steps.add(new SubfieldPath.PathElement(null, new Integer(literalIndex.getValue()).intValue(), true));
-                }
-                else if (type.equals("VARCHAR")) {
-                    steps.add(new SubfieldPath.PathElement(literalIndex.getValue().toString(), 0, true));
+                else if (index instanceof StringLiteral) {
+                    StringLiteral literal = (StringLiteral) index;
+                    steps.add(new SubfieldPath.PathElement(literal.getValue(), 0, true));
                 }
                 else {
                     return null;

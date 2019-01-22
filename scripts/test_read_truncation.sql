@@ -32,7 +32,10 @@ select orderkey, linenumber, s1.s1, s1.s2, s3.s3, s4.s4 from hive.tpch.strings2 
  and s3.s4 > '2';
 
 
+select orderkey, linenumber, s1.s1, s1.s2, s3.s3, s4.s4 from hive.tpch.strings2 where
+ s1.s1 > 'f';
+ 
 
 
--- Example of filter reorder gains, from 58s cpu to 42s cpu
-select count (*) from hive.tpch.lineitem_s where partkey < 19000000 and suppkey < 900000 and quantity < 45 and extendedprice < 9000;
+
+

@@ -53,4 +53,10 @@ public class Filter
     {
         return 100;
     }
+
+    // Used for deciding wheher to make a hash based in when all ranges are equalities.
+    public boolean isEquality()
+    {
+        return false;
+    }
 }

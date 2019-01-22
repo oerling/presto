@@ -55,6 +55,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.facebook.presto.SystemSessionProperties.enableAria;
 import static com.facebook.presto.SystemSessionProperties.isNewOptimizerEnabled;
 import static com.facebook.presto.matching.Capture.newCapture;
 import static com.facebook.presto.metadata.TableLayoutResult.computeEnforced;
@@ -257,10 +258,16 @@ public class PickTableLayout
         // don't include non-deterministic predicates
         Expression deterministicPredicate = filterDeterministicConjuncts(predicate);
         boolean supportsSubfieldTupleDomain = false;
-        for (Map.Entry<Symbol, ColumnHandle> entry : node.getAssignments().entrySet()) {
-            supportsSubfieldTupleDomain = entry.getValue().supportsSubfieldTupleDomain();
-            break;
-        }
+        if (enableAria(session)) {
+            // Subfield TupleDomain extraction is only on for Aria
+            // because even if the Aria path were not run, this
+            // extraction would alter predicate order and the non-Aria
+            // path can't have that.
+            for (Map.Entry<Symbol, ColumnHandle> entry : node.getAssignments().entrySet()) {
+                            supportsSubfieldTupleDomain = entry.getValue().supportsSubfieldTupleDomain();
+                            break;
+                        }
+                    }
         DomainTranslator.ExtractionResult decomposedPredicate = DomainTranslator.fromPredicate(
                 metadata,
                 session,

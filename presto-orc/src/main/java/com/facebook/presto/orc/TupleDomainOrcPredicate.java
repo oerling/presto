@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
@@ -61,6 +63,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static java.lang.Float.floatToRawIntBits;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 public class TupleDomainOrcPredicate<C>
         implements OrcPredicate
@@ -338,17 +341,18 @@ public class TupleDomainOrcPredicate<C>
             ValueSet values = predicateDomain.getValues();
             if (values instanceof SortedRangeSet) {
                 List<Range> ranges = ((SortedRangeSet) values).getOrderedRanges();
-                Range range = ranges.get(0);
                 Type type = predicateDomain.getType();
+
                 Filter filter = null;
-                if (isVarcharType(type)) {
-                    filter = VarcharRangesToFilter(ranges);
+                if (ranges.isEmpty() && predicateDomain.isNullAllowed()) {
+                    filter = new Filters.IsNull();
                 }
-                else if (type == BIGINT) {
-                    filter = BigintRangesToFilter(ranges);
+                else if (ranges.size() == 1) {
+                    filter = createRangeFilter(type, ranges.get(0));
                 }
-                else if (type == DOUBLE) {
-                    filter = doubleRangesToFilter(ranges);
+                else {
+                    List<Filter> rangeFilters = ranges.stream().map(r -> createRangeFilter(type, r)).collect(toList());
+                    filter = Filters.createMultiRange(rangeFilters);
                 }
                 if (filter == null) {
                     // The domain cannot be converted to a filter. Pushdown fails.
@@ -363,6 +367,20 @@ public class TupleDomainOrcPredicate<C>
         return filters;
     }
 
+    private static Filter createRangeFilter(Type type, Range range)
+    {
+        if (isVarcharType(type)) {
+            return VarcharRangeToFilter(range);
+                }
+                else if (type == BIGINT) {
+                    return BigintRangeToFilter(range);
+                }
+                else if (type == DOUBLE) {
+                    return doubleRangeToFilter(range);
+                }
+        return null;
+    }
+    
     private static void addFilter(Integer ordinal, SubfieldPath subfield, Filter filter, Map<Integer, Filter> filters)
     {
         if (subfield == null) {
@@ -397,12 +415,8 @@ public class TupleDomainOrcPredicate<C>
         }
     }
 
-    private static Filter BigintRangesToFilter(List<Range> ranges)
+    private static Filter BigintRangeToFilter(Range range)
     {
-        if (ranges.size() != 1) {
-            return null;
-        }
-        Range range = ranges.get(0);
         Marker low = range.getLow();
         Marker high = range.getHigh();
         long lowerLong = low.isLowerUnbounded() ? Long.MIN_VALUE : ((Long) low.getValue()).longValue();
@@ -416,12 +430,8 @@ public class TupleDomainOrcPredicate<C>
         return new Filters.BigintRange(lowerLong, upperLong);
     }
 
-    private static Filter doubleRangesToFilter(List<Range> ranges)
+    private static Filter doubleRangeToFilter(Range range)
     {
-        if (ranges.size() != 1) {
-            return null;
-        }
-        Range range = ranges.get(0);
         Marker low = range.getLow();
         Marker high = range.getHigh();
         double lowerDouble = low.isLowerUnbounded() ? Double.MIN_VALUE
@@ -436,12 +446,8 @@ public class TupleDomainOrcPredicate<C>
                 high.getBound() == Marker.Bound.BELOW);
     }
 
-    private static Filter VarcharRangesToFilter(List<Range> ranges)
+    private static Filter VarcharRangeToFilter(Range range)
     {
-        if (ranges.size() != 1) {
-            return null;
-        }
-        Range range = ranges.get(0);
         Marker low = range.getLow();
         Marker high = range.getHigh();
         Marker.Bound lowerBound = low.getBound();

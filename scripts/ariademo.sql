@@ -71,3 +71,10 @@ select count (*) from hive.tpch.lineitem_s where
 if (linenumber = 2, false, suppkey / (linenumber - 3) > 0)
 and if (linenumber = 3, false, partkey / (linenumber - 2) > 0)
 and orderkey < 1000000;
+
+
+
+
+select count (*) from hive.tpch.lineitem_s where partkey between 1 and 10 or partkey between 100 and 200 or partkey between 300 and 400 or partkey between 800 and 900 or partkey between 1100 and 1200 or partkey between 1000000 and 1001000;
+
+
