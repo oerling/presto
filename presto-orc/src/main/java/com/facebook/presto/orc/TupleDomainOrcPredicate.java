@@ -41,8 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.stream.Collectors;
-
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
@@ -330,9 +328,9 @@ public class TupleDomainOrcPredicate<C>
             ColumnReference<C> columnReference = null;
             for (ColumnReference<C> c : columnReferences) {
                 if (c.getColumn().equals(topLevelColumn)) {
-                        columnReference = c;
-                        break;
-                    }
+                    columnReference = c;
+                    break;
+                }
             }
             if (columnReference == null) {
                 // Predicate on non-existent column.
@@ -372,15 +370,15 @@ public class TupleDomainOrcPredicate<C>
         if (isVarcharType(type)) {
             return VarcharRangeToFilter(range, nullAllowed);
                 }
-                else if (type == BIGINT) {
+        if (type == BIGINT) {
                     return BigintRangeToFilter(range, nullAllowed);
                 }
-                else if (type == DOUBLE) {
+        if (type == DOUBLE) {
                     return doubleRangeToFilter(range, nullAllowed);
                 }
         return null;
     }
-    
+
     private static void addFilter(Integer ordinal, SubfieldPath subfield, Filter filter, Map<Integer, Filter> filters)
     {
         if (subfield == null) {
@@ -396,21 +394,21 @@ public class TupleDomainOrcPredicate<C>
             }
             int depth = subfield.getPath().size();
             for (int i = 1; i < depth; i++) {
-                    Filter memberFilter = structFilter.getMember(subfield.getPath().get(i));
-                    if (i == depth - 1) {
-                        verify(memberFilter == null);
-                        structFilter.addMember(subfield.getPath().get(i), filter);
-                        return;
-                    }
-                    if (memberFilter == null) {
-                        memberFilter = new Filters.StructFilter();
-                        structFilter.addMember(subfield.getPath().get(i), memberFilter);
-                        structFilter = (Filters.StructFilter) memberFilter;
-                    }
-                    else {
-                        verify(memberFilter instanceof Filters.StructFilter);
-                        structFilter = (Filters.StructFilter) memberFilter;
-                    }
+                Filter memberFilter = structFilter.getMember(subfield.getPath().get(i));
+                if (i == depth - 1) {
+                    verify(memberFilter == null);
+                    structFilter.addMember(subfield.getPath().get(i), filter);
+                    return;
+                }
+                if (memberFilter == null) {
+                    memberFilter = new Filters.StructFilter();
+                    structFilter.addMember(subfield.getPath().get(i), memberFilter);
+                    structFilter = (Filters.StructFilter) memberFilter;
+                }
+                else {
+                    verify(memberFilter instanceof Filters.StructFilter);
+                    structFilter = (Filters.StructFilter) memberFilter;
+                }
             }
         }
     }

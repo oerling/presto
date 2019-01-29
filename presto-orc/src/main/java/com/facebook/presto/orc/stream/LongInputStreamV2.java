@@ -181,7 +181,7 @@ public class LongInputStreamV2
                 inputNumbersOut[numResults] = outerIdx;
             }
         }
-            if (valuesOut != null) {
+        if (valuesOut != null) {
             valuesOut[numResults + valuesFill] = val;
         }
         ++numResults;

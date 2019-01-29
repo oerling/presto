@@ -17,8 +17,8 @@ import com.facebook.presto.spi.PageSourceOptions.ErrorSet;
 import com.facebook.presto.spi.PrestoException;
 
 import java.util.Arrays;
+
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_USER_ERROR;
-import static com.google.common.base.Preconditions.checkArgument;
 
 public class QualifyingSet
 {
@@ -240,7 +240,7 @@ public class QualifyingSet
         if (position >= positionCount || position <= 0) {
             throw new IllegalArgumentException();
         }
-            truncationPosition = position;
+        truncationPosition = position;
     }
 
     public void clearTruncationPosition()
@@ -292,7 +292,7 @@ public class QualifyingSet
         }
         return errorSet;
     }
-    
+
     public void setErrorSet(ErrorSet errorSet)
     {
         this.errorSet = errorSet;
@@ -386,7 +386,7 @@ public class QualifyingSet
                 if (errors[i] != null) {
                     lastError = i;
                 }
-                }
+            }
             errorSet.setErrors(errors, lastError + 1);
         }
     }
@@ -398,7 +398,8 @@ public class QualifyingSet
         }
     }
 
-    public boolean hasErrors() {
+    public boolean hasErrors()
+    {
         return errorSet != null && !errorSet.isEmpty();
     }
 

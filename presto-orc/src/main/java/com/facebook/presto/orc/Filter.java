@@ -16,9 +16,8 @@ package com.facebook.presto.orc;
 import com.facebook.presto.spi.PageSourceOptions;
 
 public class Filter
-    extends PageSourceOptions.FilterStats
+        extends PageSourceOptions.FilterStats
 {
-
     boolean nullAllowed;
 
     public Filter(boolean nullAllowed)

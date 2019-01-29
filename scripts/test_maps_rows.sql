@@ -140,7 +140,10 @@ group by c_custkey, o_orderkey)
 group by c_custkey;
 
 
-select count (*) from    hive.tpch.cust_order_line cross join unnest c_orders cross join unnest o_lines where l_partkey = 111111;
+select count (*) from    hive.tpch.cust_order_line cross join unnest (c_orders) cross join unnest (o_lines) where l_partkey = 111111;
 
 
 select count (*) from hive.tpch.exportlineitem where export.s_nation = 2;
+
+
+select count(*), sum (l_shipment.l_partkey) from hive.tpch.exportlineitem where l_export.license.comment between 'fur' and 'hag';
