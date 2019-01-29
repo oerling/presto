@@ -40,6 +40,7 @@ public class QualifyingSet
     private int[] ownedPositions;
     private int[] ownedInputNumbers;
     private QualifyingSet parent;
+    private QualifyingSet firstOfLevel;
 
     static {
         wholeRowGroup = new int[10000];
@@ -195,16 +196,45 @@ public class QualifyingSet
         this.positionCount = positionCount;
     }
 
-    // Returns the first position after the argument position where
+    // Returns the first row number after the argument position where
     // one can truncate a result column. For a top level column this
-    // is the position itself. For a nested column, this is the
-    // positioning corresponding to the first of row of the next top
-    // level row.
-    public int getNextTruncationPosition(int position)
+    // is the row itself. For a nested column, this is the
+    // position corresponding to the first row of this column
+    // corresponding to the next top level qualifying row. If this row
+    // is already nested within the last top level row, the row is -1.
+    public int truncateAndReturnTruncationRow(int position)
     {
-        return position;
+        if (firstOfLevel == null || firstOfLevel.parent == null) {
+            truncationPosition = position;
+            return positions[position];
+        }
+        int thisTopLevelPos = getTopLevelPosition(position);
+        for (int pos = position + 1; pos < positionCount; pos++) {
+            int newTopLevelPos = getTopLevelPosition(pos);
+            if (newTopLevelPos != thisTopLevelPos) {
+                truncationPosition = pos;
+                return positions[pos];
+            }
+        }
+        // We are already under the last top level row.
+        return -1;
     }
 
+    private int getTopLevelPosition(int position)
+    {
+        int row = positions[position];
+        if (firstOfLevel == null || firstOfLevel.parent == null) {
+            return position;
+        }
+        int posInFirstOfLevel = Arrays.binarySearch(firstOfLevel.positions, 0, firstOfLevel.positionCount, row);
+        if (posInFirstOfLevel < 0) {
+            throw new IllegalArgumentException("Row in qualifying set is not found in the first qualifying set of the level");
+        }
+        int parentPos = firstOfLevel.inputNumbers[posInFirstOfLevel];
+        return firstOfLevel.parent.getTopLevelPosition(parentPos);
+    }
+
+    
     public void setTruncationPosition(int position)
     {
         if (position >= positionCount || position <= 0) {
@@ -239,6 +269,17 @@ public class QualifyingSet
         return pos < 0 ? -1 - pos : pos;
     }
 
+    public void setParent(QualifyingSet parent)
+    {
+        this.parent = parent;
+    }
+
+    public void setFirstOfLevel(QualifyingSet first)
+    {
+        firstOfLevel = first;
+    }
+
+    
     public ErrorSet getErrorSet()
     {
         return errorSet;

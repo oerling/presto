@@ -466,7 +466,13 @@ public class ColumnGroupReader
             long startTime = 0;
             StreamReader reader = streamOrder[streamIdx];
             Filter filter = reader.getFilter();
-            reader.setInputQualifyingSet(qualifyingSet);
+            // Link this qualifying set to the input of this reader so
+            // that for nested structs we know what rows correspond to
+            // top level row boundaries.
+            if (qualifyingSet != inputQualifyingSet) {
+                qualifyingSet.setFirstOfLevel(inputQualifyingSet);
+            }
+                reader.setInputQualifyingSet(qualifyingSet);
             if (reorderFilters && filter != null) {
                 startTime = System.nanoTime();
             }
