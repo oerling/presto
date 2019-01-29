@@ -83,8 +83,6 @@ public class SliceDirectStreamReader
     private byte[] bytes;
     // Start offsets for use in returned Block.
     private int[] resultOffsets;
-    // Null flags for use in result Block.
-    boolean[] valueIsNull;
     // Temp space for extracting values to filter when a value straddles buffers.
     private byte[] tempBytes;
     // Result arrays from outputQualifyingSet.
@@ -428,11 +426,7 @@ public class SliceDirectStreamReader
                 }
                 nextActive = inputPositions[activeIdx];
                 if (bytesToGo <= 0) {
-                    int truncationPosition = input.getNextTruncationPosition(activeIdx);
-                    if (truncationPosition < numActive) {
-                        truncationRow = inputPositions[truncationPosition];
-                    }
-                    input.setTruncationPosition(truncationPosition);
+                    truncationRow = input.truncateAndReturnTruncationRow(activeIdx);
                 }
                 continue;
             }

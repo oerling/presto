@@ -80,7 +80,6 @@ public class StructStreamReader
     int[] fieldChannels;
     Type[] fieldTypes;
     int[] fieldBlockOffset;
-    boolean[] valueIsNull;
     // Number of rows in field blocks. This is < numValues if there
     // are null structs in the result.
     int fieldBlockSize;

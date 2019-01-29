@@ -58,11 +58,12 @@ public class DoubleStreamReader
     private int readOffset;
     private int nextBatchSize;
 
+    /*
     private InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
     @Nullable
     private BooleanInputStream presentStream;
+    */
     private boolean[] nullVector = new boolean[0];
-    private boolean[] valueIsNull;
     private long[] values;
     // Result arrays from outputQualifyingSet.
     int[] outputRows;
@@ -237,7 +238,10 @@ public class DoubleStreamReader
         int toSkip = 0;
         for (int i = 0; i < rowsInRange; i++) {
             if (i + posInRowGroup == nextActive) {
-                if (present != null && !present[i]) {
+                if (nextActive == truncationRow) {
+                    break;
+                }
+                if (presentStream != null && !present[i]) {
                     if (filter == null || filter.testNull()) {
                         addNullResult(i + posInRowGroup, activeIdx);
                     }
@@ -292,7 +296,7 @@ public class DoubleStreamReader
                 }
                 if (++activeIdx == numActive) {
                     i++;
-                    if (present != null) {
+                    if (presentStream != null) {
                         for (; i < end; i++) {
                             if (present[i]) {
                                 toSkip++;
@@ -300,11 +304,14 @@ public class DoubleStreamReader
                         }
                     }
                     else {
-                        toSkip = end - i;
+                        toSkip = end - (posInRowGroup + i);
                     }
                     break;
                 }
                 nextActive = inputPositions[activeIdx];
+                if (outputChannel != -1 && numResults * SIZE_OF_DOUBLE > resultSizeBudget) {
+                    truncationRow = inputQualifyingSet.truncateAndReturnTruncationRow(activeIdx);
+                }
                 continue;
             }
             else {

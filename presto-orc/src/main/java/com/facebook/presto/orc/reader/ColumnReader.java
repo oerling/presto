@@ -16,16 +16,28 @@ package com.facebook.presto.orc.reader;
 import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.stream.BooleanInputStream;
+import com.facebook.presto.orc.stream.InputStreamSource;
+import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.orc.stream.LongInputStream;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Arrays;
+
+import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
+import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 
 abstract class ColumnReader
         implements StreamReader
 {
+    protected InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
+
+        @Nullable
+        protected BooleanInputStream presentStream;
+
     QualifyingSet inputQualifyingSet;
     QualifyingSet outputQualifyingSet;
     Block block;
@@ -63,6 +75,9 @@ abstract class ColumnReader
 
     // Number of bytes the next scan() may add to the result.
     long resultSizeBudget = 8 * 10000;
+
+    // Null flags for retrieved values. At least numValues + numResults elements.
+    boolean[] valueIsNull;
 
     public QualifyingSet getInputQualifyingSet()
     {
@@ -159,9 +174,6 @@ abstract class ColumnReader
     protected void beginScan(    BooleanInputStream presentStream, LongInputStream lengthStream)
             throws IOException
     {
-        if (!rowGroupOpen) {
-            openRowGroup();
-        }
         numResults = 0;
         truncationRow = -1;
         QualifyingSet input = inputQualifyingSet;
