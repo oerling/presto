@@ -211,7 +211,7 @@ public class Filters
         {
             super(false);
         }
-        
+
         public Filter getMember(SubfieldPath.PathElement member)
         {
             return filters.get(member);

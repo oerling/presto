@@ -234,7 +234,6 @@ public class QualifyingSet
         return firstOfLevel.parent.getTopLevelPosition(parentPos);
     }
 
-    
     public void setTruncationPosition(int position)
     {
         if (position >= positionCount || position <= 0) {
@@ -279,7 +278,6 @@ public class QualifyingSet
         firstOfLevel = first;
     }
 
-    
     public ErrorSet getErrorSet()
     {
         return errorSet;

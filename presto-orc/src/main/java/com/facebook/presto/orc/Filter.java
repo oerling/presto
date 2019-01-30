@@ -24,7 +24,7 @@ public class Filter
     {
         this.nullAllowed = nullAllowed;
     }
-    
+
     // True if one may call the filter once per distinct value. This
     // is usually true but a counter example is a filter on the data
     // column of a map where different positions have a different

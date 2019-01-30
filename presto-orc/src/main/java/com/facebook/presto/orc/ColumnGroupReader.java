@@ -424,7 +424,7 @@ public class ColumnGroupReader
             if (qualifyingSet != inputQualifyingSet) {
                 qualifyingSet.setFirstOfLevel(inputQualifyingSet);
             }
-                reader.setInputQualifyingSet(qualifyingSet);
+            reader.setInputQualifyingSet(qualifyingSet);
             if (reorderFilters && filter != null) {
                 startTime = System.nanoTime();
             }

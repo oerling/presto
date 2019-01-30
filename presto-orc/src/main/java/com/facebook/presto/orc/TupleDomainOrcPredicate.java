@@ -369,13 +369,13 @@ public class TupleDomainOrcPredicate<C>
     {
         if (isVarcharType(type)) {
             return VarcharRangeToFilter(range, nullAllowed);
-                }
+        }
         if (type == BIGINT) {
-                    return BigintRangeToFilter(range, nullAllowed);
-                }
+            return BigintRangeToFilter(range, nullAllowed);
+        }
         if (type == DOUBLE) {
-                    return doubleRangeToFilter(range, nullAllowed);
-                }
+            return doubleRangeToFilter(range, nullAllowed);
+        }
         return null;
     }
 

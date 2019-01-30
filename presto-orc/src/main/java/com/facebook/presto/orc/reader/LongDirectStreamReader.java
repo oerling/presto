@@ -208,7 +208,7 @@ public class LongDirectStreamReader
         makeInnerQualifyingSets(0, inputQualifyingSet.getPositionCount());
         QualifyingSet input = innerQualifyingSet;
         QualifyingSet output = innerOutputQualifyingSet;
-        // Read dataStream if there are non-null values in the QualifyingSet. 
+        // Read dataStream if there are non-null values in the QualifyingSet.
         if (input.getPositionCount() > 0) {
             if (filter != null) {
                 int numInput = input.getPositionCount();
@@ -252,7 +252,7 @@ public class LongDirectStreamReader
     {
         values[to] = values[from];
     }
-    
+
     @Override
         protected void writeNull(int i)
     {

@@ -17,7 +17,6 @@ import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
-import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.orc.stream.LongInputStream;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
@@ -27,7 +26,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Arrays;
 
-import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 
 abstract class ColumnReader
@@ -35,8 +33,8 @@ abstract class ColumnReader
 {
     protected InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
 
-        @Nullable
-        protected BooleanInputStream presentStream;
+    @Nullable
+    protected BooleanInputStream presentStream;
 
     QualifyingSet inputQualifyingSet;
     QualifyingSet outputQualifyingSet;
