@@ -41,6 +41,13 @@ public class QualifyingSet
     private int[] ownedInputNumbers;
     private QualifyingSet parent;
     private QualifyingSet firstOfLevel;
+    // True if the output of the scan whose input this is should be
+    // expressed in row/input numbers of 'parent' of 'this'. If so,
+    // 'inputNumbers' gives the translation. This is used when a
+    // qualifying set is in terms of a non-null rows of a
+    // struct/list/map but the results should be expressed in row
+    // numbers that include the nulls.
+    boolean translateResultToParentRows;
 
     static {
         wholeRowGroup = new int[10000];
@@ -268,6 +275,11 @@ public class QualifyingSet
         return pos < 0 ? -1 - pos : pos;
     }
 
+    public QualifyingSet getParent()
+    {
+        return parent;
+    }
+
     public void setParent(QualifyingSet parent)
     {
         this.parent = parent;
@@ -276,6 +288,16 @@ public class QualifyingSet
     public void setFirstOfLevel(QualifyingSet first)
     {
         firstOfLevel = first;
+    }
+
+    public boolean getTranslateResultToParentRows()
+    {
+        return translateResultToParentRows;
+    }
+
+    public void setTranslateResultToParentRows(boolean translateResultToParentRows)
+    {
+        this.translateResultToParentRows = translateResultToParentRows;
     }
 
     public ErrorSet getErrorSet()
@@ -332,7 +354,7 @@ public class QualifyingSet
         }
         positions = getMutablePositions(positionCount);
         inputNumbers = getMutableInputNumbers(positionCount);
-        int lowestSurvivingInput = inputNumbers[surviving];
+        int lowestSurvivingInput = translateResultToParentRows ? 0 : inputNumbers[surviving];
         for (int i = surviving; i < positionCount; i++) {
             positions[i - surviving] = positions[i];
             inputNumbers[i - surviving] = inputNumbers[i] - lowestSurvivingInput;
@@ -365,6 +387,7 @@ public class QualifyingSet
             ownedInputNumbers = inputNumbers;
         }
     }
+
     public void compactPositionsAndErrors(int[] surviving, int numSurviving)
     {
         int[] rows = getMutablePositions(0);

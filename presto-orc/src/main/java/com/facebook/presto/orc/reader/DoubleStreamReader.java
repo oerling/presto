@@ -58,11 +58,6 @@ public class DoubleStreamReader
     private int readOffset;
     private int nextBatchSize;
 
-    /*
-    private InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
-    @Nullable
-    private BooleanInputStream presentStream;
-    */
     private boolean[] nullVector = new boolean[0];
     private long[] values;
     // Result arrays from outputQualifyingSet.

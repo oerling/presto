@@ -219,15 +219,18 @@ abstract class ColumnReader
 
     protected void endScan(BooleanInputStream presentStream)
     {
-        // The reader is positioned at inputQualifyingSet.end() or truncationRow.
-        int end = inputQualifyingSet.getEnd(); // getNonTruncatedEnd();
+        // The reader is positioned at inputQualifyingSet.end() or
+        // truncationRow. posInRowGroup is where the calling scan()
+        // started.
+        int initialPosInRowGroup = posInRowGroup;
+        int end = inputQualifyingSet.getEnd();
         posInRowGroup = truncationRow != -1 ? truncationRow : end;
-
         if (presentStream != null) {
-            if (posInRowGroup != end) {
-                System.arraycopy(present, posInRowGroup, present, 0, end - posInRowGroup);
+            int numAdvanced = posInRowGroup - initialPosInRowGroup;
+            if (numAdvanced < numPresent) {
+                System.arraycopy(present, posInRowGroup, present, 0, numPresent - numAdvanced);
             }
-            numPresent -= end - posInRowGroup;
+            numPresent -= numAdvanced;
         }
         if (lengths != null) {
             if (lengthIdx < numLengths) {
@@ -252,5 +255,16 @@ abstract class ColumnReader
         numPresent = 0;
         lengthIdx = 0;
         rowGroupOpen = true;
+    }
+
+    protected int countPresent(int begin, int end)
+    {
+        int count = 0;
+        for (int i = begin; i < end; i++) {
+            if (present[i]) {
+                count++;
+            }
+        }
+        return count;
     }
 }

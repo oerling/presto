@@ -206,8 +206,8 @@ public class LongDirectStreamReader
             ensureValuesSize();
         }
         makeInnerQualifyingSets(0, inputQualifyingSet.getPositionCount());
-        QualifyingSet input = innerQualifyingSet;
-        QualifyingSet output = innerOutputQualifyingSet;
+        QualifyingSet input = hasNulls ? innerQualifyingSet : inputQualifyingSet;
+        QualifyingSet output = outputQualifyingSet;
         // Read dataStream if there are non-null values in the QualifyingSet.
         if (input.getPositionCount() > 0) {
             if (filter != null) {
@@ -240,7 +240,7 @@ public class LongDirectStreamReader
                                              numValues);
             }
         }
-        addNullsAfterScan();
+        addNullsAfterScan(0, inputQualifyingSet.getEnd());
         if (filter != null) {
             outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
         }

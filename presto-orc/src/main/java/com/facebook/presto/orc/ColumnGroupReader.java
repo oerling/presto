@@ -667,9 +667,21 @@ public class ColumnGroupReader
             int[] inputRows = inputQualifyingSet.getPositions();
             int[] rows = outputQualifyingSet.getMutablePositions(numAdded);
             int[] inputs = outputQualifyingSet.getMutableInputNumbers(numAdded);
-            for (int i = 0; i < numAdded; i++) {
-                inputs[i] = survivingRows[i];
-                rows[i] = inputRows[survivingRows[i]];
+            if (inputQualifyingSet.getTranslateResultToParentRows()) {
+                int[] translation = inputQualifyingSet.getInputNumbers();
+                QualifyingSet parent = inputQualifyingSet.getParent();
+                int[] parentRows = parent.getPositions();
+                for (int i = 0; i < numAdded; i++) {
+                    int parentPos = translation[survivingRows[i]];
+                    inputs[i] = parentPos;
+                    rows[i] = parentRows[parentPos];
+                }
+            }
+            else {
+                for (int i = 0; i < numAdded; i++) {
+                    inputs[i] = survivingRows[i];
+                    rows[i] = inputRows[survivingRows[i]];
+                }
             }
             outputQualifyingSet.setPositionCount(numAdded);
         }
