@@ -290,17 +290,7 @@ public class DoubleStreamReader
                     valueIdx++;
                 }
                 if (++activeIdx == numActive) {
-                    i++;
-                    if (presentStream != null) {
-                        for (; i < end; i++) {
-                            if (present[i]) {
-                                toSkip++;
-                            }
-                        }
-                    }
-                    else {
-                        toSkip = end - (posInRowGroup + i);
-                    }
+                    toSkip = countPresent(i + 1, end - posInRowGroup);
                     break;
                 }
                 nextActive = inputPositions[activeIdx];

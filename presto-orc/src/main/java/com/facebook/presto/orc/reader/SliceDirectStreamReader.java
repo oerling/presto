@@ -415,8 +415,8 @@ public class SliceDirectStreamReader
                     // Calculate the distance from the last qualifying
                     // row to the end of the qualifying set. Take
                     // nulls into account.
-                    int numPresentBeforeEnd = countPresent(i + 1, end);
-                    if (numLengths < lengthIdx + numPresentBeforeEnd) {
+                    int numPresentBeforeEnd = countPresent(i + 1, end - posInRowGroup);
+                    if (numPresentBeforeEnd < 0 || numLengths < lengthIdx + numPresentBeforeEnd) {
                         throw new OrcCorruptionException(streamDescriptor.getOrcDataSourceId(), "lengths do not cover the range of the qualifying set");
                     }
                     for (int counter = 0; counter < numPresentBeforeEnd; counter++) {

@@ -50,20 +50,24 @@ abstract class ColumnReader
     int truncationRow = -1;
 
     boolean rowGroupOpen;
-    // Lengths for the rows of the input QualifyingSet.
-    int[] lengths;
-    // Number of elements in lengths.
-    int numLengths;
-    // Index of length of first unprocessed element in 'lemgths'.
-    int lengthIdx;
-    //Present flag for each row in input QualifyingSet.
+
+    // position of first unprocessed row from the start of the row group.
+    int posInRowGroup;
+
+    //Present flag for each row between posInRowGroup and end of inputQualifyingSet.
     boolean[] present;
 
     // Number of values in 'present'.
     int numPresent;
 
-    // position of first unprocessed row from the start of the row group.
-    int posInRowGroup;
+    // Lengths for present rows from posInRowGroup to end of inputQualifyingSet.
+    int[] lengths;
+
+    // Number of elements in lengths.
+    int numLengths;
+
+    // Index of length of first unprocessed element in 'lemgths'.
+    int lengthIdx;
 
     // Number of values in Block to be returned by getBlock.
     int numValues;
@@ -228,7 +232,7 @@ abstract class ColumnReader
         if (presentStream != null) {
             int numAdvanced = posInRowGroup - initialPosInRowGroup;
             if (numAdvanced < numPresent) {
-                System.arraycopy(present, posInRowGroup, present, 0, numPresent - numAdvanced);
+                System.arraycopy(present, posInRowGroup - initialPosInRowGroup, present, 0, numPresent - numAdvanced);
             }
             numPresent -= numAdvanced;
         }
@@ -237,6 +241,7 @@ abstract class ColumnReader
                 System.arraycopy(lengths, lengthIdx, lengths, 0, numLengths - lengthIdx);
             }
             numLengths -= lengthIdx;
+            lengthIdx = 0;
         }
         if (outputQualifyingSet != null) {
             outputQualifyingSet.setEnd(posInRowGroup);
@@ -257,8 +262,12 @@ abstract class ColumnReader
         rowGroupOpen = true;
     }
 
+    // Returns the number of non-null rows to skip to go from 'begin' to 'end'. 'begin' and 'end' are offsets from 'posInRowGroup'.
     protected int countPresent(int begin, int end)
     {
+        if (presentStream == null) {
+            return end - begin;
+        }
         int count = 0;
         for (int i = begin; i < end; i++) {
             if (present[i]) {

@@ -453,8 +453,9 @@ public class StructStreamReader
         int initialFieldResults = reader.getNumResults();
         int firstRow = inputQualifyingSet.getPositions()[0];
         if (reader.hasUnfetchedRows()) {
-            int innerTruncationRow = innerQualifyingSet.getPositions()[innerQualifyingSet.getTruncationPosition()];
-            firstRow = innerToOuterRow(innerTruncationRow);
+            // posInRowGroup is the first unprocessed enclosing level
+            // row, by definition part of the input qualifying set.
+            firstRow = posInRowGroup;
             innerQualifyingSet.clearTruncationPosition();
             reader.advance();
             int newTruncation = reader.getTruncationRow();
