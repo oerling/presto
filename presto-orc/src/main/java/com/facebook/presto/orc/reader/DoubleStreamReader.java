@@ -356,6 +356,7 @@ public class DoubleStreamReader
     @Override
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
+        checkEnoughValues(numFirstRows);
         if (mayReuse) {
             return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
         }

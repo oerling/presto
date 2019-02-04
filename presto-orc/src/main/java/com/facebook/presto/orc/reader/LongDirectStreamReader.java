@@ -240,6 +240,9 @@ public class LongDirectStreamReader
                                              numValues);
             }
         }
+        if (hasNulls) {
+            innerPosInRowGroup = innerQualifyingSet.getEnd();
+        }
         addNullsAfterScan(0, inputQualifyingSet.getEnd());
         if (filter != null) {
             outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
@@ -262,6 +265,7 @@ public class LongDirectStreamReader
     @Override
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
+        checkEnoughValues(numFirstRows);
         if (mayReuse) {
             return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
         }

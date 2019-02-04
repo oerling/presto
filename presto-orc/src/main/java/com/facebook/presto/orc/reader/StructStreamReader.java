@@ -1,4 +1,3 @@
-
 /*
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -385,37 +384,43 @@ public class StructStreamReader
                 fieldFill++;
             }
         }
+        fieldBlockOffset[numValues] = fieldFill;
+        verify(fieldBlockSize == numValues);
+        if (fieldFill > 0) {
+            reader.getBlocks(fieldFill, true, false);
+        }
     }
 
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
         if (outputChannel != -1) {
+            check();
             if (fieldSurviving == null || fieldSurviving.length < numSurviving) {
                 fieldSurviving = new int[numSurviving];
             }
             int fieldBase = fieldBlockOffset[base];
+            int initialFieldBase = fieldBase;
             int numFieldSurviving = 0;
             for (int i = 0; i < numSurviving; i++) {
                 if (valueIsNull != null && valueIsNull[base + surviving[i]]) {
                     valueIsNull[base + i] = true;
-                    fieldBlockOffset[i] = fieldBase;
+                    fieldBlockOffset[base + i] = fieldBase;
                 }
                 else {
-                    fieldSurviving[numFieldSurviving++] = fieldBlockOffset[base + surviving[i]];
-                    fieldBase++;
+                    fieldSurviving[numFieldSurviving++] = fieldBlockOffset[base + surviving[i]] - initialFieldBase;
                     if (valueIsNull != null) {
                         valueIsNull[base + i] = false;
                     }
-                    fieldBlockOffset[i] = fieldBase;
+                    fieldBlockOffset[base + i] = fieldBase;
+                    fieldBase++;
                 }
             }
-            for (StreamReader reader : streamReaders) {
-                if (reader != null) {
-                    reader.compactValues(fieldSurviving, base, numFieldSurviving);
-                }
-            }
+            fieldBlockOffset[base + numSurviving] = fieldBase;
+            fieldBlockSize = base + numSurviving;
+            reader.compactValues(fieldSurviving, initialFieldBase, numFieldSurviving);
             numValues = base + numSurviving;
+            check();
         }
         compactQualifyingSet(surviving, numSurviving);
     }
@@ -437,6 +442,9 @@ public class StructStreamReader
         return reader.getAverageResultSize();
     }
 
+    static int callCount;
+    static int stopCallCount = -1;
+
     @Override
     public void scan()
             throws IOException
@@ -447,6 +455,11 @@ public class StructStreamReader
         if (!rowGroupOpen) {
             openRowGroup();
         }
+        callCount++;
+        if (stopCallCount != -1 && callCount >= stopCallCount) {
+            System.out.println("break");
+        }
+        check();
         beginScan(presentStream, null);
         QualifyingSet input = inputQualifyingSet;
         QualifyingSet output = outputQualifyingSet;
@@ -468,6 +481,10 @@ public class StructStreamReader
             }
         }
         else {
+            if (inputCopy == null) {
+                inputCopy = new QualifyingSet();
+            }
+            inputCopy.copyFrom(inputQualifyingSet);
             int numInput = input.getPositionCount();
             makeInnerQualifyingSets(0, numInput);
             if (hasNulls) {
@@ -503,11 +520,12 @@ public class StructStreamReader
         for (int i = 0; i < numStructs; i++) {
             addStructResult();
         }
+        int lastFieldOffset = fieldBlockSize == 0 ? 0 : fieldBlockOffset[fieldBlockSize];
         addNullsAfterScan(firstRow, truncationRow != -1 ? truncationRow : inputQualifyingSet.getEnd());
         if (numResults > numInnerResults) {
             // Fill null positions in fieldBlockOffset  with the offset of the next non-null.
-            fieldBlockOffset[numValues + numResults] = fieldBlockSize;
-            int nextNonNull = fieldBlockSize;
+            fieldBlockOffset[numValues + numResults] = lastFieldOffset;
+            int nextNonNull = lastFieldOffset;
             for (int i = numValues + numResults - 1; i >= numValues; i--) {
                 if (fieldBlockOffset[i] == -1) {
                     fieldBlockOffset[i] = nextNonNull;
@@ -517,13 +535,16 @@ public class StructStreamReader
                 }
             }
         }
+        fieldBlockSize = numValues + numResults;
         endScan(presentStream);
+        check();
     }
 
     void addStructResult()
     {
-        fieldBlockOffset[numValues + numInnerResults] = fieldBlockSize;
-        fieldBlockOffset[numValues + numInnerResults + 1] = fieldBlockSize + 1;
+        int lastFieldOffset = fieldBlockSize == 0 ? 0 : fieldBlockOffset[fieldBlockSize];
+        fieldBlockOffset[numValues + numInnerResults] = lastFieldOffset;
+        fieldBlockOffset[numValues + numInnerResults + 1] = lastFieldOffset + 1;
         if (valueIsNull != null) {
             valueIsNull[numValues + numInnerResults] = false;
         }
@@ -554,7 +575,7 @@ public class StructStreamReader
         for (int i = 0; i < numRows; i++) {
             if (inner == innerRows[i]) {
                 int[] innerToOuter = innerQualifyingSet.getInputNumbers();
-                return inputQualifyingSet.getPositions()[innerToOuter[i]];
+                return inputCopy.getPositions()[innerToOuter[i]];
             }
         }
         throw new IllegalArgumentException("Can't translate from struct truncation row to enclosing truncation row");
@@ -582,6 +603,9 @@ public class StructStreamReader
     {
         int innerFirstRows = 0;
         for (int i = 0; i < numFirstRows; i++) {
+            if (fieldBlockOffset[i] != innerFirstRows) {
+                throw new IllegalArgumentException("Struct nulls and block field indices inconsistent");
+            }
             if (valueIsNull == null || !valueIsNull[i]) {
                 innerFirstRows++;
             }
@@ -614,5 +638,28 @@ public class StructStreamReader
     public void maybeReorderFilters()
     {
         reader.maybeReorderFilters();
+    }
+
+    void check()
+    {
+        int innerFirstRows = 0;
+        for (int i = 0; i < numValues; i++) {
+            if (fieldBlockOffset[i] != innerFirstRows) {
+                throw new IllegalArgumentException("Struct nulls and block field indices inconsistent");
+            }
+            if (valueIsNull == null || !valueIsNull[i]) {
+                innerFirstRows++;
+            }
+        }
+        if (numValues > 0 && (fieldBlockOffset[numValues] != innerFirstRows || fieldBlockSize != numValues)) {
+            throw new IllegalArgumentException("Last fieldBlockOffset inconsistent");
+        }
+        reader.getBlocks(innerFirstRows, true, false);
+    }
+
+    void setcc(int cc, int stop)
+    {
+        stopCallCount = stop;
+        callCount = cc;
     }
 }

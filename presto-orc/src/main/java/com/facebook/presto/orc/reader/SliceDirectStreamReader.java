@@ -513,6 +513,7 @@ public class SliceDirectStreamReader
     @Override
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
+        checkEnoughValues(numFirstRows);
         if (mayReuse) {
             return new VariableWidthBlock(numFirstRows, Slices.wrappedBuffer(bytes), resultOffsets, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull));
         }

@@ -96,6 +96,11 @@ abstract class ColumnReader
         return outputQualifyingSet;
     }
 
+    public void setOutputQualifyingSet(QualifyingSet set)
+    {
+        outputQualifyingSet = set;
+    }
+
     @Override
     public QualifyingSet getOrCreateOutputQualifyingSet()
     {
@@ -198,8 +203,10 @@ abstract class ColumnReader
             if (numPresent > 0 && rowsInRange > numPresent) {
                 throw new IllegalArgumentException("The present stream should be read in full the first time");
             }
-            presentStream.getSetBits(rowsInRange, present);
-            numPresent = rowsInRange;
+            if (numPresent == 0) {
+                presentStream.getSetBits(rowsInRange, present);
+                numPresent = rowsInRange;
+            }
             if (lengthStream != null) {
                 for (int i = 0; i < rowsInRange; i++) {
                     if (present[i]) {
@@ -276,5 +283,12 @@ abstract class ColumnReader
             }
         }
         return count;
+    }
+
+    protected void checkEnoughValues(int numFirstRows)
+    {
+        if (numValues < numFirstRows) {
+            throw new IllegalArgumentException("Reader does not have enough rows");
+        }
     }
 }

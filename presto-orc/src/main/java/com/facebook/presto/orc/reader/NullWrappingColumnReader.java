@@ -14,6 +14,8 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.orc.QualifyingSet;
+import com.facebook.presto.orc.stream.BooleanInputStream;
+import com.facebook.presto.orc.stream.LongInputStream;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -30,6 +32,13 @@ abstract class NullWrappingColumnReader
     int numNullsToAdd;
     // Number of elements retrieved from inner reader.
     int numInnerResults;
+
+    protected void beginScan(BooleanInputStream presentStream, LongInputStream lengthStream)
+            throws IOException
+    {
+        super.beginScan(presentStream, lengthStream);
+        numInnerResults = 0;
+    }
 
     // Translates the positions of inputQualifyingSet between
     // beginPosition and endPosition into an inner qualifying set for
@@ -109,7 +118,7 @@ abstract class NullWrappingColumnReader
             return;
         }
         if (valueIsNull.length < size) {
-            valueIsNull = Arrays.copyOf(valueIsNull, valueIsNull.length * 2);
+            valueIsNull = Arrays.copyOf(valueIsNull, Math.max(size, valueIsNull.length * 2));
         }
     }
 
@@ -128,7 +137,7 @@ abstract class NullWrappingColumnReader
             return;
         }
         int savedNullsToAdd = numNullsToAdd;
-        int lastNull = Arrays.binarySearch(nullsToAdd, 0, numNullsToAdd, endRow);
+        int lastNull = Arrays.binarySearch(nullsToAdd, 0, numNullsToAdd, endRow - posInRowGroup);
         if (lastNull < 0) {
             lastNull = -1 - lastNull;
         }
