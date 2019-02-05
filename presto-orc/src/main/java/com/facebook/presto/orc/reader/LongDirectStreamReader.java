@@ -243,7 +243,7 @@ public class LongDirectStreamReader
         if (hasNulls) {
             innerPosInRowGroup = innerQualifyingSet.getEnd();
         }
-        addNullsAfterScan(0, inputQualifyingSet.getEnd());
+        addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (filter != null) {
             outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
         }

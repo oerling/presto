@@ -521,7 +521,7 @@ public class StructStreamReader
             addStructResult();
         }
         int lastFieldOffset = fieldBlockSize == 0 ? 0 : fieldBlockOffset[fieldBlockSize];
-        addNullsAfterScan(firstRow, truncationRow != -1 ? truncationRow : inputQualifyingSet.getEnd());
+        addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, truncationRow != -1 ? truncationRow : inputQualifyingSet.getEnd());
         if (numResults > numInnerResults) {
             // Fill null positions in fieldBlockOffset  with the offset of the next non-null.
             fieldBlockOffset[numValues + numResults] = lastFieldOffset;

@@ -456,7 +456,7 @@ public class ColumnGroupReader
         alignResultsAndRemoveFromQualifyingSet(numAdded, sortedStreamReaders.length - 1);
         numRowsInResult += numAdded;
         // Check.
-        getBlocks(numRowsInResult, true, false);
+        // getBlocks(numRowsInResult, true, false);
     }
 
     QualifyingSet evaluateFilterFunction(int streamIdx, QualifyingSet qualifyingSet)
@@ -671,9 +671,9 @@ public class ColumnGroupReader
                 for (int i = numAdded; i < numSurviving; i++) {
                     resultInputNumbers[i] = i;
                 }
-                if (truncationRow != -1 && streamIdx > 0) {
-                    numSurviving = addUnusedInputToSurviving(reader, numSurviving, 0);
-                }
+            }
+            if (truncationRow != -1 && streamIdx > 0) {
+                numSurviving = addUnusedInputToSurviving(reader, numSurviving, 0);
             }
         }
         // Record the input rows that made it into the output qualifying set.
@@ -737,6 +737,9 @@ public class ColumnGroupReader
         for (int i = 0; i < numIn; i++) {
             if (rows[i] == truncationRow) {
                 int numAdded = numIn - i;
+                if (survivingRows == null) {
+                    survivingRows = new int[numSurviving + numAdded];
+                }
                 if (survivingRows.length < numSurviving + numAdded) {
                     survivingRows = Arrays.copyOf(survivingRows, numSurviving + numAdded + 100);
                 }
@@ -844,7 +847,7 @@ public class ColumnGroupReader
         }
         numRowsInResult = base + initialNumSurviving;
         // Check.
-        getBlocks(numRowsInResult, true, false);
+        // getBlocks(numRowsInResult, true, false);
     }
 
     public String toString()

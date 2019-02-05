@@ -20,6 +20,8 @@ import com.facebook.presto.orc.stream.LongInputStream;
 import java.io.IOException;
 import java.util.Arrays;
 
+import static com.google.common.base.Verify.verify;
+
 abstract class NullWrappingColumnReader
         extends ColumnReader
         implements StreamReader
@@ -69,7 +71,7 @@ abstract class NullWrappingColumnReader
             int row = inputRows[activeIdx] - posInRowGroup;
             if (!present[row]) {
                 if (keepNulls) {
-                    addNullToKeep(activeIdx);
+                    addNullToKeep(inputRows[activeIdx]);
                 }
             }
             else {
@@ -126,7 +128,7 @@ abstract class NullWrappingColumnReader
     // the inner reader. Because the inner reader may have run out of
     // budget before producing the full result, this only processes
     // nulls on rows beginRow to endRow, exclusive.
-    protected void addNullsAfterScan(int beginRow, int endRow)
+    protected void addNullsAfterScan(QualifyingSet output, int endRow)
     {
         if (numNullsToAdd == 0) {
             if (valueIsNull != null) {
@@ -137,7 +139,7 @@ abstract class NullWrappingColumnReader
             return;
         }
         int savedNullsToAdd = numNullsToAdd;
-        int lastNull = Arrays.binarySearch(nullsToAdd, 0, numNullsToAdd, endRow - posInRowGroup);
+        int lastNull = Arrays.binarySearch(nullsToAdd, 0, numNullsToAdd, endRow);
         if (lastNull < 0) {
             lastNull = -1 - lastNull;
         }
@@ -146,25 +148,19 @@ abstract class NullWrappingColumnReader
         if (numNullsToAdd == 0 && valueIsNull == null) {
             numResults = numInnerResults;
         }
-        else if (filter != null) {
-            addNullsAfterFilter(beginRow, end);
+        else if (false && filter != null) {
+            addNullsAfterFilter(output, end);
         }
         else {
-            addNullsAfterRead(beginRow, end);
+            addNullsAfterRead(output, end);
         }
         int nullsLeft = savedNullsToAdd - numNullsToAdd;
         System.arraycopy(nullsToAdd, numNullsToAdd, nullsToAdd, 0, nullsLeft);
-        if (filter == null) {
-            // When we continue, the nulls that belong to the next batch are shifted down by the number of results in this batch.
-            for (int i = 0; i < nullsLeft; i++) {
-                nullsToAdd[i] -= numInnerResults + numNullsToAdd;
-            }
-        }
         numResults = numInnerResults + numNullsToAdd;
         numNullsToAdd = nullsLeft;
     }
 
-    private void addNullsAfterRead(int beginRow, int endRow)
+    private void addNullsAfterRead(QualifyingSet output, int endRow)
     {
         ensureNulls(numValues + numInnerResults + numNullsToAdd);
         int end = numValues + numInnerResults + numNullsToAdd;
@@ -172,24 +168,53 @@ abstract class NullWrappingColumnReader
         if (numNullsToAdd == 0) {
             return;
         }
-        for (int i = numNullsToAdd - 1; i >= 0; i--) {
-            int nullPos = nullsToAdd[i];
-            valueIsNull[numValues + nullPos] = true;
+        int[] outRows = output.getPositions();
+        int resultIdx = filter != null ? numInnerResults - 1 : output.getPositionCount() - 1;
+        int nullIdx = numNullsToAdd - 1;
+        // If there are filters, the qualifying rows are disjoin of
+        // the null rows, else the null rows are a subset of the
+        // qualifying.
+        int targetIdx = numValues + numNullsToAdd + numInnerResults - 1;
+        while (nullIdx >= 0 || resultIdx >= 0) {
+            if (nullIdx < 0) {
+                resultIdx--;
+                targetIdx--;
+                continue;
+            }
+            if (resultIdx < 0) {
+                valueIsNull[targetIdx--] = true;
+                nullIdx--;
+                continue;
+            }
+            if (outRows[resultIdx] > nullsToAdd[nullIdx]) {
+                resultIdx--;
+                targetIdx--;
+                continue;
+            }
+            if (outRows[resultIdx] == nullsToAdd[nullIdx]) {
+                verify(filter == null);
+                valueIsNull[targetIdx--] = true;
+                resultIdx--;
+                nullIdx--;
+                continue;
+            }
+            verify(filter != null);
+            valueIsNull[targetIdx--] = true;
+            nullIdx--;
         }
+        verify(targetIdx == numValues - 1);
         moveNonNullsAroundNulls();
     }
 
-    private void addNullsAfterFilter(int beginRow, int endRow)
+    private void addNullsAfterFilter(QualifyingSet output, int endRow)
     {
         ensureNulls(numValues + numInnerResults + numNullsToAdd);
         if (numNullsToAdd == 0) {
             Arrays.fill(valueIsNull, numValues, numValues + numInnerResults, false);
             return;
         }
-        int sourceRow = numValues + numInnerResults - 1;
-        int targetRow = numValues + numInnerResults + numNullsToAdd - 1;
-        int[] resultNumbers = outputQualifyingSet.getInputNumbers();
-        int resultIdx = outputQualifyingSet.getPositionCount() - 1;
+        int[] outRows = output.getPositions();
+        int resultIdx = numInnerResults - 1;
         int nullIdx = numNullsToAdd - 1;
         int targetIdx = numValues + numInnerResults + numNullsToAdd - 1;
         while (!(nullIdx < 0 && resultIdx < 0)) {
@@ -203,7 +228,7 @@ abstract class NullWrappingColumnReader
                 nullIdx--;
                 continue;
             }
-            if (nullsToAdd[nullIdx] > resultNumbers[resultIdx]) {
+            if (nullsToAdd[nullIdx] > outRows[resultIdx]) {
                 valueIsNull[targetIdx--] = true;
                 nullIdx--;
             }
@@ -212,6 +237,7 @@ abstract class NullWrappingColumnReader
                 resultIdx--;
             }
         }
+        verify(targetIdx == numValues - 1);
         moveNonNullsAroundNulls();
     }
 
@@ -221,7 +247,7 @@ abstract class NullWrappingColumnReader
         int[] rows = null;
         int[] inputNumbers = null;
 
-        int nullCtr = numNullsToAdd;
+        int nullCtr = numNullsToAdd - 1;
         if (outputQualifyingSet != null) {
             rows = outputQualifyingSet.getMutablePositions(numInnerResults + numNullsToAdd);
             inputNumbers = outputQualifyingSet.getMutablePositions(numInnerResults + numNullsToAdd);
@@ -231,16 +257,16 @@ abstract class NullWrappingColumnReader
             if (!valueIsNull[i]) {
                 shiftUp(sourceRow, i);
                 if (rows != null) {
-                    rows[i] = rows[sourceRow];
-                    inputNumbers[i] = inputNumbers[sourceRow];
+                    rows[i - numValues] = rows[sourceRow - numValues];
+                    inputNumbers[i - numValues] = inputNumbers[sourceRow - numValues];
                 }
                 sourceRow--;
             }
             else {
                 writeNull(i);
                 if (rows != null) {
-                    rows[i] = inputQualifyingSet.getPositions()[nullsToAdd[nullCtr]];
-                    inputNumbers[i] = nullsToAdd[nullCtr];
+                    rows[i - numValues] = nullsToAdd[nullCtr];
+                    inputNumbers[i - numValues] = inputQualifyingSet.findPositionAtOrAbove(nullsToAdd[nullCtr]);
                     nullCtr--;
                 }
             }
