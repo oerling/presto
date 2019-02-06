@@ -100,7 +100,9 @@ public class ColumnGroupReader
             }
             StreamReader streamReader = streamReaders[columnIndex];
             streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, types.get(i));
-            channelToStreamReader.put(internalChannel, streamReader);
+            if (internalChannel != -1) {
+                channelToStreamReader.put(internalChannel, streamReader);
+            }
         }
         this.filterFunctions = filterFunctions != null ? filterFunctions : new FilterFunction[0];
         for (int i = 0; i < outputChannels.length; i++) {
@@ -363,11 +365,12 @@ public class ColumnGroupReader
             blocks = new Block[maxOutputChannel + 1];
         }
         for (int i = 0; i < outputChannels.length; i++) {
+            // The ith entry of internalChannels goes to outputChannels[i]th place in the result Page.
             int channel = outputChannels[i];
             if (channel == -1) {
                 continue;
             }
-            StreamReader reader = channelToStreamReader.get(channel);
+            StreamReader reader = channelToStreamReader.get(i);
             if (reader != null) {
                 blocks[channel] = reader.getBlock(numFirstRows, reuseBlocks);
             }
