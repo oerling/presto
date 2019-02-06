@@ -288,7 +288,7 @@ public class DoubleStreamReader
                     }
                     valueIdx++;
                 }
-                if (++activeIdx == numActive) {
+                if (++activeIdx == input.getPositionCount()) {
                     toSkip = countPresent(i + 1, end - posInRowGroup);
                     break;
                 }
