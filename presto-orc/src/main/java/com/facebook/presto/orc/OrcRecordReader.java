@@ -805,6 +805,7 @@ public class OrcRecordReader
                     reader.maybeReorderFilters();
                 }
             }
+            qualifyingSet.clearTruncationPosition();
             reader.advance();
             numResults = reader.getNumResults();
             if (numResults > targetResultRows || reader.getResultSizeInBytes() > targetResultBytes * 8 / 10) {
