@@ -471,14 +471,16 @@ public class StructStreamReader
             // row, by definition part of the input qualifying set.
             firstRow = posInRowGroup;
             setInnerTruncation();
+            int originalTarget = innerQualifyingSet.getEnd();
             reader.advance();
             int newTruncation = reader.getTruncationRow();
             if (newTruncation != -1) {
+                innerPosInRowGroup = newTruncation;
                 truncationRow = innerToOuterRow(newTruncation);
                 inputQualifyingSet.setTruncationRow(truncationRow);
             }
             else {
-                innerPosInRowGroup = innerQualifyingSet.getEnd();
+                innerPosInRowGroup = originalTarget;
             }
         }
         else {
