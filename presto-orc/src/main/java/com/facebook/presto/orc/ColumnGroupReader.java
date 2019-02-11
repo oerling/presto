@@ -695,15 +695,17 @@ public class ColumnGroupReader
                 QualifyingSet parent = inputQualifyingSet.getParent();
                 int[] parentRows = parent.getPositions();
                 for (int i = 0; i < numAdded; i++) {
-                    int parentPos = translation[survivingRows[i]];
+                    int row = needCompact ? survivingRows[i] : i;
+                    int parentPos = translation[row];
                     inputs[i] = parentPos;
                     rows[i] = parentRows[parentPos];
                 }
             }
             else {
                 for (int i = 0; i < numAdded; i++) {
-                    inputs[i] = survivingRows[i];
-                    rows[i] = inputRows[survivingRows[i]];
+                    int row = needCompact ? survivingRows[i] : i;
+                    inputs[i] = row;
+                    rows[i] = inputRows[row];
                 }
             }
             outputQualifyingSet.setPositionCount(numAdded);
