@@ -166,7 +166,8 @@ public class OrcRecordReader
         requireNonNull(systemMemoryUsage, "systemMemoryUsage is null");
 
         this.includedColumns = requireNonNull(includedColumns, "includedColumns is null");
-        this.includedColumnHandles = requireNonNull(includedColumnHandles, "includedColumnHandles is null");
+        // includedColumnHandles is nullable, this is only needed for subfield pruning.
+        this.includedColumnHandles = includedColumnHandles;
         this.writeValidation = requireNonNull(writeValidation, "writeValidation is null");
         this.writeChecksumBuilder = writeValidation.map(validation -> createWriteChecksumBuilder(includedColumns));
         this.rowGroupStatisticsValidation = writeValidation.map(validation -> validation.createWriteStatisticsBuilder(includedColumns));

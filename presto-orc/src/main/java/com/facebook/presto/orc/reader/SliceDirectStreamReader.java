@@ -533,6 +533,17 @@ public class SliceDirectStreamReader
         return block;
     }
 
+    public String getValue(int i)
+    {
+        if (i >= numValues || i < 0) {
+            return ("out of range");
+        }
+        if (valueIsNull != null && valueIsNull[i]) {
+            return "null";
+        }
+        return new String(bytes, resultOffsets[i], resultOffsets[i + 1] - resultOffsets[i]);
+    }
+
     @Override
     public String toString()
     {
