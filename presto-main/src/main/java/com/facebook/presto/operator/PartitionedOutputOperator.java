@@ -716,7 +716,8 @@ public class PartitionedOutputOperator
                 }
                 Arrays.fill(rowSizes, 0);
                 for (int i = 0; i < variableWidthChannels.size(); i++) {
-                    page.getBlock(variableWidthChannels.get(i).intValue()).addElementSizes(null, rowSizes, intArrayAllocator);
+                    BlockDecoder decoder = blockContents[variableWidthChannels.get(i)];
+                    decoder.getLeafBlock().addElementSizes(decoder.getRowNumberMap(), null, positionCount, rowSizes, intArrayAllocator);
                 }
             }
             for (PartitionData target : partitionData) {

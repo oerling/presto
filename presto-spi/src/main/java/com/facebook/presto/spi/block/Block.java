@@ -315,12 +315,11 @@ public interface Block
         return false;
     }
 
-    /* Adds the combined size of elements offsets[i] ... offsets[i +
-     * 1] to sizes[i]. offsets can be null, in which case the function
-     * works as if offsets were {0, 1, ... positionCount}. This adds
-     * the pairwise corresponding element's size to each element in
-     * sizes[].*/
-    default void addElementSizes(int offsets[], int[] sizes, IntArrayAllocator intArrayAllocator)
+    /* Adds the combined size of elements begins[i] ... ends[i] to
+     * sizes[i]. numRanges is the number of valid elements in the
+     * arrays. If ends is null, begins[i] + 1 will be used instead of
+     * ends[i]. */
+    default void addElementSizes(int[] begins, int[] ends, int numRanges, int[] sizes, IntArrayAllocator intArrayAllocator)
     {
         throw new UnsupportedOperationException(getClass().getName());
     }

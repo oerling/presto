@@ -25,6 +25,7 @@ import static com.facebook.presto.spi.block.BlockUtil.checkValidRegion;
 import static com.facebook.presto.spi.block.BlockUtil.compactArray;
 import static com.facebook.presto.spi.block.BlockUtil.countUsedPositions;
 import static io.airlift.slice.SizeOf.sizeOf;
+import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 import static java.lang.Math.toIntExact;
 
 public class LongArrayBlock
@@ -313,5 +314,12 @@ public class LongArrayBlock
     public boolean isReusable()
     {
         return true;
+    }
+    @Override
+    public void addElementSizes(int[] begins, int[] ends, int numRanges, int[] sizes, IntArrayAllocator intArrayAllocator)
+    {
+        for (int i = 0; i < numRanges; i++) {
+            sizes[i] += ends != null ? (ends[i] - begins[i]) * SIZE_OF_LONG : SIZE_OF_LONG;
+        }
     }
 }

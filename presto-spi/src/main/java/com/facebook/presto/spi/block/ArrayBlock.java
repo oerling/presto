@@ -193,4 +193,18 @@ public class ArrayBlock
                 offsets,
                 loadedValuesBlock);
     }
+
+    @Override
+    public void addElementSizes(int[] begins, int[] ends, int numRanges, int[] sizes, IntArrayAllocator intArrayAllocator)
+    {
+        int[] innerBegins = intArrayAllocator.getIntArray(numRanges);
+        int[] innerEnds = intArrayAllocator.getIntArray(numRanges);
+        for (int i = 0; i < numRanges; i++) {
+            innerBegins[i] = getOffset(begins[i]);
+            innerEnds[i] = ends != null ? getOffset(ends[i]) : getOffset(begins[i] + 1);
+        }
+        getRawElementBlock().addElementSizes(innerBegins, innerEnds, numRanges, sizes, intArrayAllocator);
+        intArrayAllocator.store(innerBegins);
+        intArrayAllocator.store(innerEnds);
+    }
 }
