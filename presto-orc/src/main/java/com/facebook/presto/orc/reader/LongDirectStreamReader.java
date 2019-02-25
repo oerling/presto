@@ -46,7 +46,6 @@ import static java.util.Objects.requireNonNull;
 
 public class LongDirectStreamReader
         extends NullWrappingColumnReader
-        implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(LongDirectStreamReader.class).instanceSize();
 
@@ -64,6 +63,7 @@ public class LongDirectStreamReader
     private LocalMemoryContext systemMemoryContext;
 
     private long[] values;
+    private ResultsProcessor resultsProcessor = new ResultsProcessor();
 
     public LongDirectStreamReader(StreamDescriptor streamDescriptor, LocalMemoryContext systemMemoryContext)
     {
@@ -202,42 +202,20 @@ public class LongDirectStreamReader
             openRowGroup();
         }
         beginScan(presentStream, null);
-        if (outputChannel != -1) {
-            ensureValuesSize();
-        }
-        makeInnerQualifyingSets(0, inputQualifyingSet.getPositionCount());
+        ensureValuesCapacity();
+        makeInnerQualifyingSet();
         QualifyingSet input = hasNulls ? innerQualifyingSet : inputQualifyingSet;
-        QualifyingSet output = outputQualifyingSet;
         // Read dataStream if there are non-null values in the QualifyingSet.
         if (input.getPositionCount() > 0) {
+            resultsProcessor.reset();
             if (filter != null) {
                 int numInput = input.getPositionCount();
-                int[] innerToOuter = !hasNulls ? null : innerQualifyingSet.getInputNumbers();
-                int[] outerRows = !hasNulls ? input.getPositions() : inputQualifyingSet.getPositions();
-                numInnerResults = dataStream.scan(filter,
-                                             input.getPositions(),
-                                             0,
-                                             numInput,
-                                             input.getEnd(),
-                                             outerRows,
-                                             innerToOuter,
-                                             output.getMutablePositions(numInput),
-                                             output.getMutableInputNumbers(numInput),
-                                             values,
-                                             numValues);
+                outputQualifyingSet.reset(numInput);
+                numInnerResults = dataStream.scan(input.getPositions(), 0, numInput, input.getEnd(), resultsProcessor);
+                outputQualifyingSet.setPositionCount(numInnerResults);
             }
             else {
-                numInnerResults = dataStream.scan(null,
-                                             input.getPositions(),
-                                             0,
-                                                  input.getPositionCount(),
-                                             input.getEnd(),
-                                             null,
-                                             null,
-                                             null,
-                                             null,
-                                             values,
-                                             numValues);
+                numInnerResults = dataStream.scan(input.getPositions(), 0, input.getPositionCount(), input.getEnd(), resultsProcessor);
             }
         }
         if (hasNulls) {
@@ -250,6 +228,79 @@ public class LongDirectStreamReader
         endScan(presentStream);
     }
 
+    private final class ResultsProcessor
+            implements LongInputStream.ResultsConsumer
+    {
+        private int[] offsets;
+        private int[] rowNumbers;
+        private int[] inputNumbers;
+        private int[] rowNumbersOut;
+        private int[] inputNumbersOut;
+        private int numResults;
+
+        void reset()
+        {
+            QualifyingSet input = hasNulls ? innerQualifyingSet : inputQualifyingSet;
+            offsets = input.getPositions();
+            numResults = 0;
+            if (filter != null) {
+                rowNumbers = inputQualifyingSet.getPositions();
+                inputNumbers = hasNulls ? innerQualifyingSet.getInputNumbers() : null;
+                rowNumbersOut = outputQualifyingSet.getPositions();
+                inputNumbersOut = outputQualifyingSet.getInputNumbers();
+            }
+            else {
+                rowNumbers = null;
+                inputNumbers = null;
+                rowNumbersOut = null;
+                inputNumbersOut = null;
+            }
+        }
+
+        @Override
+        public boolean consume(int offsetIndex, long value)
+        {
+            if (filter != null && !filter.testLong(value)) {
+                return false;
+            }
+
+            addResult(offsetIndex, value);
+            return true;
+        }
+
+        @Override
+        public boolean consumeRepeated(int offsetIndex, long value, int count)
+        {
+            if (filter != null && !filter.testLong(value)) {
+                return false;
+            }
+
+            for (int i = 0; i < count; i++) {
+                addResult(offsetIndex + i, value);
+            }
+            return true;
+        }
+
+        private void addResult(int offsetIndex, long value)
+        {
+            if (rowNumbersOut != null) {
+                if (inputNumbers == null) {
+                    rowNumbersOut[numResults] = offsets[offsetIndex];
+                    inputNumbersOut[numResults] = offsetIndex;
+                }
+                else {
+                    int outerIdx = inputNumbers[offsetIndex];
+                    rowNumbersOut[numResults] = rowNumbers[outerIdx];
+                    inputNumbersOut[numResults] = outerIdx;
+                }
+            }
+            if (values != null) {
+                values[numResults + numValues] = value;
+            }
+            ++numResults;
+        }
+    }
+
     @Override
     protected void shiftUp(int from, int to)
     {
@@ -257,7 +308,7 @@ public class LongDirectStreamReader
     }
 
     @Override
-        protected void writeNull(int i)
+    protected void writeNull(int i)
     {
         // No action. values[i] is undefined if valueIsNull[i] == true.
     }
@@ -281,21 +332,17 @@ public class LongDirectStreamReader
         return block;
     }
 
-    private void ensureValuesSize()
+    private void ensureValuesCapacity()
     {
         if (outputChannel == -1) {
             return;
         }
-        int numInput = inputQualifyingSet.getPositionCount();
+        int capacity = numValues + inputQualifyingSet.getPositionCount();
         if (values == null) {
-            values = new long[Math.max(numInput, expectNumValues)];
+            values = new long[capacity];
         }
-        else if (numValues + numInput > values.length) {
-            int newSize = (int) ((numValues + numInput) * 1.2);
-            if (valueIsNull != null) {
-                valueIsNull = Arrays.copyOf(valueIsNull, newSize);
-            }
-            values = Arrays.copyOf(values, newSize);
+        else if (values.length < capacity) {
+            values = Arrays.copyOf(values, capacity);
         }
     }
 

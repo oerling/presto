@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.Arrays;
 
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
+import static java.lang.String.format;
 
 abstract class ColumnReader
         implements StreamReader
@@ -43,7 +44,6 @@ abstract class ColumnReader
     Filter filter;
     int columnIndex;
     Type type;
-    int expectNumValues = 10000;
     // First row number in row group that is not processed due to
     // reaching target size. This must occur as a position in
     // inputQualifyingSet. -1 if all inputQualifyingSet is processed.
@@ -184,14 +184,10 @@ abstract class ColumnReader
     {
         numResults = 0;
         truncationRow = -1;
-        QualifyingSet input = inputQualifyingSet;
-        QualifyingSet output = outputQualifyingSet;
-        if (filter != null && output == null) {
+        if (filter != null && outputQualifyingSet == null) {
             outputQualifyingSet = new QualifyingSet();
         }
-        int numInput = input.getPositionCount();
-        int end = input.getEnd();
-        int rowsInRange = end - posInRowGroup;
+        int rowsInRange = inputQualifyingSet.getEnd() - posInRowGroup;
         int neededLengths = 0;
         if (presentStream == null) {
             neededLengths = rowsInRange;
@@ -218,15 +214,15 @@ abstract class ColumnReader
         if (lengthStream == null || neededLengths <= numLengths) {
             return;
         }
-        neededLengths -= numLengths;
+
         if (lengths == null) {
-            lengths = new int[neededLengths + numLengths];
+            lengths = new int[neededLengths];
         }
-        else if (lengths.length < numLengths + neededLengths) {
-            lengths = Arrays.copyOf(lengths, numLengths + neededLengths + 100);
+        else if (lengths.length < neededLengths) {
+            lengths = Arrays.copyOf(lengths, neededLengths + 100);
         }
-        lengthStream.nextIntVector(neededLengths, lengths, numLengths);
-        numLengths += neededLengths;
+        lengthStream.nextIntVector(neededLengths - numLengths, lengths, numLengths);
+        numLengths = neededLengths;
     }
 
     protected void endScan(BooleanInputStream presentStream)
@@ -235,8 +231,7 @@ abstract class ColumnReader
         // truncationRow. posInRowGroup is where the calling scan()
         // started.
         int initialPosInRowGroup = posInRowGroup;
-        int end = inputQualifyingSet.getEnd();
-        posInRowGroup = truncationRow != -1 ? truncationRow : end;
+        posInRowGroup = truncationRow != -1 ? truncationRow : inputQualifyingSet.getEnd();
         if (presentStream != null) {
             int numAdvanced = posInRowGroup - initialPosInRowGroup;
             if (numAdvanced < numPresent) {
@@ -253,7 +248,6 @@ abstract class ColumnReader
         }
         if (outputQualifyingSet != null) {
             outputQualifyingSet.setEnd(posInRowGroup);
-            outputQualifyingSet.setPositionCount(numResults);
         }
         if (outputChannel != -1) {
             numValues += numResults;
@@ -288,7 +282,7 @@ abstract class ColumnReader
     protected void checkEnoughValues(int numFirstRows)
     {
         if (numValues < numFirstRows) {
-            throw new IllegalArgumentException("Reader does not have enough rows");
+            throw new IllegalArgumentException(format("Reader does not have enough rows: requested %s, available %s", numFirstRows, numValues));
         }
     }
 }

@@ -37,8 +37,6 @@ public class QualifyingSet
 
     static volatile int[] wholeRowGroup;
     static volatile int[] allZeros;
-    private int[] ownedPositions;
-    private int[] ownedInputNumbers;
     private QualifyingSet parent;
     private QualifyingSet firstOfLevel;
     // True if the output of the scan whose input this is should be
@@ -58,45 +56,54 @@ public class QualifyingSet
         }
     }
 
-    public void setRange(int begin, int end)
+    private int[] ensureAllZeroesCapacity(int capacity)
+    {
+        int[] zeros = allZeros;
+        if (zeros.length >= capacity) {
+            return zeros;
+        }
+
+        int[] newZeros = new int[capacity];
+        allZeros = newZeros;
+        return newZeros;
+    }
+
+    private int[] ensureWholeRowGroupCapacity(int capacity)
+    {
+        int[] rowGroup = wholeRowGroup;
+        if (rowGroup.length >= capacity) {
+            return rowGroup;
+        }
+
+        // Thread safe.  If many concurrently create a new wholeRowGroup, many are created but all but one become garbage and everybody has a right size array.
+        int[] newWholeRowGroup = new int[capacity];
+        for (int i = 0; i < capacity; i++) {
+            newWholeRowGroup[i] = i;
+        }
+        wholeRowGroup = newWholeRowGroup;
+        return newWholeRowGroup;
+    }
+
+    public void setRange(int end)
     {
         this.end = end;
-        int[] zeros = allZeros;
-        if (zeros.length < end - begin) {
-            int[] newZeros = new int[end - begin];
-            Arrays.fill(newZeros, 0);
-            allZeros = newZeros;
-            inputNumbers = newZeros;
+        int[] wholeRowGroup = ensureWholeRowGroupCapacity(end);
+        if (positions == null || positions.length < end) {
+            positions = Arrays.copyOf(wholeRowGroup, end);
         }
         else {
-            inputNumbers = zeros;
+            System.arraycopy(wholeRowGroup, 0, positions, 0, end);
         }
-        if (begin == 0) {
-            int[] rowGroup = wholeRowGroup;
-            if (rowGroup.length >= end) {
-                positions = rowGroup;
-            }
-            else {
-                // Thread safe.  If many concurrently create a new wholeRowGroup, many are created but all but one become garbage and everybody has a right size array.
-                int[] newWholeRowGroup = new int[end];
-                for (int i = 0; i < end; i++) {
-                    newWholeRowGroup[i] = i;
-                }
-                positions = newWholeRowGroup;
-                wholeRowGroup = newWholeRowGroup;
-            }
-            positionCount = end;
-        }
-        else {
-            if (ownedPositions == null || ownedPositions.length < end - begin) {
-                ownedPositions = new int[(int) ((end - begin) * 1.2)];
-            }
-            positions = ownedPositions;
 
-            for (int i = begin; i < end; i++) {
-                positions[i - begin] = i;
-            }
+        int[] allZeroes = ensureAllZeroesCapacity(end);
+        if (inputNumbers == null || inputNumbers.length < end) {
+            inputNumbers = Arrays.copyOf(allZeroes, end);
         }
+        else {
+            System.arraycopy(allZeroes, 0, inputNumbers, 0, end);
+        }
+
+        positionCount = end;
     }
 
     public boolean isEmpty()
@@ -114,54 +121,66 @@ public class QualifyingSet
         return inputNumbers;
     }
 
-    public int[] getMutablePositions(int minSize)
+    public void reset(int capacity)
     {
-        if (positions == null || ownedPositions == null || ownedPositions.length < minSize) {
-            minSize = (int) (minSize * 1.2);
-            if (positions != null) {
-                ownedPositions = Arrays.copyOf(positions, minSize);
-            }
-            else {
-                ownedPositions = new int[minSize];
-            }
-            positions = ownedPositions;
-        }
-        else {
-            System.arraycopy(positions, 0, ownedPositions, 0, positionCount);
-            positions = ownedPositions;
-        }
-        return positions;
+        ensureCapacity(capacity);
+        positionCount = 0;
     }
 
+    public void ensureCapacity(int capacity)
+    {
+        if (positions == null) {
+            positions = new int[capacity];
+        }
+        else if (positions.length < capacity) {
+            positions = Arrays.copyOf(positions, capacity);
+        }
+
+        if (inputNumbers == null) {
+            inputNumbers = new int[capacity];
+        }
+        else if (inputNumbers.length < capacity) {
+            inputNumbers = Arrays.copyOf(inputNumbers, capacity);
+        }
+    }
+
+    public void append(int position, int inputIndex)
+    {
+        positions[positionCount] = position;
+        inputNumbers[positionCount] = inputIndex;
+        positionCount++;
+    }
+
+    public void insert(int[] newPositions, int[] newInputIndexes, int newCount)
+    {
+        int originalIndex = positionCount - 1;
+        int newIndex = newCount - 1;
+
+        positionCount += newCount;
+        ensureCapacity(positionCount);
+
+        for (int i = positionCount - 1; i >= 0; i--) {
+            if (newIndex == -1 || (originalIndex != -1 && positions[originalIndex] > newPositions[newIndex])) {
+                positions[i] = positions[originalIndex];
+                inputNumbers[i] = inputNumbers[originalIndex];
+                originalIndex--;
+            }
+            else {
+                positions[i] = newPositions[newIndex];
+                inputNumbers[i] = newInputIndexes[newIndex];
+                newIndex--;
+            }
+        }
+    }
+
+    // Use ensureCapacity + append
+    @Deprecated
     public int[] getMutableInputNumbers(int minSize)
     {
-        if (inputNumbers == null || ownedInputNumbers == null || ownedInputNumbers.length < minSize) {
-            minSize = (int) (minSize * 1.2);
-            if (inputNumbers != null) {
-                ownedInputNumbers = Arrays.copyOf(inputNumbers, minSize);
-            }
-            else {
-                ownedInputNumbers = new int[minSize];
-            }
-            inputNumbers = ownedInputNumbers;
-        }
-        else {
-            System.arraycopy(inputNumbers, 0, ownedInputNumbers, 0, positionCount);
-            inputNumbers = ownedInputNumbers;
-        }
+        ensureCapacity(minSize);
         return inputNumbers;
     }
-    /*
-    public int getBegin()
-    {
-        return begin;
-    }
 
-    public void setBegin(int begin)
-    {
-        this.begin = begin;
-    }
-    */
     public int getEnd()
     {
         if (truncationPosition != -1) {
@@ -352,8 +371,7 @@ public class QualifyingSet
             }
             return;
         }
-        positions = getMutablePositions(positionCount);
-        inputNumbers = getMutableInputNumbers(positionCount);
+        ensureCapacity(positionCount);
         int lowestSurvivingInput = translateResultToParentRows ? 0 : inputNumbers[surviving];
         for (int i = surviving; i < positionCount; i++) {
             positions[i - surviving] = positions[i];
@@ -370,29 +388,15 @@ public class QualifyingSet
         positionCount = other.positionCount;
         end = other.end;
         truncationPosition = other.truncationPosition;
-        if (ownedPositions != null && ownedPositions.length >= other.positionCount) {
-            positions = ownedPositions;
-            System.arraycopy(other.positions, 0, positions, 0, positionCount);
-        }
-        else {
-            ownedPositions = Arrays.copyOf(other.positions, positionCount);
-            positions = ownedPositions;
-        }
-        if (ownedInputNumbers != null && ownedInputNumbers.length >= positionCount) {
-            inputNumbers = ownedInputNumbers;
-            System.arraycopy(other.inputNumbers, 0, inputNumbers, 0, positionCount);
-        }
-        else {
-            inputNumbers = Arrays.copyOf(other.inputNumbers, positionCount);
-            ownedInputNumbers = inputNumbers;
-        }
+        ensureCapacity(positionCount);
+        System.arraycopy(other.positions, 0, positions, 0, positionCount);
+        System.arraycopy(other.inputNumbers, 0, inputNumbers, 0, positionCount);
     }
 
     public void compactPositionsAndErrors(int[] surviving, int numSurviving)
     {
-        int[] rows = getMutablePositions(0);
         for (int i = 0; i < numSurviving; i++) {
-            rows[i] = rows[surviving[i]];
+            positions[i] = positions[surviving[i]];
         }
         positionCount = numSurviving;
         if (errorSet != null && !errorSet.isEmpty()) {

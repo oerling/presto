@@ -55,7 +55,7 @@ import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.util.Objects.requireNonNull;
 
 public class StructStreamReader
-        extends NullWrappingColumnReader implements StreamReader
+        extends NullWrappingColumnReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(StructStreamReader.class).instanceSize();
 
@@ -462,14 +462,11 @@ public class StructStreamReader
         }
         check();
         beginScan(presentStream, null);
-        QualifyingSet input = inputQualifyingSet;
-        QualifyingSet output = outputQualifyingSet;
         int initialFieldResults = reader.getNumResults();
         int firstRow = inputQualifyingSet.getPositions()[0];
         if (reader.hasUnfetchedRows()) {
             // posInRowGroup is the first unprocessed enclosing level
             // row, by definition part of the input qualifying set.
-            firstRow = posInRowGroup;
             setInnerTruncation();
             int originalTarget = innerQualifyingSet.getEnd();
             reader.advance();
@@ -488,8 +485,7 @@ public class StructStreamReader
                 inputCopy = new QualifyingSet();
             }
             inputCopy.copyFrom(inputQualifyingSet);
-            int numInput = input.getPositionCount();
-            makeInnerQualifyingSets(0, numInput);
+            makeInnerQualifyingSet();
             if (hasNulls) {
                 innerQualifyingSet.setParent(inputQualifyingSet);
                 innerQualifyingSet.setTranslateResultToParentRows(true);

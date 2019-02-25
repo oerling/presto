@@ -49,6 +49,7 @@ import static com.facebook.presto.spi.type.Chars.isCharType;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static io.airlift.slice.SizeOf.SIZE_OF_INT;
 import static io.airlift.slice.Slices.EMPTY_SLICE;
 import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static java.lang.Math.toIntExact;
@@ -57,7 +58,6 @@ import static java.util.Objects.requireNonNull;
 
 public class SliceDirectStreamReader
         extends ColumnReader
-        implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(SliceDirectStreamReader.class).instanceSize();
     private static final int ONE_GIGABYTE = toIntExact(new DataSize(1, GIGABYTE).toBytes());
@@ -81,9 +81,6 @@ public class SliceDirectStreamReader
     private int[] resultOffsets;
     // Temp space for extracting values to filter when a value straddles buffers.
     private byte[] tempBytes;
-    // Result arrays from outputQualifyingSet.
-    int[] outputRows;
-    int[] resultInputNumbers;
     long totalBytes;
     long totalRows;
 
@@ -316,7 +313,7 @@ public class SliceDirectStreamReader
         if (numValues == 0) {
             return 0;
         }
-        return 4 * numValues + resultOffsets[numValues];
+        return SIZE_OF_INT * numValues + resultOffsets[numValues];
     }
 
     @Override
@@ -347,12 +344,11 @@ public class SliceDirectStreamReader
         numResults = 0;
         QualifyingSet input = inputQualifyingSet;
         QualifyingSet output = outputQualifyingSet;
-        int numInput = input.getPositionCount();
         int end = input.getEnd();
         int rowsInRange = end - posInRowGroup;
-        outputRows = filter != null ? output.getMutablePositions(rowsInRange) : null;
-        resultInputNumbers = filter != null ? output.getMutableInputNumbers(rowsInRange) : null;
-        int toOffset = 0;
+        if (filter != null) {
+            output.reset(rowsInRange);
+        }
         int[] inputPositions = input.getPositions();
         lengthIdx = 0;
         int nextActive = inputPositions[0];
@@ -367,7 +363,10 @@ public class SliceDirectStreamReader
                 }
                 if (presentStream != null && !present[i]) {
                     if (filter == null || filter.testNull()) {
-                        addNullResult(i + posInRowGroup, activeIdx);
+                        if (filter != null) {
+                            output.append(i + posInRowGroup, activeIdx);
+                        }
+                        addNullResult();
                     }
                 }
                 else {
@@ -394,8 +393,7 @@ public class SliceDirectStreamReader
                             toSkip += length;
                         }
                         if (filter.testBytes(buffer, pos, length)) {
-                            outputRows[numResults] = i + posInRowGroup;
-                            resultInputNumbers[numResults] = activeIdx;
+                            output.append(i + posInRowGroup, activeIdx);
                             if (outputChannel != -1) {
                                 addResultBytes(buffer, pos, length);
                                 bytesToGo -= length + 4;
@@ -447,7 +445,7 @@ public class SliceDirectStreamReader
         endScan(presentStream);
     }
 
-    void addNullResult(int row, int activeIdx)
+    void addNullResult()
     {
         if (outputChannel != -1) {
             if (valueIsNull == null) {
@@ -456,10 +454,6 @@ public class SliceDirectStreamReader
             ensureResultRows();
             valueIsNull[numResults + numValues] = true;
             resultOffsets[numValues + numResults + 1] = resultOffsets[numValues + numResults];
-        }
-        if (filter != null) {
-            outputRows[numResults] = row;
-            resultInputNumbers[numResults] = activeIdx;
         }
         numResults++;
     }
@@ -482,10 +476,12 @@ public class SliceDirectStreamReader
         ensureResultBytes(length);
         ensureResultRows();
         int endOffset = resultOffsets[numValues + numResults];
-        // This is an unaccountable perversion and a violation of
-        // every principle of consistent design: The argument of next()called
-        // length is in fact an end offset into the buffer.
-        dataStream.next(bytes, endOffset, endOffset + length);
+        if (length > 0) {
+            // This is an unaccountable perversion and a violation of
+            // every principle of consistent design: The argument of next()called
+            // length is in fact an end offset into the buffer.
+            dataStream.next(bytes, endOffset, endOffset + length);
+        }
         resultOffsets[numValues + numResults + 1] = endOffset + length;
         if (valueIsNull != null) {
             valueIsNull[numValues + numResults] = false;
