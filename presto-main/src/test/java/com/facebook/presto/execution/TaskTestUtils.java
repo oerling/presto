@@ -13,15 +13,13 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.OutputBuffers;
-import com.facebook.presto.ScheduledSplit;
-import com.facebook.presto.TaskSource;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.cost.StatsAndCosts;
 import com.facebook.presto.event.SplitMonitor;
 import com.facebook.presto.eventlistener.EventListenerManager;
 import com.facebook.presto.execution.TestSqlTaskManager.MockExchangeClientSupplier;
+import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.scheduler.LegacyNetworkTopology;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
@@ -32,7 +30,7 @@ import com.facebook.presto.metadata.Split;
 import com.facebook.presto.metadata.TableHandle;
 import com.facebook.presto.operator.LookupJoinOperators;
 import com.facebook.presto.operator.PagesIndex;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.type.TestingTypeManager;
@@ -104,8 +102,9 @@ public final class TaskTestUtils
             ImmutableList.of(TABLE_SCAN_NODE_ID),
             new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), ImmutableList.of(SYMBOL))
                     .withBucketToPartition(Optional.of(new int[1])),
-            StageExecutionStrategy.ungroupedExecution(),
-            StatsAndCosts.empty());
+            StageExecutionDescriptor.ungroupedExecution(),
+            StatsAndCosts.empty(),
+            Optional.empty());
 
     public static LocalExecutionPlanner createTestingPlanner()
     {

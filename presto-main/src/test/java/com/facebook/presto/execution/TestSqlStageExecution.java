@@ -19,7 +19,7 @@ import com.facebook.presto.execution.TestSqlTaskManager.MockLocationFactory;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
 import com.facebook.presto.failureDetector.NoOpFailureDetector;
 import com.facebook.presto.metadata.PrestoNode;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.type.Type;
@@ -47,10 +47,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
-import static com.facebook.presto.OutputBuffers.BufferType.ARBITRARY;
-import static com.facebook.presto.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.execution.SqlStageExecution.createSqlStageExecution;
+import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.ARBITRARY;
+import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SOURCE_DISTRIBUTION;
@@ -177,7 +177,8 @@ public class TestSqlStageExecution
                 SOURCE_DISTRIBUTION,
                 ImmutableList.of(planNode.getId()),
                 new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), planNode.getOutputSymbols()),
-                StageExecutionStrategy.ungroupedExecution(),
-                StatsAndCosts.empty());
+                StageExecutionDescriptor.ungroupedExecution(),
+                StatsAndCosts.empty(),
+                Optional.empty());
     }
 }

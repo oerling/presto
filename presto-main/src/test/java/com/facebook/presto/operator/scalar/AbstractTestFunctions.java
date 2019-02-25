@@ -41,7 +41,7 @@ import java.util.Map;
 
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.metadata.FunctionExtractor.extractFunctions;
-import static com.facebook.presto.metadata.FunctionRegistry.mangleOperatorName;
+import static com.facebook.presto.metadata.OperatorSignatureUtils.mangleOperatorName;
 import static com.facebook.presto.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
@@ -187,7 +187,7 @@ public abstract class AbstractTestFunctions
     protected void registerScalarFunction(SqlScalarFunction sqlScalarFunction)
     {
         Metadata metadata = functionAssertions.getMetadata();
-        metadata.getFunctionRegistry().addFunctions(ImmutableList.of(sqlScalarFunction));
+        metadata.getFunctionManager().addFunctions(ImmutableList.of(sqlScalarFunction));
     }
 
     protected void registerScalar(Class<?> clazz)
@@ -196,7 +196,7 @@ public abstract class AbstractTestFunctions
         List<SqlFunction> functions = new FunctionListBuilder()
                 .scalars(clazz)
                 .getFunctions();
-        metadata.getFunctionRegistry().addFunctions(functions);
+        metadata.getFunctionManager().addFunctions(functions);
     }
 
     protected void registerParametricScalar(Class<?> clazz)
@@ -205,7 +205,7 @@ public abstract class AbstractTestFunctions
         List<SqlFunction> functions = new FunctionListBuilder()
                 .scalar(clazz)
                 .getFunctions();
-        metadata.getFunctionRegistry().addFunctions(functions);
+        metadata.getFunctionManager().addFunctions(functions);
     }
 
     protected void registerFunctions(Plugin plugin)

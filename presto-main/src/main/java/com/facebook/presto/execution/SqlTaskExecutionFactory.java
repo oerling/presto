@@ -14,7 +14,6 @@
 package com.facebook.presto.execution;
 
 import com.facebook.presto.Session;
-import com.facebook.presto.TaskSource;
 import com.facebook.presto.event.SplitMonitor;
 import com.facebook.presto.execution.buffer.OutputBuffer;
 import com.facebook.presto.execution.executor.TaskExecutor;
@@ -78,7 +77,7 @@ public class SqlTaskExecutionFactory
                         fragment.getRoot(),
                         TypeProvider.copyOf(fragment.getSymbols()),
                         fragment.getPartitioningScheme(),
-                        fragment.getStageExecutionStrategy(),
+                        fragment.getStageExecutionDescriptor(),
                         fragment.getPartitionedSources(),
                         outputBuffer);
             }

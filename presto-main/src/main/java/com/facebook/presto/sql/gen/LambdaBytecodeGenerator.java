@@ -13,7 +13,7 @@
  */
 package com.facebook.presto.sql.gen;
 
-import com.facebook.presto.metadata.FunctionRegistry;
+import com.facebook.presto.metadata.FunctionManager;
 import com.facebook.presto.operator.aggregation.AccumulatorCompiler;
 import com.facebook.presto.operator.aggregation.LambdaProvider;
 import com.facebook.presto.spi.ConnectorSession;
@@ -48,6 +48,7 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.spi.StandardErrorCode.COMPILER_ERROR;
@@ -82,7 +83,7 @@ public class LambdaBytecodeGenerator
             CallSiteBinder callSiteBinder,
             CachedInstanceBinder cachedInstanceBinder,
             RowExpression expression,
-            FunctionRegistry functionRegistry)
+            FunctionManager functionManager)
     {
         Set<LambdaDefinitionExpression> lambdaExpressions = ImmutableSet.copyOf(extractLambdaExpressions(expression));
         ImmutableMap.Builder<LambdaDefinitionExpression, CompiledLambda> compiledLambdaMap = ImmutableMap.builder();
@@ -96,7 +97,7 @@ public class LambdaBytecodeGenerator
                     compiledLambdaMap.build(),
                     callSiteBinder,
                     cachedInstanceBinder,
-                    functionRegistry);
+                    functionManager);
             compiledLambdaMap.put(lambdaExpression, compiledLambda);
             counter++;
         }
@@ -114,7 +115,7 @@ public class LambdaBytecodeGenerator
             Map<LambdaDefinitionExpression, CompiledLambda> compiledLambdaMap,
             CallSiteBinder callSiteBinder,
             CachedInstanceBinder cachedInstanceBinder,
-            FunctionRegistry functionRegistry)
+            FunctionManager functionManager)
     {
         ImmutableList.Builder<Parameter> parameters = ImmutableList.builder();
         ImmutableMap.Builder<String, ParameterAndType> parameterMapBuilder = ImmutableMap.builder();
@@ -132,7 +133,7 @@ public class LambdaBytecodeGenerator
                 callSiteBinder,
                 cachedInstanceBinder,
                 variableReferenceCompiler(parameterMapBuilder.build()),
-                functionRegistry,
+                functionManager,
                 compiledLambdaMap);
 
         return defineLambdaMethod(
@@ -156,7 +157,7 @@ public class LambdaBytecodeGenerator
 
         Scope scope = method.getScope();
         Variable wasNull = scope.declareVariable(boolean.class, "wasNull");
-        BytecodeNode compiledBody = innerExpressionCompiler.compile(lambda.getBody(), scope);
+        BytecodeNode compiledBody = innerExpressionCompiler.compile(lambda.getBody(), scope, Optional.empty());
         method.getBody()
                 .putVariable(wasNull, false)
                 .append(compiledBody)
@@ -197,7 +198,7 @@ public class LambdaBytecodeGenerator
         for (RowExpression captureExpression : captureExpressions) {
             Class<?> valueType = Primitives.wrap(captureExpression.getType().getJavaType());
             Variable valueVariable = scope.createTempVariable(valueType);
-            block.append(context.generate(captureExpression));
+            block.append(context.generate(captureExpression, Optional.empty()));
             block.append(boxPrimitiveIfNecessary(scope, valueType));
             block.putVariable(valueVariable);
             block.append(wasNull.set(constantFalse()));
@@ -229,7 +230,7 @@ public class LambdaBytecodeGenerator
         return block;
     }
 
-    public static Class<? extends LambdaProvider> compileLambdaProvider(LambdaDefinitionExpression lambdaExpression, FunctionRegistry functionRegistry, Class lambdaInterface)
+    public static Class<? extends LambdaProvider> compileLambdaProvider(LambdaDefinitionExpression lambdaExpression, FunctionManager functionManager, Class lambdaInterface)
     {
         ClassDefinition lambdaProviderClassDefinition = new ClassDefinition(
                 a(PUBLIC, Access.FINAL),
@@ -247,7 +248,7 @@ public class LambdaBytecodeGenerator
                 callSiteBinder,
                 cachedInstanceBinder,
                 lambdaExpression,
-                functionRegistry);
+                functionManager);
 
         MethodDefinition method = lambdaProviderClassDefinition.declareMethod(
                 a(PUBLIC),
@@ -264,7 +265,7 @@ public class LambdaBytecodeGenerator
                 callSiteBinder,
                 cachedInstanceBinder,
                 variableReferenceCompiler(ImmutableMap.of()),
-                functionRegistry,
+                functionManager,
                 compiledLambdaMap);
 
         BytecodeGeneratorContext generatorContext = new BytecodeGeneratorContext(
@@ -272,7 +273,7 @@ public class LambdaBytecodeGenerator
                 scope,
                 callSiteBinder,
                 cachedInstanceBinder,
-                functionRegistry);
+                functionManager);
 
         body.append(
                 generateLambda(

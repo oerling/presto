@@ -168,6 +168,11 @@ public class PlanBuilder
         return values(id, 0, columns);
     }
 
+    public ValuesNode values(int rows, Symbol... columns)
+    {
+        return values(idAllocator.getNextId(), rows, columns);
+    }
+
     public ValuesNode values(PlanNodeId id, int rows, Symbol... columns)
     {
         return values(
@@ -270,7 +275,7 @@ public class PlanBuilder
         {
             checkArgument(expression instanceof FunctionCall);
             FunctionCall aggregation = (FunctionCall) expression;
-            Signature signature = metadata.getFunctionRegistry().resolveFunction(aggregation.getName(), TypeSignatureProvider.fromTypes(inputTypes));
+            Signature signature = metadata.getFunctionManager().resolveFunction(aggregation.getName(), TypeSignatureProvider.fromTypes(inputTypes));
             return addAggregation(output, new Aggregation(aggregation, signature, mask));
         }
 

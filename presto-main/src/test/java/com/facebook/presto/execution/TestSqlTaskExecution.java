@@ -13,20 +13,18 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.OutputBuffers.OutputBufferId;
-import com.facebook.presto.ScheduledSplit;
-import com.facebook.presto.TaskSource;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.execution.buffer.BufferResult;
 import com.facebook.presto.execution.buffer.BufferState;
 import com.facebook.presto.execution.buffer.OutputBuffer;
+import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
 import com.facebook.presto.execution.buffer.PartitionedOutputBuffer;
 import com.facebook.presto.execution.buffer.SerializedPage;
 import com.facebook.presto.execution.executor.TaskExecutor;
-import com.facebook.presto.memory.DefaultQueryContext;
 import com.facebook.presto.memory.MemoryPool;
+import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.memory.context.SimpleLocalMemoryContext;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.operator.DriverContext;
@@ -37,7 +35,7 @@ import com.facebook.presto.operator.OperatorFactory;
 import com.facebook.presto.operator.PipelineExecutionStrategy;
 import com.facebook.presto.operator.SourceOperator;
 import com.facebook.presto.operator.SourceOperatorFactory;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.operator.TaskContext;
 import com.facebook.presto.operator.TaskOutputOperator.TaskOutputOperatorFactory;
 import com.facebook.presto.operator.ValuesOperator.ValuesOperatorFactory;
@@ -84,8 +82,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static com.facebook.presto.OutputBuffers.BufferType.PARTITIONED;
-import static com.facebook.presto.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.block.BlockAssertions.createStringSequenceBlock;
 import static com.facebook.presto.block.BlockAssertions.createStringsBlock;
@@ -93,6 +89,8 @@ import static com.facebook.presto.execution.TaskTestUtils.TABLE_SCAN_NODE_ID;
 import static com.facebook.presto.execution.TaskTestUtils.createTestSplitMonitor;
 import static com.facebook.presto.execution.buffer.BufferState.OPEN;
 import static com.facebook.presto.execution.buffer.BufferState.TERMINAL_BUFFER_STATES;
+import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.PARTITIONED;
+import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
 import static com.facebook.presto.operator.PipelineExecutionStrategy.GROUPED_EXECUTION;
 import static com.facebook.presto.operator.PipelineExecutionStrategy.UNGROUPED_EXECUTION;
@@ -168,7 +166,7 @@ public class TestSqlTaskExecution
                             OptionalInt.empty(),
                             executionStrategy)),
                     ImmutableList.of(TABLE_SCAN_NODE_ID),
-                    executionStrategy == GROUPED_EXECUTION ? StageExecutionStrategy.groupedExecution(ImmutableList.of(TABLE_SCAN_NODE_ID)) : StageExecutionStrategy.ungroupedExecution());
+                    executionStrategy == GROUPED_EXECUTION ? StageExecutionDescriptor.fixedLifespanScheduleGroupedExecution(ImmutableList.of(TABLE_SCAN_NODE_ID)) : StageExecutionDescriptor.ungroupedExecution());
             TaskContext taskContext = newTestingTaskContext(taskNotificationExecutor, driverYieldExecutor, taskStateMachine);
             SqlTaskExecution sqlTaskExecution = SqlTaskExecution.createSqlTaskExecution(
                     taskStateMachine,
@@ -419,7 +417,7 @@ public class TestSqlTaskExecution
                                     OptionalInt.empty(),
                                     UNGROUPED_EXECUTION)),
                     ImmutableList.of(scan2NodeId, scan0NodeId),
-                    executionStrategy == GROUPED_EXECUTION ? StageExecutionStrategy.groupedExecution(ImmutableList.of(scan0NodeId, scan2NodeId)) : StageExecutionStrategy.ungroupedExecution());
+                    executionStrategy == GROUPED_EXECUTION ? StageExecutionDescriptor.fixedLifespanScheduleGroupedExecution(ImmutableList.of(scan0NodeId, scan2NodeId)) : StageExecutionDescriptor.ungroupedExecution());
             TaskContext taskContext = newTestingTaskContext(taskNotificationExecutor, driverYieldExecutor, taskStateMachine);
             SqlTaskExecution sqlTaskExecution = SqlTaskExecution.createSqlTaskExecution(
                     taskStateMachine,
@@ -597,7 +595,7 @@ public class TestSqlTaskExecution
 
     private TaskContext newTestingTaskContext(ScheduledExecutorService taskNotificationExecutor, ScheduledExecutorService driverYieldExecutor, TaskStateMachine taskStateMachine)
     {
-        DefaultQueryContext queryContext = new DefaultQueryContext(
+        QueryContext queryContext = new QueryContext(
                 new QueryId("queryid"),
                 new DataSize(1, MEGABYTE),
                 new DataSize(2, MEGABYTE),
