@@ -17,9 +17,9 @@ public class ByteArrayPoolCacheAdapter
     implements CacheAdapter
 {
 
-    private ByteArrayPool pool;
+    private ArrayPool<byte[]> pool;
 
-    ByteArrayPoolCacheAdapter(ByteArrayPool pool)
+    ByteArrayPoolCacheAdapter(ArrayPool<byte[]> pool)
     {
         this.pool = pool;
     }
@@ -28,9 +28,9 @@ public class ByteArrayPoolCacheAdapter
         implements CacheEntry
     {
         private final byte[] data;
-        private final ByteArrayPool pool;
+        private final ArrayPool<byte[]> pool;
 
-        public ByteArrayCacheEntry(ByteArrayPool pool, byte[] data)
+        public ByteArrayCacheEntry(ArrayPool<byte[]> pool, byte[] data)
         {
             this.pool = pool;
             this.data = data;
@@ -74,6 +74,6 @@ public class ByteArrayPoolCacheAdapter
 
     public ByteArrayCacheEntry get(long position, int size)
     {
-        return new ByteArrayCacheEntry(pool, pool.getBytes(size));
+        return new ByteArrayCacheEntry(pool, pool.alloc(size));
     }
     }

@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.spi.block;
 
+import com.facebook.presto.spi.memory.ArrayPool;
+import com.facebook.presto.spi.memory.Caches;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import org.openjdk.jol.info.ClassLayout;
@@ -46,7 +48,8 @@ public class DictionaryBlock
     private volatile long logicalSizeInBytes = -1;
     private volatile int uniqueIds = -1;
     private final DictionaryId dictionarySourceId;
-
+    private static ArrayPool<boolean[]> booleanArrayPool = Caches.getBooleanArrayPool();
+    
     public DictionaryBlock(Block dictionary, int[] ids)
     {
         this(requireNonNull(ids, "ids is null").length, dictionary, ids);
@@ -201,6 +204,8 @@ public class DictionaryBlock
         /* We return the size this takes passing through a partitioned output.*/
 
         if (sizeInBytes < 0) {
+            calculateCompactSize();
+            /*
             sizeInBytes = 0;
             for (int i = 0; i < positionCount; i++) {
                 int position = getId(i);
@@ -208,6 +213,7 @@ public class DictionaryBlock
                     sizeInBytes += dictionary.getRegionSizeInBytes(position, 1);
                 }
             }
+            */
         }
         return sizeInBytes;
     }
@@ -215,7 +221,7 @@ public class DictionaryBlock
     private void calculateCompactSize()
     {
         int uniqueIds = 0;
-        boolean[] used = new boolean[dictionary.getPositionCount()];
+        boolean[] used = booleanArrayPool.allocInitialized(dictionary.getPositionCount());
         for (int i = 0; i < positionCount; i++) {
             int position = getId(i);
             if (!used[position]) {
@@ -225,6 +231,7 @@ public class DictionaryBlock
         }
         this.sizeInBytes = dictionary.getPositionsSizeInBytes(used) + (Integer.BYTES * (long) positionCount);
         this.uniqueIds = uniqueIds;
+        booleanArrayPool.release(used);
     }
 
     @Override

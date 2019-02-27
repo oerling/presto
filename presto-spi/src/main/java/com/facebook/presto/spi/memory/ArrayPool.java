@@ -16,18 +16,30 @@ package com.facebook.presto.spi.memory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
-public class ByteArrayPool
+public class ArrayPool<ArrayType>
 {
+    public static abstract class Allocator<ArrayType>
+    {
+        abstract ArrayType alloc(int size);
+        abstract void init(ArrayType array);
+        abstract int getLength(ArrayType array);
+        void clear(ArrayType array)
+        {
+        }
+    }
+
     private int[] sizes;
-    private ArrayList<byte[]>[] contents;
+    private ArrayList<ArrayType>[] contents;
     private LongArrayList[] times;
     private long[] hits;
     private long[] misses;
     private AtomicLong totalSize = new AtomicLong();
     private long capacity;
+    Allocator<ArrayType> allocator;
 
-    public ByteArrayPool(int smallestSize, int largestSize, long capacity)
+    public ArrayPool(int smallestSize, int largestSize, long capacity, Allocator<ArrayType> allocator)
     {
         int size = smallestSize;
         ArrayList<Integer> sizeList = new ArrayList();
@@ -49,16 +61,27 @@ public class ByteArrayPool
             contents[i] = new ArrayList();
             times[i] = new LongArrayList();
         }
+        this.allocator = allocator;
     }
 
-    public byte[] getBytes(int size)
+    public ArrayType alloc(int size)
+    {
+        return alloc(size, false);
+    }
+
+    public ArrayType allocInitialized(int size)
+    {
+        return alloc(size, true);
+    }
+
+    public ArrayType alloc(int size, boolean init)
     {
         int idx = getSizeIndex(size);
         if (idx >= sizes.length) {
-            return new byte[size];
+            return allocator.alloc(size);
         }
-        ArrayList<byte[]> list = contents[idx];
-        byte[] data = null;
+        ArrayList<ArrayType> list = contents[idx];
+        ArrayType data = null;
         synchronized(list) {
             int count = list.size();
             if (count > 0) {
@@ -70,28 +93,31 @@ public class ByteArrayPool
         if (data != null) {
             totalSize.getAndAdd(-sizes[idx]);
             hits[idx]++;
+            if (init) {
+                allocator.init(data);
+            }
             return data;
         }
         misses[idx]++;
-        return new byte[sizes[idx]];
+        return allocator.alloc(sizes[idx]);
     }
 
-    public void release(byte[] data)
+    public void release(ArrayType data)
     {
-        int idx = getSizeIndex(data.length);
+        int idx = getSizeIndex(allocator.getLength(data));
         if (idx < sizes.length) {
             int addedSize = sizes[idx];
             long now = System.nanoTime();
-            ArrayList<byte[]> list = contents[idx];
+            ArrayList<ArrayType> list = contents[idx];
             long newSize = totalSize.getAndAdd(addedSize);
-            if (sizes[idx] != data.length) {
-                throw new IllegalArgumentException("Wrongf size for ByteArrayPool release");
+            if (sizes[idx] != allocator.getLength(data)) {
+                throw new IllegalArgumentException("Wrongf size for ArrayPool release");
             }
             synchronized (list) {
                 /*
                 for (byte[] existing : list) {
                     if (existing == data) {
-                        throw new IllegalArgumentException("Duplicate release in ByteArrayPool");
+                        throw new IllegalArgumentException("Duplicate release in ArrayPool");
                     }
                 }
                 */
@@ -123,36 +149,6 @@ public class ByteArrayPool
                 }
             }
             break;
-        }
-    }
-
-    class LongArrayList
-    {
-        long[] longs = new long[10];
-        int size = 0;
-
-        void add(long value)
-        {
-            if (longs.length <= size) {
-                longs = Arrays.copyOf(longs, 2 * size);
-            }
-            longs[size++] = value;
-        }
-
-
-        int size()
-        {
-            return size;
-        }
-
-        long get(int i)
-        {
-            return longs[i];
-        }
-
-        void popBack()
-        {
-            size--;
         }
     }
 }

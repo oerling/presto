@@ -13,16 +13,74 @@
  */
 package com.facebook.presto.spi.memory;
 
+import java.util.Arrays;
+
 public class Caches
 {
-    private static ByteArrayPool byteArrayPool;
+    private static ArrayPool<byte[]> byteArrayPool;
     private static ByteArrayPoolCacheAdapter byteArrayPoolCacheAdapter;
+    private static class BooleanArrayAllocator
+            extends ArrayPool.Allocator<boolean[]>
+    {
+        @Override
+        boolean[] alloc(int size)
+        {
+            return new boolean[size];
+        }
 
-    public static ByteArrayPool getByteArrayPool()
+        @Override
+        void init(boolean[] array)
+        {
+            Arrays.fill(array, false);
+        }
+
+        @Override
+        int getLength(boolean[] array)
+        {
+            return array.length;
+        }
+    }
+
+    private static class ByteArrayAllocator
+            extends ArrayPool.Allocator<byte[]>
+    {
+        @Override
+        byte[] alloc(int size)
+        {
+            return new byte[size];
+        }
+
+        @Override
+        void init(byte[] array)
+        {
+            Arrays.fill(array, (byte) 0);
+        }
+
+        @Override
+        int getLength(byte[] array)
+        {
+            return array.length;
+        }
+    }
+
+    
+    private static ArrayPool<boolean[]> booleanArrayPool;
+
+    public static ArrayPool<boolean[]> getBooleanArrayPool()
+    {
+        synchronized (Caches.class) {
+            if (booleanArrayPool == null) {
+                booleanArrayPool = new ArrayPool(16, 64 * 1024, 1024 * 1024, new BooleanArrayAllocator());
+            }
+        }
+        return booleanArrayPool;
+    }
+
+    public static ArrayPool<byte[]> getByteArrayPool()
     {
         synchronized (Caches.class) {
             if (byteArrayPool == null) {
-                byteArrayPool = new ByteArrayPool(1024, 8 * 1024 * 1024, 2028 * 1024 * 1024);
+                byteArrayPool = new ArrayPool(1024, 8 * 1024 * 1024, 2028 * 1024 * 1024, new ByteArrayAllocator());
             }
         }
         return byteArrayPool;
@@ -30,12 +88,14 @@ public class Caches
 
     public static CacheAdapter getByteArrayPoolCacheAdapter()
     {
-        ByteArrayPool pool = getByteArrayPool();
+        ArrayPool<byte[]> pool = getByteArrayPool();
         synchronized (Caches.class) {
-        if (byteArrayPoolCacheAdapter == null) {
-            byteArrayPoolCacheAdapter = new ByteArrayPoolCacheAdapter(byteArrayPool);
+            if (byteArrayPoolCacheAdapter == null) {
+                byteArrayPoolCacheAdapter = new ByteArrayPoolCacheAdapter(byteArrayPool);
+            }
+            return byteArrayPoolCacheAdapter;
         }
-        return byteArrayPoolCacheAdapter;
-                }
     }
+
+
 }

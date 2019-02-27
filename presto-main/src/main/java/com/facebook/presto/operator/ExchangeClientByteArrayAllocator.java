@@ -14,14 +14,14 @@
 package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.block.ConcatenatedByteArrayInputStream;
-import com.facebook.presto.spi.memory.ByteArrayPool;
+import com.facebook.presto.spi.memory.ArrayPool;
 
 public class ExchangeClientByteArrayAllocator
         implements io.airlift.http.client.ByteArrayAllocator
 {
-    private ByteArrayPool pool;
+    private ArrayPool<byte[]> pool;
 
-    public ExchangeClientByteArrayAllocator(ByteArrayPool pool)
+    public ExchangeClientByteArrayAllocator(ArrayPool<byte[]> pool)
     {
         this.pool = pool;
     }
@@ -34,7 +34,7 @@ public class ExchangeClientByteArrayAllocator
     @Override
     public byte[] allocate(int size)
     {
-        return pool.getBytes(size);
+        return pool.alloc(size);
     }
 
     @Override
