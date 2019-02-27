@@ -14,6 +14,8 @@
 
 package com.facebook.presto.spi.block;
 
+import com.facebook.presto.spi.memory.ArrayPool;
+import com.facebook.presto.spi.memory.Caches;
 import com.facebook.presto.spi.type.Type;
 
 import javax.annotation.Nullable;
@@ -36,6 +38,8 @@ public abstract class AbstractMapBlock
     // inverse of hash fill ratio, must be integer
     static final int HASH_MULTIPLIER = 2;
 
+    private static ArrayPool<boolean[]> booleanArrayPool = Caches.getBooleanArrayPool();
+    
     protected final Type keyType;
     protected final MethodHandle keyNativeHashCode;
     protected final MethodHandle keyBlockNativeEquals;
@@ -174,10 +178,11 @@ public abstract class AbstractMapBlock
         // used position.
         int positionCount = getPositionCount();
         checkValidPositions(positions, positionCount);
-        boolean[] entryPositions = new boolean[getRawKeyBlock().getPositionCount()];
+        boolean[] entryPositions = booleanArrayPool.allocInitialized(getRawKeyBlock().getPositionCount());
         int usedEntryCount = 0;
         int usedPositionCount = 0;
-        for (int i = 0; i < positions.length; ++i) {
+        int end = Math.min(positionCount, positions.length);
+        for (int i = 0; i < end; ++i) {
             if (positions[i]) {
                 usedPositionCount++;
                 int entriesStart = getOffsets()[getOffsetBase() + i];
@@ -188,10 +193,12 @@ public abstract class AbstractMapBlock
                 usedEntryCount += (entriesEnd - entriesStart);
             }
         }
-        return getRawKeyBlock().getPositionsSizeInBytes(entryPositions) +
+        long size = getRawKeyBlock().getPositionsSizeInBytes(entryPositions) +
                 getRawValueBlock().getPositionsSizeInBytes(entryPositions) +
                 (Integer.BYTES + Byte.BYTES) * (long) usedPositionCount +
                 Integer.BYTES * HASH_MULTIPLIER * (long) usedEntryCount;
+        booleanArrayPool.release(entryPositions);
+        return size;
     }
     @Override
     public Block copyRegion(int position, int length)
