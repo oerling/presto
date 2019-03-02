@@ -13,7 +13,7 @@
  */
 package com.facebook.presto.sql.gen;
 
-import com.facebook.presto.metadata.FunctionRegistry;
+import com.facebook.presto.metadata.FunctionManager;
 import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.operator.scalar.ScalarFunctionImplementation;
 import com.facebook.presto.spi.function.OperatorType;
@@ -40,10 +40,12 @@ import java.lang.invoke.MethodHandle;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.spi.function.OperatorType.HASH_CODE;
 import static com.facebook.presto.spi.function.OperatorType.INDETERMINATE;
+import static com.facebook.presto.sql.gen.BytecodeGenerator.generateWrite;
 import static com.facebook.presto.sql.gen.BytecodeUtils.ifWasNullPopAndGoto;
 import static com.facebook.presto.sql.gen.BytecodeUtils.invoke;
 import static com.facebook.presto.sql.gen.BytecodeUtils.loadConstant;
@@ -60,11 +62,11 @@ import static java.util.Objects.requireNonNull;
 public class InCodeGenerator
         implements BytecodeGenerator
 {
-    private final FunctionRegistry registry;
+    private final FunctionManager functionManager;
 
-    public InCodeGenerator(FunctionRegistry registry)
+    public InCodeGenerator(FunctionManager functionManager)
     {
-        this.registry = requireNonNull(registry, "registry is null");
+        this.functionManager = requireNonNull(functionManager, "functionManager is null");
     }
 
     enum SwitchGenerationCase
@@ -107,7 +109,7 @@ public class InCodeGenerator
     }
 
     @Override
-    public BytecodeNode generateExpression(Signature signature, BytecodeGeneratorContext generatorContext, Type returnType, List<RowExpression> arguments)
+    public BytecodeNode generateExpression(Signature signature, BytecodeGeneratorContext generatorContext, Type returnType, List<RowExpression> arguments, Optional<Variable> outputBlockVariable)
     {
         List<RowExpression> values = arguments.subList(1, arguments.size());
         // empty IN statements are not allowed by the standard, and not possible here
@@ -119,17 +121,17 @@ public class InCodeGenerator
 
         SwitchGenerationCase switchGenerationCase = checkSwitchGenerationCase(type, values);
 
-        Signature hashCodeSignature = generatorContext.getRegistry().resolveOperator(HASH_CODE, ImmutableList.of(type));
-        MethodHandle hashCodeFunction = generatorContext.getRegistry().getScalarFunctionImplementation(hashCodeSignature).getMethodHandle();
-        Signature isIndeterminateSignature = generatorContext.getRegistry().resolveOperator(INDETERMINATE, ImmutableList.of(type));
-        ScalarFunctionImplementation isIndeterminateFunction = generatorContext.getRegistry().getScalarFunctionImplementation(isIndeterminateSignature);
+        Signature hashCodeSignature = generatorContext.getFunctionManager().resolveOperator(HASH_CODE, ImmutableList.of(type));
+        MethodHandle hashCodeFunction = generatorContext.getFunctionManager().getScalarFunctionImplementation(hashCodeSignature).getMethodHandle();
+        Signature isIndeterminateSignature = generatorContext.getFunctionManager().resolveOperator(INDETERMINATE, ImmutableList.of(type));
+        ScalarFunctionImplementation isIndeterminateFunction = generatorContext.getFunctionManager().getScalarFunctionImplementation(isIndeterminateSignature);
 
         ImmutableListMultimap.Builder<Integer, BytecodeNode> hashBucketsBuilder = ImmutableListMultimap.builder();
         ImmutableList.Builder<BytecodeNode> defaultBucket = ImmutableList.builder();
         ImmutableSet.Builder<Object> constantValuesBuilder = ImmutableSet.builder();
 
         for (RowExpression testValue : values) {
-            BytecodeNode testBytecode = generatorContext.generate(testValue);
+            BytecodeNode testBytecode = generatorContext.generate(testValue, Optional.empty());
 
             if (isDeterminateConstant(testValue, isIndeterminateFunction.getMethodHandle())) {
                 ConstantExpression constant = (ConstantExpression) testValue;
@@ -218,7 +220,7 @@ public class InCodeGenerator
                         .append(switchBuilder.build());
                 break;
             case SET_CONTAINS:
-                Set<?> constantValuesSet = toFastutilHashSet(constantValues, type, registry);
+                Set<?> constantValuesSet = toFastutilHashSet(constantValues, type, functionManager);
                 Binding constant = generatorContext.getCallSiteBinder().bind(constantValuesSet, constantValuesSet.getClass());
 
                 switchBlock = new BytecodeBlock()
@@ -252,7 +254,7 @@ public class InCodeGenerator
 
         BytecodeBlock block = new BytecodeBlock()
                 .comment("IN")
-                .append(generatorContext.generate(arguments.get(0)))
+                .append(generatorContext.generate(arguments.get(0), Optional.empty()))
                 .append(ifWasNullPopAndGoto(scope, end, boolean.class, javaType))
                 .putVariable(value)
                 .append(switchBlock)
@@ -276,6 +278,7 @@ public class InCodeGenerator
 
         block.visitLabel(end);
 
+        outputBlockVariable.ifPresent(output -> block.append(generateWrite(generatorContext, returnType, output)));
         return block;
     }
 
@@ -330,8 +333,8 @@ public class InCodeGenerator
 
         elseBlock.gotoLabel(noMatchLabel);
 
-        Signature equalsSignature = generatorContext.getRegistry().resolveOperator(OperatorType.EQUAL, ImmutableList.of(type, type));
-        ScalarFunctionImplementation equalsFunction = generatorContext.getRegistry().getScalarFunctionImplementation(equalsSignature);
+        Signature equalsSignature = generatorContext.getFunctionManager().resolveOperator(OperatorType.EQUAL, ImmutableList.of(type, type));
+        ScalarFunctionImplementation equalsFunction = generatorContext.getFunctionManager().getScalarFunctionImplementation(equalsSignature);
 
         BytecodeNode elseNode = elseBlock;
         for (BytecodeNode testNode : testValues) {

@@ -26,7 +26,9 @@ import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.security.GrantInfo;
+import com.facebook.presto.spi.security.PrestoPrincipal;
 import com.facebook.presto.spi.security.Privilege;
+import com.facebook.presto.spi.security.RoleGrant;
 import com.facebook.presto.spi.statistics.ComputedStatistics;
 import com.facebook.presto.spi.statistics.TableStatistics;
 import com.facebook.presto.spi.statistics.TableStatisticsMetadata;
@@ -69,6 +71,8 @@ public interface Metadata
 
     Optional<SystemTable> getSystemTable(Session session, QualifiedObjectName tableName);
 
+    Optional<TableHandle> getTableHandleForStatisticsCollection(Session session, QualifiedObjectName tableName, Map<String, Object> analyzeProperties);
+
     List<TableLayoutResult> getLayouts(Session session, TableHandle tableHandle, Constraint<ColumnHandle> constraint, Optional<Set<ColumnHandle>> desiredColumns);
 
     TableLayout getLayout(Session session, TableLayoutHandle handle);
@@ -86,6 +90,11 @@ public interface Metadata
      * Return a partitioning handle which the connector can transparently convert both {@code left} and {@code right} into.
      */
     Optional<PartitioningHandle> getCommonPartitioning(Session session, PartitioningHandle left, PartitioningHandle right);
+
+    /**
+     * Provides partitioning handle for exchange.
+     */
+    PartitioningHandle getPartitioningHandleForExchange(Session session, String catalogName, int partitionCount, List<Type> partitionTypes);
 
     Optional<Object> getInfo(Session session, TableLayoutHandle handle);
 
@@ -191,7 +200,22 @@ public interface Metadata
     /**
      * Describes statistics that must be collected during a write.
      */
+    TableStatisticsMetadata getStatisticsCollectionMetadataForWrite(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
+
+    /**
+     * Describe statistics that must be collected during a statistics collection
+     */
     TableStatisticsMetadata getStatisticsCollectionMetadata(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
+
+    /**
+     * Begin statistics collection
+     */
+    AnalyzeTableHandle beginStatisticsCollection(Session session, TableHandle tableHandle);
+
+    /**
+     * Finish statistics collection
+     */
+    void finishStatisticsCollection(Session session, AnalyzeTableHandle tableHandle, Collection<ComputedStatistics> computedStatistics);
 
     /**
      * Start a SELECT/UPDATE/INSERT/DELETE query
@@ -284,21 +308,67 @@ public interface Metadata
     Optional<ResolvedIndex> resolveIndex(Session session, TableHandle tableHandle, Set<ColumnHandle> indexableColumns, Set<ColumnHandle> outputColumns, TupleDomain<ColumnHandle> tupleDomain);
 
     /**
+     * Creates the specified role in the specified catalog.
+     *
+     * @param grantor represents the principal specified by WITH ADMIN statement
+     */
+    void createRole(Session session, String role, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * Drops the specified role in the specified catalog.
+     */
+    void dropRole(Session session, String role, String catalog);
+
+    /**
+     * List available roles in specified catalog.
+     */
+    Set<String> listRoles(Session session, String catalog);
+
+    /**
+     * List roles grants in the specified catalog for a given principal, not recursively.
+     */
+    Set<RoleGrant> listRoleGrants(Session session, String catalog, PrestoPrincipal principal);
+
+    /**
+     * Grants the specified roles to the specified grantees in the specified catalog
+     *
+     * @param grantor represents the principal specified by GRANTED BY statement
+     */
+    void grantRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean withAdminOption, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * Revokes the specified roles from the specified grantees in the specified catalog
+     *
+     * @param grantor represents the principal specified by GRANTED BY statement
+     */
+    void revokeRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean adminOptionFor, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * List applicable roles, including the transitive grants, for the specified principal
+     */
+    Set<RoleGrant> listApplicableRoles(Session session, PrestoPrincipal principal, String catalog);
+
+    /**
+     * List applicable roles, including the transitive grants, in given session
+     */
+    Set<String> listEnabledRoles(Session session, String catalog);
+
+    /**
      * Grants the specified privilege to the specified user on the specified table
      */
-    void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption);
+    void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption);
 
     /**
      * Revokes the specified privilege on the specified table from the specified user
      */
-    void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption);
+    void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption);
 
     /**
-     * Gets the privileges for the specified table available to the given grantee
+     * Gets the privileges for the specified table available to the given grantee considering the selected session role
      */
     List<GrantInfo> listTablePrivileges(Session session, QualifiedTablePrefix prefix);
 
-    FunctionRegistry getFunctionRegistry();
+    FunctionManager getFunctionManager();
 
     ProcedureRegistry getProcedureRegistry();
 
@@ -313,4 +383,6 @@ public interface Metadata
     TablePropertyManager getTablePropertyManager();
 
     ColumnPropertyManager getColumnPropertyManager();
+
+    AnalyzePropertyManager getAnalyzePropertyManager();
 }

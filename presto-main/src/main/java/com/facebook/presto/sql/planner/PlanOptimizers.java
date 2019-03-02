@@ -34,6 +34,7 @@ import com.facebook.presto.sql.planner.iterative.rule.DesugarCurrentUser;
 import com.facebook.presto.sql.planner.iterative.rule.DesugarLambdaExpression;
 import com.facebook.presto.sql.planner.iterative.rule.DesugarTryExpression;
 import com.facebook.presto.sql.planner.iterative.rule.DetermineJoinDistributionType;
+import com.facebook.presto.sql.planner.iterative.rule.DetermineSemiJoinDistributionType;
 import com.facebook.presto.sql.planner.iterative.rule.EliminateCrossJoins;
 import com.facebook.presto.sql.planner.iterative.rule.EvaluateZeroLimit;
 import com.facebook.presto.sql.planner.iterative.rule.EvaluateZeroSample;
@@ -70,6 +71,7 @@ import com.facebook.presto.sql.planner.iterative.rule.PruneValuesColumns;
 import com.facebook.presto.sql.planner.iterative.rule.PruneWindowColumns;
 import com.facebook.presto.sql.planner.iterative.rule.PushAggregationThroughOuterJoin;
 import com.facebook.presto.sql.planner.iterative.rule.PushLimitThroughMarkDistinct;
+import com.facebook.presto.sql.planner.iterative.rule.PushLimitThroughOuterJoin;
 import com.facebook.presto.sql.planner.iterative.rule.PushLimitThroughProject;
 import com.facebook.presto.sql.planner.iterative.rule.PushLimitThroughSemiJoin;
 import com.facebook.presto.sql.planner.iterative.rule.PushPartialAggregationThroughExchange;
@@ -102,7 +104,6 @@ import com.facebook.presto.sql.planner.optimizations.AddExchanges;
 import com.facebook.presto.sql.planner.optimizations.AddLocalExchanges;
 import com.facebook.presto.sql.planner.optimizations.BeginTableWrite;
 import com.facebook.presto.sql.planner.optimizations.CheckSubqueryNodesAreRewritten;
-import com.facebook.presto.sql.planner.optimizations.DetermineSemiJoinDistributionType;
 import com.facebook.presto.sql.planner.optimizations.HashGenerationOptimizer;
 import com.facebook.presto.sql.planner.optimizations.ImplementIntersectAndExceptAsUnion;
 import com.facebook.presto.sql.planner.optimizations.IndexJoinOptimizer;
@@ -113,6 +114,7 @@ import com.facebook.presto.sql.planner.optimizations.OptimizeMixedDistinctAggreg
 import com.facebook.presto.sql.planner.optimizations.PlanOptimizer;
 import com.facebook.presto.sql.planner.optimizations.PredicatePushDown;
 import com.facebook.presto.sql.planner.optimizations.PruneUnreferencedOutputs;
+import com.facebook.presto.sql.planner.optimizations.ReplicateSemiJoinInDelete;
 import com.facebook.presto.sql.planner.optimizations.SetFlatteningOptimizer;
 import com.facebook.presto.sql.planner.optimizations.StatsRecordingPlanOptimizer;
 import com.facebook.presto.sql.planner.optimizations.TransformQuantifiedComparisonApplyToLateralJoin;
@@ -277,6 +279,7 @@ public class PlanOptimizers
                                         new MergeLimitWithSort(),
                                         new MergeLimitWithTopN(),
                                         new PushLimitThroughMarkDistinct(),
+                                        new PushLimitThroughOuterJoin(),
                                         new PushLimitThroughSemiJoin(),
                                         new RemoveTrivialFilters(),
                                         new ImplementFilteredAggregations(),
@@ -285,7 +288,7 @@ public class PlanOptimizers
                                         new ImplementBernoulliSampleAsFilter(),
                                         new MergeLimitWithDistinct(),
                                         new PruneCountAggregationOverScalar(),
-                                        new PruneOrderByInAggregation(metadata.getFunctionRegistry()),
+                                        new PruneOrderByInAggregation(metadata.getFunctionManager()),
                                         new RewriteSpatialPartitioningAggregation(metadata)))
                                 .build()),
                 simplifyOptimizer,
@@ -309,7 +312,7 @@ public class PlanOptimizers
                         ruleStats,
                         statsCalculator,
                         estimatedExchangesCostCalculator,
-                        ImmutableSet.of(new TransformExistsApplyToLateralNode(metadata.getFunctionRegistry()))),
+                        ImmutableSet.of(new TransformExistsApplyToLateralNode(metadata.getFunctionManager()))),
                 new TransformQuantifiedComparisonApplyToLateralJoin(metadata),
                 new IterativeOptimizer(
                         ruleStats,
@@ -319,7 +322,7 @@ public class PlanOptimizers
                                 new RemoveUnreferencedScalarLateralNodes(),
                                 new TransformUncorrelatedLateralToJoin(),
                                 new TransformUncorrelatedInPredicateSubqueryToSemiJoin(),
-                                new TransformCorrelatedScalarAggregationToJoin(metadata.getFunctionRegistry()),
+                                new TransformCorrelatedScalarAggregationToJoin(metadata.getFunctionManager()),
                                 new TransformCorrelatedLateralJoinToJoin())),
                 new IterativeOptimizer(
                         ruleStats,
@@ -428,17 +431,21 @@ public class PlanOptimizers
                 costCalculator,
                 ImmutableSet.<Rule<?>>builder()
                         .add(new RemoveRedundantIdentityProjections())
-                        .addAll(new ExtractSpatialJoins(metadata, splitManager, pageSourceManager).rules())
+                        .addAll(new ExtractSpatialJoins(metadata, splitManager, pageSourceManager, sqlParser).rules())
                         .add(new InlineProjections())
                         .build()));
 
         if (!forceSingleNode) {
+            builder.add(new ReplicateSemiJoinInDelete()); // Must run before AddExchanges
             builder.add((new IterativeOptimizer(
                     ruleStats,
                     statsCalculator,
                     estimatedExchangesCostCalculator,
-                    ImmutableSet.of(new DetermineJoinDistributionType(costComparator, taskCountEstimator))))); // Must run before AddExchanges
-            builder.add(new DetermineSemiJoinDistributionType()); // Must run before AddExchanges
+                    ImmutableSet.of(
+                            new DetermineJoinDistributionType(costComparator, taskCountEstimator), // Must run before AddExchanges
+                            // Must run before AddExchanges and after ReplicateSemiJoinInDelete
+                            // to avoid temporarily having an invalid plan
+                            new DetermineSemiJoinDistributionType(costComparator, taskCountEstimator)))));
             builder.add(
                     new IterativeOptimizer(
                             ruleStats,
@@ -485,7 +492,7 @@ public class PlanOptimizers
                 costCalculator,
                 ImmutableSet.of(
                         new PushPartialAggregationThroughJoin(),
-                        new PushPartialAggregationThroughExchange(metadata.getFunctionRegistry()),
+                        new PushPartialAggregationThroughExchange(metadata.getFunctionManager()),
                         new PruneJoinColumns())));
         builder.add(new IterativeOptimizer(
                 ruleStats,

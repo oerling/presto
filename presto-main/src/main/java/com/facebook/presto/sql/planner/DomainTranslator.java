@@ -338,7 +338,7 @@ public final class DomainTranslator
             this.literalEncoder = new LiteralEncoder(metadata.getBlockEncodingSerde());
             this.session = requireNonNull(session, "session is null");
             this.types = requireNonNull(types, "types is null");
-            this.functionInvoker = new InterpretedFunctionInvoker(metadata.getFunctionRegistry());
+            this.functionInvoker = new InterpretedFunctionInvoker(metadata.getFunctionManager());
             this.includeSubfields = includeSubfields;
         }
 
@@ -717,7 +717,7 @@ public final class DomainTranslator
 
         private Optional<Signature> getSaturatedFloorCastOperator(Type fromType, Type toType)
         {
-            if (metadata.getFunctionRegistry().canResolveOperator(SATURATED_FLOOR_CAST, toType, ImmutableList.of(fromType))) {
+            if (metadata.getFunctionManager().canResolveOperator(SATURATED_FLOOR_CAST, toType, ImmutableList.of(fromType))) {
                 return Optional.of(internalOperator(SATURATED_FLOOR_CAST, toType, ImmutableList.of(fromType)));
             }
             return Optional.empty();
@@ -725,7 +725,7 @@ public final class DomainTranslator
 
         private int compareOriginalValueToCoerced(Type originalValueType, Object originalValue, Type coercedValueType, Object coercedValue)
         {
-            Signature castToOriginalTypeOperator = metadata.getFunctionRegistry().getCoercion(coercedValueType, originalValueType);
+            Signature castToOriginalTypeOperator = metadata.getFunctionManager().getCoercion(coercedValueType, originalValueType);
             Object coercedValueInOriginalType = functionInvoker.invoke(castToOriginalTypeOperator, session.toConnectorSession(), coercedValue);
             Block originalValueBlock = Utils.nativeValueToBlock(originalValueType, originalValue);
             Block coercedValueBlock = Utils.nativeValueToBlock(originalValueType, coercedValueInOriginalType);

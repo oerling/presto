@@ -46,6 +46,7 @@ import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
+import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
 import com.facebook.presto.sql.planner.plan.TopNNode;
@@ -83,6 +84,7 @@ import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.REPARTITION
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.gatheringExchange;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.mergingExchange;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.partitionedExchange;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.systemPartitionedExchange;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -192,6 +194,14 @@ public class AddLocalExchanges
         }
 
         @Override
+        public PlanWithProperties visitStatisticsWriterNode(StatisticsWriterNode node, StreamPreferredProperties context)
+        {
+            // analyze finish requires that all data be in one stream
+            // this node changes the input organization completely, so we do not pass through parent preferences
+            return planAndEnforceChildren(node, singleStream(), defaultParallelism(session));
+        }
+
+        @Override
         public PlanWithProperties visitTableFinish(TableFinishNode node, StreamPreferredProperties parentPreferences)
         {
             // table commit requires that all data be in one stream
@@ -269,19 +279,19 @@ public class AddLocalExchanges
         {
             checkState(node.getStep() == AggregationNode.Step.SINGLE, "step of aggregation is expected to be SINGLE, but it is %s", node.getStep());
 
-            if (node.hasSingleNodeExecutionPreference(metadata.getFunctionRegistry())) {
+            if (node.hasSingleNodeExecutionPreference(metadata.getFunctionManager())) {
                 return planAndEnforceChildren(node, singleStream(), defaultParallelism(session));
             }
 
             List<Symbol> groupingKeys = node.getGroupingKeys();
             if (node.hasDefaultOutput()) {
-                checkState(node.isDecomposable(metadata.getFunctionRegistry()));
+                checkState(node.isDecomposable(metadata.getFunctionManager()));
 
                 // Put fixed local exchange directly below final aggregation to ensure that final and partial aggregations are separated by exchange (in a local runner mode)
                 // This is required so that default outputs from multiple instances of partial aggregations are passed to a single final aggregation.
                 PlanWithProperties child = planAndEnforce(node.getSource(), any(), defaultParallelism(session));
                 PlanWithProperties exchange = deriveProperties(
-                        partitionedExchange(
+                        systemPartitionedExchange(
                                 idAllocator.getNextId(),
                                 LOCAL,
                                 child.getNode(),
@@ -699,7 +709,7 @@ public class AddLocalExchanges
 
             if (requiredProperties.isParallelPreferred()) {
                 // partitioned parallel streams required
-                ExchangeNode exchangeNode = partitionedExchange(
+                ExchangeNode exchangeNode = systemPartitionedExchange(
                         idAllocator.getNextId(),
                         LOCAL,
                         planWithProperties.getNode(),

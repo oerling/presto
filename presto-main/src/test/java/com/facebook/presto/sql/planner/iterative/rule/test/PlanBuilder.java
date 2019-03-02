@@ -66,6 +66,7 @@ import com.facebook.presto.sql.planner.plan.TableScanNode;
 import com.facebook.presto.sql.planner.plan.TableWriterNode;
 import com.facebook.presto.sql.planner.plan.TopNNode;
 import com.facebook.presto.sql.planner.plan.UnionNode;
+import com.facebook.presto.sql.planner.plan.UnnestNode;
 import com.facebook.presto.sql.planner.plan.ValuesNode;
 import com.facebook.presto.sql.planner.plan.WindowNode;
 import com.facebook.presto.sql.tree.Expression;
@@ -166,6 +167,11 @@ public class PlanBuilder
     public ValuesNode values(PlanNodeId id, Symbol... columns)
     {
         return values(id, 0, columns);
+    }
+
+    public ValuesNode values(int rows, Symbol... columns)
+    {
+        return values(idAllocator.getNextId(), rows, columns);
     }
 
     public ValuesNode values(PlanNodeId id, int rows, Symbol... columns)
@@ -270,7 +276,7 @@ public class PlanBuilder
         {
             checkArgument(expression instanceof FunctionCall);
             FunctionCall aggregation = (FunctionCall) expression;
-            Signature signature = metadata.getFunctionRegistry().resolveFunction(aggregation.getName(), TypeSignatureProvider.fromTypes(inputTypes));
+            Signature signature = metadata.getFunctionManager().resolveFunction(aggregation.getName(), TypeSignatureProvider.fromTypes(inputTypes));
             return addAggregation(output, new Aggregation(aggregation, signature, mask));
         }
 
@@ -732,6 +738,15 @@ public class PlanBuilder
         return new RemoteSourceNode(idAllocator.getNextId(), fragmentIds, symbols, Optional.empty(), exchangeType);
     }
 
+    public UnnestNode unnest(PlanNode source, List<Symbol> replicateSymbols, Map<Symbol, List<Symbol>> unnestSymbols, Optional<Symbol> ordinalitySymbol)
+    {
+        return new UnnestNode(
+                idAllocator.getNextId(),
+                source,
+                replicateSymbols,
+                unnestSymbols,
+                ordinalitySymbol);
+    }
     public static Expression expression(String sql)
     {
         return ExpressionUtils.rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(sql));

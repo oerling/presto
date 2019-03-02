@@ -13,16 +13,13 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.OutputBuffers;
-import com.facebook.presto.OutputBuffers.OutputBufferId;
 import com.facebook.presto.Session;
-import com.facebook.presto.TaskSource;
 import com.facebook.presto.event.SplitMonitor;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.buffer.BufferResult;
+import com.facebook.presto.execution.buffer.OutputBuffers;
+import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
 import com.facebook.presto.execution.executor.TaskExecutor;
-import com.facebook.presto.memory.DefaultQueryContext;
-import com.facebook.presto.memory.LegacyQueryContext;
 import com.facebook.presto.memory.LocalMemoryManager;
 import com.facebook.presto.memory.MemoryPool;
 import com.facebook.presto.memory.MemoryPoolAssignment;
@@ -75,7 +72,6 @@ import static com.facebook.presto.spi.StandardErrorCode.ABANDONED_TASK;
 import static com.facebook.presto.spi.StandardErrorCode.SERVER_SHUTTING_DOWN;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Predicates.notNull;
-import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Iterables.transform;
 import static io.airlift.concurrent.Threads.threadsNamed;
@@ -176,22 +172,7 @@ public class SqlTaskManager
             DataSize maxQueryTotalMemoryPerNode,
             DataSize maxQuerySpillPerNode)
     {
-        if (nodeMemoryConfig.isLegacySystemPoolEnabled()) {
-            Optional<MemoryPool> systemPool = localMemoryManager.getSystemPool();
-            verify(systemPool.isPresent(), "systemPool must be present");
-            return new LegacyQueryContext(
-                    queryId,
-                    maxQueryUserMemoryPerNode,
-                    localMemoryManager.getGeneralPool(),
-                    systemPool.get(),
-                    gcMonitor,
-                    taskNotificationExecutor,
-                    driverYieldExecutor,
-                    maxQuerySpillPerNode,
-                    localSpillManager.getSpillSpaceTracker());
-        }
-
-        return new DefaultQueryContext(
+        return new QueryContext(
                 queryId,
                 maxQueryUserMemoryPerNode,
                 maxQueryTotalMemoryPerNode,
@@ -225,7 +206,7 @@ public class SqlTaskManager
                 queryContexts.getUnchecked(assignment.getQueryId()).setMemoryPool(reservedPool);
             }
             else {
-                new IllegalArgumentException(format("Cannot move %s to %s as the target memory pool id is invalid", assignment.getQueryId(), assignment.getPoolId()));
+                throw new IllegalArgumentException(format("Cannot move %s to %s as the target memory pool id is invalid", assignment.getQueryId(), assignment.getPoolId()));
             }
         }
     }

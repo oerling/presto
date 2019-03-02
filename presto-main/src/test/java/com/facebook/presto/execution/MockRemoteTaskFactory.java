@@ -13,19 +13,19 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.OutputBuffers;
 import com.facebook.presto.Session;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.cost.StatsAndCosts;
 import com.facebook.presto.execution.NodeTaskMap.PartitionedSplitCountTracker;
 import com.facebook.presto.execution.buffer.LazyOutputBuffer;
 import com.facebook.presto.execution.buffer.OutputBuffer;
-import com.facebook.presto.memory.DefaultQueryContext;
+import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.memory.MemoryPool;
+import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.memory.context.SimpleLocalMemoryContext;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.metadata.TableHandle;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.operator.TaskContext;
 import com.facebook.presto.operator.TaskStats;
 import com.facebook.presto.spi.Node;
@@ -64,6 +64,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -72,10 +73,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
-import static com.facebook.presto.OutputBuffers.BufferType.BROADCAST;
-import static com.facebook.presto.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.execution.StateMachine.StateChangeListener;
+import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.BROADCAST;
+import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
@@ -116,8 +117,9 @@ public class MockRemoteTaskFactory
                 SOURCE_DISTRIBUTION,
                 ImmutableList.of(sourceId),
                 new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), ImmutableList.of(symbol)),
-                StageExecutionStrategy.ungroupedExecution(),
-                StatsAndCosts.empty());
+                StageExecutionDescriptor.ungroupedExecution(),
+                StatsAndCosts.empty(),
+                Optional.empty());
 
         ImmutableMultimap.Builder<PlanNodeId, Split> initialSplits = ImmutableMultimap.builder();
         for (Split sourceSplit : splits) {
@@ -181,7 +183,7 @@ public class MockRemoteTaskFactory
 
             MemoryPool memoryPool = new MemoryPool(new MemoryPoolId("test"), new DataSize(1, GIGABYTE));
             SpillSpaceTracker spillSpaceTracker = new SpillSpaceTracker(new DataSize(1, GIGABYTE));
-            DefaultQueryContext queryContext = new DefaultQueryContext(taskId.getQueryId(),
+            QueryContext queryContext = new QueryContext(taskId.getQueryId(),
                     new DataSize(1, MEGABYTE),
                     new DataSize(2, MEGABYTE),
                     memoryPool,

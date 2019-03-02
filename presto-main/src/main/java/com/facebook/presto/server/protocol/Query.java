@@ -37,6 +37,7 @@ import com.facebook.presto.spi.ErrorCode;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.spi.type.BooleanType;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
@@ -138,6 +139,9 @@ class Query
 
     @GuardedBy("this")
     private Set<String> resetSessionProperties = ImmutableSet.of();
+
+    @GuardedBy("this")
+    private Map<String, SelectedRole> setRoles = ImmutableMap.of();
 
     @GuardedBy("this")
     private Map<String, String> addedPreparedStatements = ImmutableMap.of();
@@ -261,6 +265,11 @@ class Query
     public synchronized Set<String> getResetSessionProperties()
     {
         return resetSessionProperties;
+    }
+
+    public synchronized Map<String, SelectedRole> getSetRoles()
+    {
+        return setRoles;
     }
 
     public synchronized Map<String, String> getAddedPreparedStatements()
@@ -474,6 +483,9 @@ class Query
         setSessionProperties = queryInfo.getSetSessionProperties();
         resetSessionProperties = queryInfo.getResetSessionProperties();
 
+        // update setRoles
+        setRoles = queryInfo.getSetRoles();
+
         // update preparedStatements
         addedPreparedStatements = queryInfo.getAddedPreparedStatements();
         deallocatedPreparedStatements = queryInfo.getDeallocatedPreparedStatements();
@@ -587,6 +599,7 @@ class Query
                 .setProcessedRows(queryStats.getRawInputPositions())
                 .setProcessedBytes(queryStats.getRawInputDataSize().toBytes())
                 .setPeakMemoryBytes(queryStats.getPeakUserMemoryReservation().toBytes())
+                .setSpilledBytes(queryStats.getSpilledDataSize().toBytes())
                 .setRootStage(toStageStats(outputStage))
                 .build();
     }

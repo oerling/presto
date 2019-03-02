@@ -46,7 +46,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 
 import static com.facebook.presto.metadata.FunctionKind.SCALAR;
-import static com.facebook.presto.metadata.FunctionRegistry.mangleOperatorName;
+import static com.facebook.presto.metadata.OperatorSignatureUtils.mangleOperatorName;
 import static com.facebook.presto.metadata.Signature.internalScalarFunction;
 import static com.facebook.presto.spi.function.OperatorType.EQUAL;
 import static com.facebook.presto.spi.function.OperatorType.GREATER_THAN;
@@ -112,7 +112,7 @@ public class ExpressionEquivalence
                 WarningCollector.NOOP);
 
         // convert to row expression
-        return translate(expressionWithInputReferences, SCALAR, expressionTypes, metadata.getFunctionRegistry(), metadata.getTypeManager(), session, false);
+        return translate(expressionWithInputReferences, SCALAR, expressionTypes, metadata.getFunctionManager(), metadata.getTypeManager(), session, false);
     }
 
     private static class CanonicalizationVisitor

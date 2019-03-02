@@ -15,6 +15,7 @@ package com.facebook.presto.hive.metastore;
 
 import com.facebook.presto.hive.HdfsEnvironment;
 import com.facebook.presto.hive.HdfsEnvironment.HdfsContext;
+import com.facebook.presto.hive.HiveBasicStatistics;
 import com.facebook.presto.hive.HiveType;
 import com.facebook.presto.hive.LocationHandle.WriteMode;
 import com.facebook.presto.hive.PartitionNotFoundException;
@@ -25,6 +26,9 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.StandardErrorCode;
 import com.facebook.presto.spi.TableNotFoundException;
+import com.facebook.presto.spi.security.PrestoPrincipal;
+import com.facebook.presto.spi.security.PrincipalType;
+import com.facebook.presto.spi.security.RoleGrant;
 import com.facebook.presto.spi.statistics.ColumnStatisticType;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.annotations.VisibleForTesting;
@@ -51,6 +55,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -67,6 +72,7 @@ import static com.facebook.presto.hive.HiveUtil.isPrestoView;
 import static com.facebook.presto.hive.HiveUtil.toPartitionValues;
 import static com.facebook.presto.hive.HiveWriteUtils.createDirectory;
 import static com.facebook.presto.hive.HiveWriteUtils.pathExists;
+import static com.facebook.presto.hive.LocationHandle.WriteMode.DIRECT_TO_TARGET_NEW_DIRECTORY;
 import static com.facebook.presto.hive.metastore.HivePrivilegeInfo.HivePrivilege.OWNERSHIP;
 import static com.facebook.presto.hive.util.Statistics.ReduceOperator.SUBTRACT;
 import static com.facebook.presto.hive.util.Statistics.merge;
@@ -74,6 +80,7 @@ import static com.facebook.presto.hive.util.Statistics.reduce;
 import static com.facebook.presto.spi.StandardErrorCode.ALREADY_EXISTS;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.StandardErrorCode.TRANSACTION_CONFLICT;
+import static com.facebook.presto.spi.security.PrincipalType.USER;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
@@ -93,6 +100,7 @@ public class SemiTransactionalHiveMetastore
     private final HdfsEnvironment hdfsEnvironment;
     private final Executor renameExecutor;
     private final boolean skipDeletionForAlter;
+    private final boolean skipTargetCleanupOnRollback;
 
     @GuardedBy("this")
     private final Map<SchemaTableName, Action<TableAndMore>> tableActions = new HashMap<>();
@@ -106,12 +114,13 @@ public class SemiTransactionalHiveMetastore
     private State state = State.EMPTY;
     private boolean throwOnCleanupFailure;
 
-    public SemiTransactionalHiveMetastore(HdfsEnvironment hdfsEnvironment, ExtendedHiveMetastore delegate, Executor renameExecutor, boolean skipDeletionForAlter)
+    public SemiTransactionalHiveMetastore(HdfsEnvironment hdfsEnvironment, ExtendedHiveMetastore delegate, Executor renameExecutor, boolean skipDeletionForAlter, boolean skipTargetCleanupOnRollback)
     {
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
         this.delegate = requireNonNull(delegate, "delegate is null");
         this.renameExecutor = requireNonNull(renameExecutor, "renameExecutor is null");
-        this.skipDeletionForAlter = requireNonNull(skipDeletionForAlter, "skipDeletionForAlter is null");
+        this.skipDeletionForAlter = skipDeletionForAlter;
+        this.skipTargetCleanupOnRollback = skipTargetCleanupOnRollback;
     }
 
     public synchronized List<String> getAllDatabases()
@@ -293,6 +302,45 @@ public class SemiTransactionalHiveMetastore
     public synchronized void renameDatabase(String source, String target)
     {
         setExclusive((delegate, hdfsEnvironment) -> delegate.renameDatabase(source, target));
+    }
+
+    // TODO: Allow updating statistics for 2 tables in the same transaction
+    public synchronized void setTableStatistics(Table table, PartitionStatistics tableStatistics)
+    {
+        setExclusive((delegate, hdfsEnvironment) ->
+                delegate.updateTableStatistics(table.getDatabaseName(), table.getTableName(), statistics -> updatePartitionStatistics(statistics, tableStatistics)));
+    }
+
+    // TODO: Allow updating statistics for 2 tables in the same transaction
+    public synchronized void setPartitionStatistics(Table table, Map<List<String>, PartitionStatistics> partitionStatisticsMap)
+    {
+        setExclusive((delegate, hdfsEnvironment) ->
+                partitionStatisticsMap.forEach((partitionValues, newPartitionStats) ->
+                        delegate.updatePartitionStatistics(
+                                table.getDatabaseName(),
+                                table.getTableName(),
+                                getPartitionName(table, partitionValues),
+                                oldPartitionStats -> updatePartitionStatistics(oldPartitionStats, newPartitionStats))));
+    }
+
+    // For HiveBasicStatistics, we only overwrite the original statistics if the new one is not empty.
+    // For HiveColumnStatistics, we always overwrite every statistics.
+    // TODO: Collect file count, on-disk size and in-memory size during ANALYZE
+    private PartitionStatistics updatePartitionStatistics(PartitionStatistics oldPartitionStats, PartitionStatistics newPartitionStats)
+    {
+        HiveBasicStatistics oldBasicStatistics = oldPartitionStats.getBasicStatistics();
+        HiveBasicStatistics newBasicStatistics = newPartitionStats.getBasicStatistics();
+        HiveBasicStatistics updatedBasicStatistics = new HiveBasicStatistics(
+                firstPresent(newBasicStatistics.getFileCount(), oldBasicStatistics.getFileCount()),
+                firstPresent(newBasicStatistics.getRowCount(), oldBasicStatistics.getRowCount()),
+                firstPresent(newBasicStatistics.getInMemoryDataSizeInBytes(), oldBasicStatistics.getInMemoryDataSizeInBytes()),
+                firstPresent(newBasicStatistics.getOnDiskDataSizeInBytes(), oldBasicStatistics.getOnDiskDataSizeInBytes()));
+        return new PartitionStatistics(updatedBasicStatistics, newPartitionStats.getColumnStatistics());
+    }
+
+    private static OptionalLong firstPresent(OptionalLong first, OptionalLong second)
+    {
+        return first.isPresent() ? first : second;
     }
 
     /**
@@ -727,46 +775,74 @@ public class SemiTransactionalHiveMetastore
     {
         Table table = getTable(databaseName, tableName)
                 .orElseThrow(() -> new TableNotFoundException(new SchemaTableName(databaseName, tableName)));
+        return getPartitionName(table, partitionValues);
+    }
+
+    private String getPartitionName(Table table, List<String> partitionValues)
+    {
         List<String> columnNames = table.getPartitionColumns().stream()
                 .map(Column::getName)
                 .collect(toImmutableList());
         return makePartName(columnNames, partitionValues);
     }
 
-    public synchronized Set<String> getRoles(String user)
+    public synchronized void createRole(String role, String grantor)
     {
-        checkReadable();
-        return delegate.getRoles(user);
+        setExclusive((delegate, hdfsEnvironment) -> delegate.createRole(role, grantor));
     }
 
-    public synchronized Set<HivePrivilegeInfo> getDatabasePrivileges(String user, String databaseName)
+    public synchronized void dropRole(String role)
     {
-        checkReadable();
-        return delegate.getDatabasePrivileges(user, databaseName);
+        setExclusive((delegate, hdfsEnvironment) -> delegate.dropRole(role));
     }
 
-    public synchronized Set<HivePrivilegeInfo> getTablePrivileges(String user, String databaseName, String tableName)
+    public synchronized Set<String> listRoles()
+    {
+        checkReadable();
+        return delegate.listRoles();
+    }
+
+    public synchronized void grantRoles(Set<String> roles, Set<PrestoPrincipal> grantees, boolean withAdminOption, PrestoPrincipal grantor)
+    {
+        setExclusive((delegate, hdfsEnvironment) -> delegate.grantRoles(roles, grantees, withAdminOption, grantor));
+    }
+
+    public synchronized void revokeRoles(Set<String> roles, Set<PrestoPrincipal> grantees, boolean adminOptionFor, PrestoPrincipal grantor)
+    {
+        setExclusive((delegate, hdfsEnvironment) -> delegate.revokeRoles(roles, grantees, adminOptionFor, grantor));
+    }
+
+    public synchronized Set<RoleGrant> listRoleGrants(PrestoPrincipal principal)
+    {
+        checkReadable();
+        return delegate.listRoleGrants(principal);
+    }
+
+    public synchronized Set<HivePrivilegeInfo> listTablePrivileges(String databaseName, String tableName, PrestoPrincipal principal)
     {
         checkReadable();
         SchemaTableName schemaTableName = new SchemaTableName(databaseName, tableName);
         Action<TableAndMore> tableAction = tableActions.get(schemaTableName);
         if (tableAction == null) {
-            return delegate.getTablePrivileges(user, databaseName, tableName);
+            return delegate.listTablePrivileges(databaseName, tableName, principal);
         }
         switch (tableAction.getType()) {
             case ADD:
             case ALTER: {
-                if (!user.equals(tableAction.getData().getTable().getOwner())) {
-                    throw new PrestoException(NOT_SUPPORTED, "Cannot access a table newly created in the transaction with a different user");
+                if (principal.getType() == PrincipalType.ROLE) {
+                    return ImmutableSet.of();
                 }
-                Collection<HivePrivilegeInfo> privileges = tableAction.getData().getPrincipalPrivileges().getUserPrivileges().get(user);
+                if (!principal.getName().equals(tableAction.getData().getTable().getOwner())) {
+                    return ImmutableSet.of();
+                }
+                Collection<HivePrivilegeInfo> privileges = tableAction.getData().getPrincipalPrivileges().getUserPrivileges().get(principal.getName());
                 return ImmutableSet.<HivePrivilegeInfo>builder()
                         .addAll(privileges)
-                        .add(new HivePrivilegeInfo(OWNERSHIP, true))
+                        .add(new HivePrivilegeInfo(OWNERSHIP, true, new PrestoPrincipal(USER, principal.getName()), new PrestoPrincipal(USER, principal.getName())))
                         .build();
             }
             case INSERT_EXISTING:
-                return delegate.getTablePrivileges(user, databaseName, tableName);
+                return delegate.listTablePrivileges(databaseName, tableName, principal);
             case DROP:
                 throw new TableNotFoundException(schemaTableName);
             default:
@@ -774,12 +850,12 @@ public class SemiTransactionalHiveMetastore
         }
     }
 
-    public synchronized void grantTablePrivileges(String databaseName, String tableName, String grantee, Set<HivePrivilegeInfo> privileges)
+    public synchronized void grantTablePrivileges(String databaseName, String tableName, PrestoPrincipal grantee, Set<HivePrivilegeInfo> privileges)
     {
         setExclusive((delegate, hdfsEnvironment) -> delegate.grantTablePrivileges(databaseName, tableName, grantee, privileges));
     }
 
-    public synchronized void revokeTablePrivileges(String databaseName, String tableName, String grantee, Set<HivePrivilegeInfo> privileges)
+    public synchronized void revokeTablePrivileges(String databaseName, String tableName, PrestoPrincipal grantee, Set<HivePrivilegeInfo> privileges)
     {
         setExclusive((delegate, hdfsEnvironment) -> delegate.revokeTablePrivileges(databaseName, tableName, grantee, privileges));
     }
@@ -1173,13 +1249,19 @@ public class SemiTransactionalHiveMetastore
                     schemaTableName,
                     ignored -> new PartitionAdder(partition.getDatabaseName(), partition.getTableName(), delegate, PARTITION_COMMIT_BATCH_SIZE));
 
-            if (!targetPath.equals(currentPath)) {
-                renameDirectory(
-                        context,
-                        hdfsEnvironment,
-                        currentPath,
-                        targetPath,
-                        () -> cleanUpTasksForAbort.add(new DirectoryCleanUpTask(context, targetPath, true)));
+            if (pathExists(context, hdfsEnvironment, currentPath)) {
+                if (!targetPath.equals(currentPath)) {
+                    renameDirectory(
+                            context,
+                            hdfsEnvironment,
+                            currentPath,
+                            targetPath,
+                            () -> cleanUpTasksForAbort.add(new DirectoryCleanUpTask(context, targetPath, true)));
+                }
+            }
+            else {
+                cleanUpTasksForAbort.add(new DirectoryCleanUpTask(context, targetPath, true));
+                createDirectory(context, hdfsEnvironment, targetPath);
             }
             String partitionName = getPartitionName(partition.getDatabaseName(), partition.getTableName(), partition.getValues());
             partitionAdder.addPartition(new PartitionWithStatistics(partition, partitionName, partitionAndMore.getStatisticsUpdate()));
@@ -1403,7 +1485,10 @@ public class SemiTransactionalHiveMetastore
             switch (declaredIntentionToWrite.getMode()) {
                 case STAGE_AND_MOVE_TO_TARGET_DIRECTORY:
                 case DIRECT_TO_TARGET_NEW_DIRECTORY: {
-                    // Note: there is no need to cleanup the target directory as it will only be written
+                    if (skipTargetCleanupOnRollback && declaredIntentionToWrite.getMode() == DIRECT_TO_TARGET_NEW_DIRECTORY) {
+                        break;
+                    }
+                    // Note: For STAGE_AND_MOVE_TO_TARGET_DIRECTORY there is no need to cleanup the target directory as it will only be written
                     // to during the commit call and the commit call cleans up after failures.
                     Path rootPath = declaredIntentionToWrite.getRootPath();
 

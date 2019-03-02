@@ -32,6 +32,7 @@ import com.facebook.presto.spi.SchemaTablePrefix;
 import com.facebook.presto.spi.ViewNotFoundException;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
+import com.facebook.presto.spi.security.PrestoPrincipal;
 import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.statistics.ComputedStatistics;
 import com.facebook.presto.spi.type.Type;
@@ -83,6 +84,12 @@ public class TestingMetadata
             return null;
         }
         return new TestingTableHandle(tableName);
+    }
+
+    @Override
+    public ConnectorTableHandle getTableHandleForStatisticsCollection(ConnectorSession session, SchemaTableName tableName, Map<String, Object> analyzeProperties)
+    {
+        return getTableHandle(session, tableName);
     }
 
     @Override
@@ -272,10 +279,10 @@ public class TestingMetadata
     }
 
     @Override
-    public void grantTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privileges, String grantee, boolean grantOption) {}
+    public void grantTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption) {}
 
     @Override
-    public void revokeTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privileges, String grantee, boolean grantOption) {}
+    public void revokeTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption) {}
 
     public void clear()
     {

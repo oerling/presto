@@ -15,10 +15,8 @@ package com.facebook.presto.testing;
 
 import com.facebook.presto.GroupByHashPageIndexerFactory;
 import com.facebook.presto.PagesIndexPageSorter;
-import com.facebook.presto.ScheduledSplit;
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
-import com.facebook.presto.TaskSource;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.connector.ConnectorManager;
@@ -54,10 +52,12 @@ import com.facebook.presto.execution.RenameColumnTask;
 import com.facebook.presto.execution.RenameTableTask;
 import com.facebook.presto.execution.ResetSessionTask;
 import com.facebook.presto.execution.RollbackTask;
+import com.facebook.presto.execution.ScheduledSplit;
 import com.facebook.presto.execution.SetPathTask;
 import com.facebook.presto.execution.SetSessionTask;
 import com.facebook.presto.execution.StartTransactionTask;
 import com.facebook.presto.execution.TaskManagerConfig;
+import com.facebook.presto.execution.TaskSource;
 import com.facebook.presto.execution.resourceGroups.NoOpResourceGroupManager;
 import com.facebook.presto.execution.scheduler.LegacyNetworkTopology;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
@@ -65,6 +65,7 @@ import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
 import com.facebook.presto.execution.warnings.WarningCollector;
 import com.facebook.presto.index.IndexManager;
 import com.facebook.presto.memory.MemoryManagerConfig;
+import com.facebook.presto.metadata.AnalyzePropertyManager;
 import com.facebook.presto.metadata.CatalogManager;
 import com.facebook.presto.metadata.ColumnPropertyManager;
 import com.facebook.presto.metadata.HandleResolver;
@@ -87,7 +88,7 @@ import com.facebook.presto.operator.LookupJoinOperators;
 import com.facebook.presto.operator.OperatorContext;
 import com.facebook.presto.operator.OutputFactory;
 import com.facebook.presto.operator.PagesIndex;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.operator.TaskContext;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.server.PluginManager;
@@ -304,6 +305,7 @@ public class LocalQueryRunner
                 new SchemaPropertyManager(),
                 new TablePropertyManager(),
                 new ColumnPropertyManager(),
+                new AnalyzePropertyManager(),
                 transactionManager);
         this.planFragmenter = new PlanFragmenter(this.metadata, this.nodePartitioningManager, new QueryManagerConfig());
         this.joinCompiler = new JoinCompiler(metadata, featuresConfig);
@@ -677,10 +679,10 @@ public class LocalQueryRunner
     private List<Driver> createDrivers(Session session, Plan plan, OutputFactory outputFactory, TaskContext taskContext)
     {
         if (printPlan) {
-            System.out.println(PlanPrinter.textLogicalPlan(plan.getRoot(), plan.getTypes(), metadata.getFunctionRegistry(), plan.getStatsAndCosts(), session, 0, false));
+            System.out.println(PlanPrinter.textLogicalPlan(plan.getRoot(), plan.getTypes(), metadata.getFunctionManager(), plan.getStatsAndCosts(), session, 0, false));
         }
 
-        SubPlan subplan = planFragmenter.createSubPlans(session, plan, true);
+        SubPlan subplan = planFragmenter.createSubPlans(session, plan, true, WarningCollector.NOOP);
         if (!subplan.getChildren().isEmpty()) {
             throw new AssertionError("Expected subplan to have no children");
         }
@@ -709,10 +711,10 @@ public class LocalQueryRunner
                 new OrderingCompiler());
 
         // plan query
-        StageExecutionStrategy stageExecutionStrategy = subplan.getFragment().getStageExecutionStrategy();
+        StageExecutionDescriptor stageExecutionDescriptor = subplan.getFragment().getStageExecutionDescriptor();
         LocalExecutionPlan localExecutionPlan = executionPlanner.plan(
                 taskContext,
-                stageExecutionStrategy,
+                stageExecutionDescriptor,
                 subplan.getFragment().getRoot(),
                 subplan.getFragment().getPartitioningScheme().getOutputLayout(),
                 plan.getTypes(),
@@ -728,7 +730,7 @@ public class LocalQueryRunner
             SplitSource splitSource = splitManager.getSplits(
                     session,
                     layout,
-                    stageExecutionStrategy.isGroupedExecution(tableScan.getId()) ? GROUPED_SCHEDULING : UNGROUPED_SCHEDULING);
+                    stageExecutionDescriptor.isScanGroupedExecution(tableScan.getId()) ? GROUPED_SCHEDULING : UNGROUPED_SCHEDULING);
 
             ImmutableSet.Builder<ScheduledSplit> scheduledSplits = ImmutableSet.builder();
             while (!splitSource.isFinished()) {

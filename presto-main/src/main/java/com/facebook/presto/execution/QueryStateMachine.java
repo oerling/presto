@@ -29,6 +29,7 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.eventlistener.StageGcStatistics;
 import com.facebook.presto.spi.resourceGroups.ResourceGroupId;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
@@ -43,7 +44,6 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.log.Logger;
-import io.airlift.units.Duration;
 import org.joda.time.DateTime;
 
 import javax.annotation.Nullable;
@@ -84,6 +84,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.units.DataSize.succinctBytes;
+import static io.airlift.units.Duration.succinctDuration;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -110,6 +111,7 @@ public class QueryStateMachine
     private final AtomicLong currentTotalMemory = new AtomicLong();
     private final AtomicLong peakTotalMemory = new AtomicLong();
 
+    private final AtomicLong peakTaskUserMemory = new AtomicLong();
     private final AtomicLong peakTaskTotalMemory = new AtomicLong();
 
     private final QueryStateTimer queryStateTimer;
@@ -122,6 +124,8 @@ public class QueryStateMachine
 
     private final Map<String, String> setSessionProperties = new ConcurrentHashMap<>();
     private final Set<String> resetSessionProperties = Sets.newConcurrentHashSet();
+
+    private final Map<String, SelectedRole> setRoles = new ConcurrentHashMap<>();
 
     private final Map<String, String> addedPreparedStatements = new ConcurrentHashMap<>();
     private final Set<String> deallocatedPreparedStatements = Sets.newConcurrentHashSet();
@@ -224,8 +228,14 @@ public class QueryStateMachine
                 ticker,
                 metadata,
                 warningCollector);
-        queryStateMachine.addStateChangeListener(newState -> QUERY_STATE_LOG.debug("Query %s is %s", queryStateMachine.getQueryId(), newState));
 
+        queryStateMachine.addStateChangeListener(newState -> {
+            QUERY_STATE_LOG.debug("Query %s is %s", queryStateMachine.getQueryId(), newState);
+            // mark finished or failed transaction as inactive
+            if (newState.isDone()) {
+                queryStateMachine.getSession().getTransactionId().ifPresent(transactionManager::trySetInactive);
+            }
+        });
         return queryStateMachine;
     }
 
@@ -254,17 +264,23 @@ public class QueryStateMachine
         return peakTaskTotalMemory.get();
     }
 
+    public long getPeakTaskUserMemory()
+    {
+        return peakTaskUserMemory.get();
+    }
+
     public WarningCollector getWarningCollector()
     {
         return warningCollector;
     }
 
-    public void updateMemoryUsage(long deltaUserMemoryInBytes, long deltaTotalMemoryInBytes, long taskTotalMemoryInBytes)
+    public void updateMemoryUsage(long deltaUserMemoryInBytes, long deltaTotalMemoryInBytes, long taskUserMemoryInBytes, long taskTotalMemoryInBytes)
     {
         currentUserMemory.addAndGet(deltaUserMemoryInBytes);
         currentTotalMemory.addAndGet(deltaTotalMemoryInBytes);
         peakUserMemory.updateAndGet(currentPeakValue -> Math.max(currentUserMemory.get(), currentPeakValue));
         peakTotalMemory.updateAndGet(currentPeakValue -> Math.max(currentTotalMemory.get(), currentPeakValue));
+        peakTaskUserMemory.accumulateAndGet(taskUserMemoryInBytes, Math::max);
         peakTaskTotalMemory.accumulateAndGet(taskTotalMemoryInBytes, Math::max);
     }
 
@@ -362,6 +378,7 @@ public class QueryStateMachine
                 Optional.ofNullable(setPath.get()),
                 setSessionProperties,
                 resetSessionProperties,
+                setRoles,
                 addedPreparedStatements,
                 deallocatedPreparedStatements,
                 Optional.ofNullable(startedTransactionId.get()),
@@ -493,13 +510,14 @@ public class QueryStateMachine
                 succinctBytes(totalMemoryReservation),
                 succinctBytes(getPeakUserMemoryInBytes()),
                 succinctBytes(getPeakTotalMemoryInBytes()),
+                succinctBytes(getPeakTaskUserMemory()),
                 succinctBytes(getPeakTaskTotalMemory()),
 
                 isScheduled,
 
-                new Duration(totalScheduledTime, MILLISECONDS).convertToMostSuccinctTimeUnit(),
-                new Duration(totalCpuTime, MILLISECONDS).convertToMostSuccinctTimeUnit(),
-                new Duration(totalBlockedTime, MILLISECONDS).convertToMostSuccinctTimeUnit(),
+                succinctDuration(totalScheduledTime, MILLISECONDS),
+                succinctDuration(totalCpuTime, MILLISECONDS),
+                succinctDuration(totalBlockedTime, MILLISECONDS),
                 fullyBlocked,
                 blockedReasons,
 
@@ -583,6 +601,11 @@ public class QueryStateMachine
     public void addSetSessionProperties(String key, String value)
     {
         setSessionProperties.put(requireNonNull(key, "key is null"), requireNonNull(value, "value is null"));
+    }
+
+    public void addSetRole(String catalog, SelectedRole role)
+    {
+        setRoles.put(requireNonNull(catalog, "catalog is null"), requireNonNull(role, "role is null"));
     }
 
     public Set<String> getResetSessionProperties()
@@ -921,6 +944,7 @@ public class QueryStateMachine
                 queryInfo.getSetPath(),
                 queryInfo.getSetSessionProperties(),
                 queryInfo.getResetSessionProperties(),
+                queryInfo.getSetRoles(),
                 queryInfo.getAddedPreparedStatements(),
                 queryInfo.getDeallocatedPreparedStatements(),
                 queryInfo.getStartedTransactionId(),
@@ -965,6 +989,7 @@ public class QueryStateMachine
                 queryStats.getTotalMemoryReservation(),
                 queryStats.getPeakUserMemoryReservation(),
                 queryStats.getPeakTotalMemoryReservation(),
+                queryStats.getPeakTaskUserMemory(),
                 queryStats.getPeakTaskTotalMemory(),
                 queryStats.isScheduled(),
                 queryStats.getTotalScheduledTime(),

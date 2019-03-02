@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.execution.scheduler;
 
-import com.facebook.presto.OutputBuffers.OutputBufferId;
 import com.facebook.presto.client.NodeVersion;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.cost.StatsAndCosts;
@@ -25,12 +24,13 @@ import com.facebook.presto.execution.RemoteTask;
 import com.facebook.presto.execution.SqlStageExecution;
 import com.facebook.presto.execution.StageId;
 import com.facebook.presto.execution.TestSqlTaskManager.MockLocationFactory;
+import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
 import com.facebook.presto.failureDetector.NoOpFailureDetector;
 import com.facebook.presto.metadata.InMemoryNodeManager;
 import com.facebook.presto.metadata.InternalNodeManager;
 import com.facebook.presto.metadata.PrestoNode;
 import com.facebook.presto.metadata.TableHandle;
-import com.facebook.presto.operator.StageExecutionStrategy;
+import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.FixedSplitSource;
@@ -72,9 +72,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 
-import static com.facebook.presto.OutputBuffers.BufferType.PARTITIONED;
-import static com.facebook.presto.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
+import static com.facebook.presto.execution.buffer.OutputBuffers.BufferType.PARTITIONED;
+import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.execution.scheduler.SourcePartitionedScheduler.newSourcePartitionedSchedulerAsStageScheduler;
 import static com.facebook.presto.spi.StandardErrorCode.NO_NODES_AVAILABLE;
 import static com.facebook.presto.spi.connector.NotPartitionedPartitionHandle.NOT_PARTITIONED;
@@ -483,8 +483,9 @@ public class TestSourcePartitionedScheduler
                 SOURCE_DISTRIBUTION,
                 ImmutableList.of(tableScanNodeId),
                 new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), ImmutableList.of(symbol)),
-                StageExecutionStrategy.ungroupedExecution(),
-                StatsAndCosts.empty());
+                StageExecutionDescriptor.ungroupedExecution(),
+                StatsAndCosts.empty(),
+                Optional.empty());
 
         return new StageExecutionPlan(
                 testFragment,

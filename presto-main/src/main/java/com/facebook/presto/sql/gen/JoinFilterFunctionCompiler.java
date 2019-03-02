@@ -50,6 +50,7 @@ import java.lang.reflect.Constructor;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.sql.gen.BytecodeUtils.invoke;
@@ -195,10 +196,10 @@ public class JoinFilterFunctionCompiler
                 callSiteBinder,
                 cachedInstanceBinder,
                 fieldReferenceCompiler(callSiteBinder, leftPosition, leftPage, rightPosition, rightPage, leftBlocksSize),
-                metadata.getFunctionRegistry(),
+                metadata.getFunctionManager(),
                 compiledLambdaMap);
 
-        BytecodeNode visitorBody = compiler.compile(filter, scope);
+        BytecodeNode visitorBody = compiler.compile(filter, scope, Optional.empty());
 
         Variable result = scope.declareVariable(boolean.class, "result");
         body.append(visitorBody)
@@ -228,7 +229,7 @@ public class JoinFilterFunctionCompiler
                     compiledLambdaMap.build(),
                     callSiteBinder,
                     cachedInstanceBinder,
-                    metadata.getFunctionRegistry());
+                    metadata.getFunctionManager());
             compiledLambdaMap.put(lambdaExpression, compiledLambda);
             counter++;
         }

@@ -36,11 +36,13 @@ import com.facebook.presto.server.PluginManager;
 import com.facebook.presto.server.ServerMainModule;
 import com.facebook.presto.server.ShutdownAction;
 import com.facebook.presto.server.security.ServerSecurityModule;
+import com.facebook.presto.server.smile.SmileModule;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.Plugin;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.split.PageSourceManager;
 import com.facebook.presto.split.SplitManager;
+import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import com.facebook.presto.sql.parser.SqlParserOptions;
 import com.facebook.presto.sql.planner.NodePartitioningManager;
 import com.facebook.presto.sql.planner.Plan;
@@ -49,6 +51,7 @@ import com.facebook.presto.testing.TestingAccessControlManager;
 import com.facebook.presto.testing.TestingEventListenerManager;
 import com.facebook.presto.testing.TestingWarningCollectorModule;
 import com.facebook.presto.transaction.TransactionManager;
+import com.fasterxml.jackson.module.afterburner.AfterburnerModule;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
@@ -79,8 +82,8 @@ import javax.annotation.concurrent.GuardedBy;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -96,8 +99,11 @@ import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
+import static io.airlift.configuration.ConditionalModule.installModuleIf;
 import static io.airlift.discovery.client.ServiceAnnouncement.serviceAnnouncement;
+import static io.airlift.json.JsonBinder.jsonBinder;
 import static java.lang.Integer.parseInt;
+import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.Files.isDirectory;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -107,6 +113,7 @@ public class TestingPrestoServer
 {
     private final Injector injector;
     private final Path baseDataDir;
+    private final boolean preserveData;
     private final LifeCycleManager lifeCycleManager;
     private final PluginManager pluginManager;
     private final ConnectorManager connectorManager;
@@ -171,7 +178,8 @@ public class TestingPrestoServer
         this(true, ImmutableMap.of(), null, null, new SqlParserOptions(), additionalModules);
     }
 
-    public TestingPrestoServer(boolean coordinator,
+    public TestingPrestoServer(
+            boolean coordinator,
             Map<String, String> properties,
             String environment,
             URI discoveryUri,
@@ -179,8 +187,23 @@ public class TestingPrestoServer
             List<Module> additionalModules)
             throws Exception
     {
+        this(coordinator, properties, environment, discoveryUri, parserOptions, additionalModules, Optional.empty());
+    }
+
+    public TestingPrestoServer(
+            boolean coordinator,
+            Map<String, String> properties,
+            String environment,
+            URI discoveryUri,
+            SqlParserOptions parserOptions,
+            List<Module> additionalModules,
+            Optional<Path> baseDataDir)
+            throws Exception
+    {
         this.coordinator = coordinator;
-        baseDataDir = Files.createTempDirectory("PrestoTest");
+
+        this.baseDataDir = baseDataDir.orElseGet(TestingPrestoServer::tempDirectory);
+        this.preserveData = baseDataDir.isPresent();
 
         properties = new HashMap<>(properties);
         String coordinatorPort = properties.remove("http-server.http.port");
@@ -205,6 +228,11 @@ public class TestingPrestoServer
                 .add(new TestingNodeModule(Optional.ofNullable(environment)))
                 .add(new TestingHttpServerModule(parseInt(coordinator ? coordinatorPort : "0")))
                 .add(new JsonModule())
+                .add(installModuleIf(
+                        FeaturesConfig.class,
+                        FeaturesConfig::isJsonSerdeCodeGenerationEnabled,
+                        binder -> jsonBinder(binder).addModuleBinding().to(AfterburnerModule.class)))
+                .add(new SmileModule())
                 .add(new JaxrsModule(true))
                 .add(new MBeanModule())
                 .add(new TestingJmxModule())
@@ -312,7 +340,7 @@ public class TestingPrestoServer
             throw new RuntimeException(e);
         }
         finally {
-            if (isDirectory(baseDataDir)) {
+            if (isDirectory(baseDataDir) && !preserveData) {
                 deleteRecursively(baseDataDir, ALLOW_INSECURE);
             }
         }
@@ -507,5 +535,15 @@ public class TestingPrestoServer
             }
         }
         throw new RuntimeException("Presto announcement not found: " + announcements);
+    }
+
+    private static Path tempDirectory()
+    {
+        try {
+            return createTempDirectory("PrestoTest");
+        }
+        catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

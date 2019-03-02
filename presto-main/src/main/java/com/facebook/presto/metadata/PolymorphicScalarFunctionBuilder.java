@@ -15,6 +15,7 @@ package com.facebook.presto.metadata;
 
 import com.facebook.presto.metadata.PolymorphicScalarFunction.PolymorphicScalarFunctionChoice;
 import com.facebook.presto.operator.scalar.ScalarFunctionImplementation.ArgumentProperty;
+import com.facebook.presto.operator.scalar.ScalarFunctionImplementation.ReturnPlaceConvention;
 import com.facebook.presto.spi.function.OperatorType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 
+import static com.facebook.presto.metadata.OperatorSignatureUtils.mangleOperatorName;
 import static com.facebook.presto.operator.scalar.ScalarFunctionImplementation.ArgumentProperty.valueTypeArgumentProperty;
 import static com.facebook.presto.operator.scalar.ScalarFunctionImplementation.NullConvention.BLOCK_AND_POSITION;
 import static com.facebook.presto.operator.scalar.ScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
@@ -117,7 +119,7 @@ public final class PolymorphicScalarFunctionBuilder
     private static boolean isOperator(Signature signature)
     {
         for (OperatorType operator : OperatorType.values()) {
-            if (signature.getName().equals(FunctionRegistry.mangleOperatorName(operator))) {
+            if (signature.getName().equals(mangleOperatorName(operator))) {
                 return true;
             }
         }
@@ -131,15 +133,15 @@ public final class PolymorphicScalarFunctionBuilder
         private final List<Type> parameterTypes;
         private final Type returnType;
         private final TypeManager typeManager;
-        private final FunctionRegistry functionRegistry;
+        private final FunctionManager functionManager;
 
-        SpecializeContext(BoundVariables boundVariables, List<Type> parameterTypes, Type returnType, TypeManager typeManager, FunctionRegistry functionRegistry)
+        SpecializeContext(BoundVariables boundVariables, List<Type> parameterTypes, Type returnType, TypeManager typeManager, FunctionManager functionManager)
         {
             this.boundVariables = requireNonNull(boundVariables, "boundVariables is null");
             this.parameterTypes = requireNonNull(parameterTypes, "parameterTypes is null");
             this.typeManager = requireNonNull(typeManager, "typeManager is null");
             this.returnType = requireNonNull(returnType, "returnType is null");
-            this.functionRegistry = requireNonNull(functionRegistry, "functionRegistry is null");
+            this.functionManager = requireNonNull(functionManager, "functionManager is null");
         }
 
         public Type getType(String name)
@@ -167,9 +169,9 @@ public final class PolymorphicScalarFunctionBuilder
             return typeManager;
         }
 
-        public FunctionRegistry getFunctionRegistry()
+        public FunctionManager getFunctionManager()
         {
-            return functionRegistry;
+            return functionManager;
         }
     }
 
@@ -250,6 +252,7 @@ public final class PolymorphicScalarFunctionBuilder
         private final Signature signature;
         private boolean nullableResult;
         private List<ArgumentProperty> argumentProperties;
+        private ReturnPlaceConvention returnPlaceConvention;
         private final ImmutableList.Builder<MethodsGroup> methodsGroups = ImmutableList.builder();
 
         private ChoiceBuilder(Class<?> clazz, Signature signature)
@@ -263,6 +266,10 @@ public final class PolymorphicScalarFunctionBuilder
             // if the argumentProperties is not set yet. We assume it is set to the default value.
             if (argumentProperties == null) {
                 argumentProperties = nCopies(signature.getArgumentTypes().size(), valueTypeArgumentProperty(RETURN_NULL_ON_NULL));
+            }
+            // if the returnPlaceConvention is not set yet. We assume it is set to the default value.
+            if (returnPlaceConvention == null) {
+                returnPlaceConvention = ReturnPlaceConvention.STACK;
             }
             MethodsGroupBuilder methodsGroupBuilder = new MethodsGroupBuilder(clazz, signature, argumentProperties);
             methodsGroupSpecification.apply(methodsGroupBuilder);
@@ -285,9 +292,18 @@ public final class PolymorphicScalarFunctionBuilder
             return this;
         }
 
+        public ChoiceBuilder returnPlaceConvention(ReturnPlaceConvention returnPlaceConvention)
+        {
+            requireNonNull(returnPlaceConvention, "returnPlaceConvention is null");
+            checkState(this.returnPlaceConvention == null,
+                    "The `returnPlaceConvention` method must be invoked only once, and must be invoked before the `implementation` method");
+            this.returnPlaceConvention = returnPlaceConvention;
+            return this;
+        }
+
         public PolymorphicScalarFunctionChoice build()
         {
-            return new PolymorphicScalarFunctionChoice(nullableResult, argumentProperties, methodsGroups.build());
+            return new PolymorphicScalarFunctionChoice(nullableResult, argumentProperties, returnPlaceConvention, methodsGroups.build());
         }
     }
 

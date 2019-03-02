@@ -104,6 +104,8 @@ public abstract class AbstractTestingPrestoClient<T>
                     resultsSession.setUpdateCount(results.getUpdateCount());
                 }
 
+                resultsSession.setWarnings(results.getWarnings());
+
                 T result = resultsSession.build(client.getSetSessionProperties(), client.getResetSessionProperties());
                 return new ResultWithQueryId<>(new QueryId(results.getId()), result);
             }
@@ -151,6 +153,7 @@ public abstract class AbstractTestingPrestoClient<T>
                 resourceEstimates.build(),
                 properties.build(),
                 session.getPreparedStatements(),
+                session.getIdentity().getRoles(),
                 session.getTransactionId().map(Object::toString).orElse(null),
                 clientRequestTimeout);
     }

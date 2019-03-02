@@ -14,7 +14,7 @@
 package com.facebook.presto.operator.aggregation;
 
 import com.facebook.presto.metadata.BoundVariables;
-import com.facebook.presto.metadata.FunctionRegistry;
+import com.facebook.presto.metadata.FunctionManager;
 import com.facebook.presto.metadata.SqlAggregationFunction;
 import com.facebook.presto.operator.aggregation.AggregationMetadata.AccumulatorStateDescriptor;
 import com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata;
@@ -22,6 +22,7 @@ import com.facebook.presto.operator.aggregation.state.NullableBooleanState;
 import com.facebook.presto.operator.aggregation.state.NullableDoubleState;
 import com.facebook.presto.operator.aggregation.state.NullableLongState;
 import com.facebook.presto.operator.aggregation.state.StateCompiler;
+import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -36,8 +37,10 @@ import static com.facebook.presto.metadata.Signature.typeVariable;
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.INPUT_CHANNEL;
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.STATE;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.generateAggregationName;
+import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.util.Reflection.methodHandle;
+import static java.lang.String.format;
 
 public class ReduceAggregationFunction
         extends SqlAggregationFunction
@@ -77,7 +80,7 @@ public class ReduceAggregationFunction
     }
 
     @Override
-    public InternalAggregationFunction specialize(BoundVariables boundVariables, int arity, TypeManager typeManager, FunctionRegistry functionRegistry)
+    public InternalAggregationFunction specialize(BoundVariables boundVariables, int arity, TypeManager typeManager, FunctionManager functionManager)
     {
         Type inputType = boundVariables.getTypeVariable("T");
         Type stateType = boundVariables.getTypeVariable("S");
@@ -124,7 +127,7 @@ public class ReduceAggregationFunction
             // State with Slice or Block as native container type is intentionally not supported yet,
             // as it may result in excessive JVM memory usage of remembered set.
             // See JDK-8017163.
-            throw new UnsupportedOperationException();
+            throw new PrestoException(NOT_SUPPORTED, format("State type not supported for %s: %s", NAME, stateType.getDisplayName()));
         }
 
         AggregationMetadata metadata = new AggregationMetadata(

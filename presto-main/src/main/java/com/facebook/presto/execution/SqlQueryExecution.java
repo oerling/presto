@@ -13,8 +13,6 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.OutputBuffers;
-import com.facebook.presto.OutputBuffers.OutputBufferId;
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.connector.ConnectorId;
@@ -22,6 +20,8 @@ import com.facebook.presto.cost.CostCalculator;
 import com.facebook.presto.cost.StatsCalculator;
 import com.facebook.presto.execution.QueryPreparer.PreparedQuery;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
+import com.facebook.presto.execution.buffer.OutputBuffers;
+import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
 import com.facebook.presto.execution.scheduler.ExecutionPolicy;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.SplitSchedulerStats;
@@ -80,8 +80,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static com.facebook.presto.OutputBuffers.BROADCAST_PARTITION_ID;
-import static com.facebook.presto.OutputBuffers.createInitialEmptyOutputBuffers;
+import static com.facebook.presto.execution.buffer.OutputBuffers.BROADCAST_PARTITION_ID;
+import static com.facebook.presto.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static com.facebook.presto.execution.scheduler.SqlQueryScheduler.createSqlQueryScheduler;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -204,7 +204,14 @@ public class SqlQueryExecution
                     Optional.of(queryExplainer),
                     preparedQuery.getParameters(),
                     warningCollector);
-            this.analysis = analyzer.analyze(preparedQuery.getStatement());
+
+            try {
+                this.analysis = analyzer.analyze(preparedQuery.getStatement());
+            }
+            catch (RuntimeException e) {
+                stateMachine.transitionToFailed(e);
+                throw e;
+            }
 
             stateMachine.setUpdateType(analysis.getUpdateType());
 
@@ -329,8 +336,8 @@ public class SqlQueryExecution
     private void waitForMinimumWorkers()
     {
         ListenableFuture<?> minimumWorkerFuture = clusterSizeMonitor.waitForMinimumWorkers();
-        addSuccessCallback(minimumWorkerFuture, this::startExecution);
-        addExceptionCallback(minimumWorkerFuture, stateMachine::transitionToFailed);
+        addSuccessCallback(minimumWorkerFuture, () -> queryExecutor.submit(this::startExecution));
+        addExceptionCallback(minimumWorkerFuture, throwable -> queryExecutor.submit(() -> stateMachine.transitionToFailed(throwable)));
     }
 
     private void startExecution()
@@ -427,7 +434,7 @@ public class SqlQueryExecution
         stateMachine.setOutput(output);
 
         // fragment the plan
-        SubPlan fragmentedPlan = planFragmenter.createSubPlans(stateMachine.getSession(), plan, false);
+        SubPlan fragmentedPlan = planFragmenter.createSubPlans(stateMachine.getSession(), plan, false, stateMachine.getWarningCollector());
 
         // record analysis time
         stateMachine.endAnalysis();

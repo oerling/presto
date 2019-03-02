@@ -23,13 +23,13 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
-import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+import static com.facebook.presto.PrestoMediaTypes.APPLICATION_JACKSON_SMILE;
 import static com.facebook.presto.memory.LocalMemoryManager.GENERAL_POOL;
 import static com.facebook.presto.memory.LocalMemoryManager.RESERVED_POOL;
-import static com.facebook.presto.memory.LocalMemoryManager.SYSTEM_POOL;
 import static java.util.Objects.requireNonNull;
+import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import static javax.ws.rs.core.Response.Status.NOT_FOUND;
 
 /**
@@ -49,8 +49,8 @@ public class MemoryResource
     }
 
     @POST
-    @Produces(MediaType.APPLICATION_JSON)
-    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces({APPLICATION_JSON, APPLICATION_JACKSON_SMILE})
+    @Consumes({APPLICATION_JSON, APPLICATION_JACKSON_SMILE})
     public MemoryInfo getMemoryInfo(MemoryPoolAssignmentsRequest request)
     {
         taskManager.updateMemoryPoolAssignments(request);
@@ -59,14 +59,12 @@ public class MemoryResource
 
     @GET
     @Path("{poolId}")
+    @Produces({APPLICATION_JSON, APPLICATION_JACKSON_SMILE})
+    @Consumes({APPLICATION_JSON, APPLICATION_JACKSON_SMILE})
     public Response getMemoryInfo(@PathParam("poolId") String poolId)
     {
         if (GENERAL_POOL.getId().equals(poolId)) {
             return toSuccessfulResponse(memoryManager.getGeneralPool().getInfo());
-        }
-
-        if (SYSTEM_POOL.getId().equals(poolId) && memoryManager.getSystemPool().isPresent()) {
-            return toSuccessfulResponse(memoryManager.getSystemPool().get().getInfo());
         }
 
         if (RESERVED_POOL.getId().equals(poolId) && memoryManager.getReservedPool().isPresent()) {

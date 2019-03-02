@@ -127,6 +127,7 @@ public class HiveClientConfig
     private boolean hdfsWireEncryptionEnabled;
 
     private boolean skipDeletionForAlter;
+    private boolean skipTargetCleanupOnRollback;
 
     private boolean bucketExecutionEnabled = true;
     private boolean sortedWritingEnabled = true;
@@ -147,6 +148,11 @@ public class HiveClientConfig
     private Duration recordingDuration = new Duration(0, MINUTES);
     private boolean s3SelectPushdownEnabled;
     private int s3SelectPushdownMaxConnections = 500;
+
+    private boolean isTemporaryStagingDirectoryEnabled = true;
+    private String temporaryStagingDirectoryPath = "/tmp/presto-${USER}";
+
+    private boolean preloadSplitsForGroupedExecution;
 
     public int getMaxInitialSplits()
     {
@@ -241,16 +247,16 @@ public class HiveClientConfig
         return this;
     }
 
+    public boolean getRecursiveDirWalkerEnabled()
+    {
+        return recursiveDirWalkerEnabled;
+    }
+
     @Config("hive.recursive-directories")
     public HiveClientConfig setRecursiveDirWalkerEnabled(boolean recursiveDirWalkerEnabled)
     {
         this.recursiveDirWalkerEnabled = recursiveDirWalkerEnabled;
         return this;
-    }
-
-    public boolean getRecursiveDirWalkerEnabled()
-    {
-        return recursiveDirWalkerEnabled;
     }
 
     public DateTimeZone getDateTimeZone()
@@ -1010,6 +1016,19 @@ public class HiveClientConfig
         return this;
     }
 
+    public boolean isSkipTargetCleanupOnRollback()
+    {
+        return skipTargetCleanupOnRollback;
+    }
+
+    @Config("hive.skip-target-cleanup-on-rollback")
+    @ConfigDescription("Skip deletion of target directories when a metastore operation fails and the write mode is DIRECT_TO_TARGET_NEW_DIRECTORY")
+    public HiveClientConfig setSkipTargetCleanupOnRollback(boolean skipTargetCleanupOnRollback)
+    {
+        this.skipTargetCleanupOnRollback = skipTargetCleanupOnRollback;
+        return this;
+    }
+
     public boolean isBucketExecutionEnabled()
     {
         return bucketExecutionEnabled;
@@ -1049,6 +1068,11 @@ public class HiveClientConfig
         return this;
     }
 
+    public boolean getWritesToNonManagedTablesEnabled()
+    {
+        return writesToNonManagedTablesEnabled;
+    }
+
     @Config("hive.non-managed-table-writes-enabled")
     @ConfigDescription("Enable writes to non-managed (external) tables")
     public HiveClientConfig setWritesToNonManagedTablesEnabled(boolean writesToNonManagedTablesEnabled)
@@ -1057,9 +1081,9 @@ public class HiveClientConfig
         return this;
     }
 
-    public boolean getWritesToNonManagedTablesEnabled()
+    public boolean getCreatesOfNonManagedTablesEnabled()
     {
-        return writesToNonManagedTablesEnabled;
+        return createsOfNonManagedTablesEnabled;
     }
 
     @Config("hive.non-managed-table-creates-enabled")
@@ -1070,9 +1094,9 @@ public class HiveClientConfig
         return this;
     }
 
-    public boolean getCreatesOfNonManagedTablesEnabled()
+    public boolean isTableStatisticsEnabled()
     {
-        return createsOfNonManagedTablesEnabled;
+        return tableStatisticsEnabled;
     }
 
     @Config("hive.table-statistics-enabled")
@@ -1081,11 +1105,6 @@ public class HiveClientConfig
     {
         this.tableStatisticsEnabled = tableStatisticsEnabled;
         return this;
-    }
-
-    public boolean isTableStatisticsEnabled()
-    {
-        return tableStatisticsEnabled;
     }
 
     @Min(1)
@@ -1128,6 +1147,11 @@ public class HiveClientConfig
         return this;
     }
 
+    public String getRecordingPath()
+    {
+        return recordingPath;
+    }
+
     @Config("hive.metastore-recording-path")
     public HiveClientConfig setRecordingPath(String recordingPath)
     {
@@ -1135,9 +1159,9 @@ public class HiveClientConfig
         return this;
     }
 
-    public String getRecordingPath()
+    public boolean isReplay()
     {
-        return recordingPath;
+        return replay;
     }
 
     @Config("hive.replay-metastore-recording")
@@ -1147,9 +1171,10 @@ public class HiveClientConfig
         return this;
     }
 
-    public boolean isReplay()
+    @NotNull
+    public Duration getRecordingDuration()
     {
-        return replay;
+        return recordingDuration;
     }
 
     @Config("hive.metastore-recoding-duration")
@@ -1157,12 +1182,6 @@ public class HiveClientConfig
     {
         this.recordingDuration = recordingDuration;
         return this;
-    }
-
-    @NotNull
-    public Duration getRecordingDuration()
-    {
-        return recordingDuration;
     }
 
     public boolean isS3SelectPushdownEnabled()
@@ -1188,6 +1207,46 @@ public class HiveClientConfig
     public HiveClientConfig setS3SelectPushdownMaxConnections(int s3SelectPushdownMaxConnections)
     {
         this.s3SelectPushdownMaxConnections = s3SelectPushdownMaxConnections;
+        return this;
+    }
+
+    public boolean isTemporaryStagingDirectoryEnabled()
+    {
+        return isTemporaryStagingDirectoryEnabled;
+    }
+
+    @Config("hive.temporary-staging-directory-enabled")
+    @ConfigDescription("Should use (if possible) temporary staging directory for write operations")
+    public HiveClientConfig setTemporaryStagingDirectoryEnabled(boolean temporaryStagingDirectoryEnabled)
+    {
+        this.isTemporaryStagingDirectoryEnabled = temporaryStagingDirectoryEnabled;
+        return this;
+    }
+
+    @NotNull
+    public String getTemporaryStagingDirectoryPath()
+    {
+        return temporaryStagingDirectoryPath;
+    }
+
+    @Config("hive.temporary-staging-directory-path")
+    @ConfigDescription("Location of temporary staging directory for write operations. Use ${USER} placeholder to use different location for each user.")
+    public HiveClientConfig setTemporaryStagingDirectoryPath(String temporaryStagingDirectoryPath)
+    {
+        this.temporaryStagingDirectoryPath = temporaryStagingDirectoryPath;
+        return this;
+    }
+
+    public boolean isPreloadSplitsForGroupedExecution()
+    {
+        return preloadSplitsForGroupedExecution;
+    }
+
+    @Config("hive.preload-splits-for-grouped-execution")
+    @ConfigDescription("Preload splits before scheduling for grouped execution")
+    public HiveClientConfig setPreloadSplitsForGroupedExecution(boolean preloadSplitsForGroupedExecution)
+    {
+        this.preloadSplitsForGroupedExecution = preloadSplitsForGroupedExecution;
         return this;
     }
 }

@@ -53,6 +53,7 @@ import com.facebook.presto.memory.MemoryPoolAssignmentsRequest;
 import com.facebook.presto.memory.MemoryResource;
 import com.facebook.presto.memory.NodeMemoryConfig;
 import com.facebook.presto.memory.ReservedSystemMemoryConfig;
+import com.facebook.presto.metadata.AnalyzePropertyManager;
 import com.facebook.presto.metadata.CatalogManager;
 import com.facebook.presto.metadata.ColumnPropertyManager;
 import com.facebook.presto.metadata.DiscoveryNodeManager;
@@ -144,6 +145,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.FLAT;
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.LEGACY;
+import static com.facebook.presto.server.smile.SmileCodecBinder.smileCodecBinder;
 import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.inject.multibindings.Multibinder.newSetBinder;
 import static com.google.inject.multibindings.OptionalBinder.newOptionalBinder;
@@ -185,6 +187,8 @@ public class ServerMainModule
             install(new WorkerModule());
         }
 
+        InternalCommunicationConfig internalCommunicationConfig = buildConfigObject(InternalCommunicationConfig.class);
+
         install(new InternalCommunicationModule());
 
         configBinder(binder).bindConfig(FeaturesConfig.class);
@@ -219,6 +223,9 @@ public class ServerMainModule
 
         // column properties
         binder.bind(ColumnPropertyManager.class).in(Scopes.SINGLETON);
+
+        // analyze properties
+        binder.bind(AnalyzePropertyManager.class).in(Scopes.SINGLETON);
 
         // node manager
         discoveryBinder(binder).bindSelector("presto");
@@ -303,6 +310,8 @@ public class ServerMainModule
         jsonCodecBinder(binder).bindJsonCodec(TaskInfo.class);
         jsonCodecBinder(binder).bindJsonCodec(OperatorStats.class);
         jsonCodecBinder(binder).bindJsonCodec(ExecutionFailureInfo.class);
+        smileCodecBinder(binder).bindSmileCodec(TaskStatus.class);
+        smileCodecBinder(binder).bindSmileCodec(TaskInfo.class);
         jaxrsBinder(binder).bind(PagesResponseWriter.class);
 
         // exchange client
@@ -329,6 +338,8 @@ public class ServerMainModule
 
         jsonCodecBinder(binder).bindJsonCodec(MemoryInfo.class);
         jsonCodecBinder(binder).bindJsonCodec(MemoryPoolAssignmentsRequest.class);
+        smileCodecBinder(binder).bindSmileCodec(MemoryInfo.class);
+        smileCodecBinder(binder).bindSmileCodec(MemoryPoolAssignmentsRequest.class);
 
         // transaction manager
         configBinder(binder).bindConfig(TransactionManagerConfig.class);
@@ -374,6 +385,8 @@ public class ServerMainModule
         // splits
         jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);
         jsonCodecBinder(binder).bindJsonCodec(ConnectorSplit.class);
+        smileCodecBinder(binder).bindSmileCodec(TaskUpdateRequest.class);
+        smileCodecBinder(binder).bindSmileCodec(ConnectorSplit.class);
         jsonBinder(binder).addSerializerBinding(Slice.class).to(SliceSerializer.class);
         jsonBinder(binder).addDeserializerBinding(Slice.class).to(SliceDeserializer.class);
         jsonBinder(binder).addSerializerBinding(Expression.class).to(ExpressionSerializer.class);
