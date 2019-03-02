@@ -14,13 +14,17 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
+import com.facebook.presto.orc.Filter;
+import com.facebook.presto.orc.Filters;
 import com.facebook.presto.orc.OrcCorruptionException;
+import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
 import com.facebook.presto.orc.metadata.ColumnEncoding;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
 import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.orc.stream.LongInputStream;
+import com.facebook.presto.spi.PageSourceOptions.ErrorSet;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.SubfieldPath.PathElement;
 import com.facebook.presto.spi.block.ArrayBlock;
@@ -36,8 +40,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -45,11 +51,12 @@ import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Verify.verify;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
 public class ListStreamReader
-        implements StreamReader
+        extends RepeatedColumnReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(ListStreamReader.class).instanceSize();
 
@@ -61,19 +68,25 @@ public class ListStreamReader
     private int nextBatchSize;
 
     private InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
-    @Nullable
-    private BooleanInputStream presentStream;
 
     private InputStreamSource<LongInputStream> lengthStreamSource = missingStreamSource(LongInputStream.class);
     @Nullable
     private LongInputStream lengthStream;
 
-    private boolean rowGroupOpen;
-
     // The set of subscripts for which data needs to be
     // returned. Other positions can be initialized to null. If this
     // is null, values for all subscripts must be returned.
     long[] subscripts;
+
+    int[] elementOffset;
+    int[] innerSurviving;
+
+    HashMap<Long, Filter> subscriptToFilter;
+    Filters.PositionalFilter positionalFilter;
+    boolean filterIsSetup;
+    Filter[] elementFilters;
+    // For each array in the inputQualifyingSet, the number of element filters that fit.
+    int[] numElementFilters;
 
     public ListStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -194,7 +207,7 @@ public class ListStreamReader
         return arrayBlock;
     }
 
-    private void openRowGroup()
+    protected void openRowGroup()
             throws IOException
     {
         presentStream = presentStreamSource.openStream();
@@ -237,6 +250,264 @@ public class ListStreamReader
         rowGroupOpen = false;
 
         elementStreamReader.startRowGroup(dataStreamSources);
+    }
+
+    @Override
+    public void erase(int end)
+    {
+        int innerEnd = getInnerPosition(end);
+        int innerNumValues = elementStreamReader.getNumValues();
+        verify(innerEnd <= innerNumValues);
+        numValues -= end;
+        if (valueIsNull != null) {
+            System.arraycopy(valueIsNull, end, valueIsNull, 0, numValues);
+        }
+        System.arraycopy(elementOffset, 0, elementOffset, innerEnd, numValues - innerEnd);
+        for (int i = 0; i < numValues; i++) {
+            verify(elementOffset[i] >= innerEnd);
+            elementOffset[i] -= innerEnd;
+        }
+    }
+
+    @Override
+    public void compactValues(int[] surviving, int base, int numSurviving)
+    {
+        if (outputChannel != -1) {
+            computeInnerSurviving(surviving, base, numSurviving);
+            int elementBase = getInnerPosition(base);
+            for (int i = 0; i < numSurviving; i++) {
+                int survivingRow = surviving[i] + base;
+                if (valueIsNull != null && valueIsNull[survivingRow]) {
+                    valueIsNull[base + i] = true;
+                    elementOffset[base + i] = elementBase;
+                }
+                else {
+                    if (valueIsNull != null) {
+                        valueIsNull[base + i] = false;
+                    }
+                    elementOffset[base + i] = elementBase;
+                    elementBase += elementOffset[survivingRow + 1] - elementOffset[survivingRow];
+                }
+            }
+            elementOffset[base + numSurviving] = elementBase;
+            elementStreamReader.compactValues(innerSurviving, innerSurvivingBase, numInnerSurviving);
+            numValues = base + numSurviving;
+        }
+        compactQualifyingSet(surviving, numSurviving);
+    }
+
+    @Override
+    public int getResultSizeInBytes()
+    {
+        if (outputChannel == -1) {
+            return 0;
+        }
+        return elementStreamReader.getResultSizeInBytes();
+    }
+
+    public int getAverageResultSize()
+    {
+        return (int) (1 + (elementStreamReader.getAverageResultSize() * innerRowCount / (1 + outerRowCount)));
+    }
+
+    private void setupFilterAndChannel()
+    {
+        Filter elementFilter = null;
+        if (filter != null) {
+            Filters.StructFilter listFilter = (Filters.StructFilter) filter;
+            HashMap<PathElement, Filter> filters = listFilter.getFilters();
+            for (Map.Entry<PathElement, Filter> entry : filters.entrySet()) {
+                verify(entry.getKey().getIsSubscript());
+                long subscript = entry.getKey().getSubscript();
+                if (subscript == PathElement.allSubscripts) {
+                    verify(filters.size() == 1, "Only one elementFilter is allowed if no subscript is given");
+                    elementFilter = entry.getValue();
+                    break;
+                }
+                else {
+                    if (subscriptToFilter == null) {
+                        subscriptToFilter = new HashMap();
+                        positionalFilter = new Filters.PositionalFilter();
+                        elementFilter = positionalFilter;
+                    }
+                    subscriptToFilter.put(new Long(subscript), entry.getValue());
+                }
+            }
+        }
+        elementStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(0));
+        filterIsSetup = true;
+    }
+
+    private void setupPositionalFilter()
+    {
+        if (numElementFilters == null || numElementFilters.length < inputQualifyingSet.getPositionCount()) {
+            numElementFilters = new int[inputQualifyingSet.getPositionCount()];
+        }
+        Arrays.fill(numElementFilters, 0, inputQualifyingSet.getPositionCount(), 0);
+        if (elementFilters == null || elementFilters.length < innerQualifyingSet.getPositionCount()) {
+            elementFilters = new Filter[innerQualifyingSet.getPositionCount()];
+        }
+        else {
+            Arrays.fill(elementFilters, 0, innerQualifyingSet.getPositionCount(), null);
+        }
+        int innerStart = 0;
+        int numInput = inputQualifyingSet.getPositionCount();
+        for (int i = 0; i < numInput; i++) {
+            int length = elementLength[i];
+            int filterCount = 0;
+            for (Map.Entry<Long, Filter> entry : subscriptToFilter.entrySet()) {
+                int subscript = toIntExact(entry.getKey().longValue());
+                if (subscript < length) {
+                    elementFilters[innerStart + subscript] = entry.getValue();
+                    filterCount++;
+                }
+                numElementFilters[i] = filterCount;
+            }
+            innerStart += length;
+        }
+        positionalFilter.setFilters(innerQualifyingSet, elementFilters);
+    }
+
+    @Override
+    public void scan()
+            throws IOException
+    {
+        if (!filterIsSetup) {
+            setupFilterAndChannel();
+        }
+        if (!rowGroupOpen) {
+            openRowGroup();
+        }
+        beginScan(presentStream, lengthStream);
+        int initialNumElements = elementStreamReader.getNumValues();
+        makeInnerQualifyingSet();
+        if (positionalFilter != null) {
+            setupPositionalFilter();
+        }
+        if (innerQualifyingSet.getPositionCount() > 0) {
+            elementStreamReader.setInputQualifyingSet(innerQualifyingSet);
+            elementStreamReader.scan();
+            innerPosInRowGroup = innerQualifyingSet.getEnd();
+        }
+        else {
+            elementStreamReader.getOrCreateOutputQualifyingSet().reset(0);
+        }
+        ensureValuesCapacity(inputQualifyingSet.getPositionCount());
+        int lastElementOffset = numValues == 0 ? 0 : elementOffset[numValues];
+        int numInput = inputQualifyingSet.getPositionCount();
+        if (filter != null) {
+            QualifyingSet filterResult = elementStreamReader.getOutputQualifyingSet();
+            outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
+            int numResults = filterResult.getPositionCount();
+            int[] resultInputNumbers = filterResult.getInputNumbers();
+            int[] resultRows = filterResult.getPositions();
+            if (innerSurviving == null || innerSurviving.length < numResults) {
+                innerSurviving = new int[numResults];
+            }
+            numInnerSurviving = 0;
+            int outputIdx = 0;
+            numInnerResults = 0;
+            for (int i = 0; i < numInput; i++) {
+                outputIdx = processFilterHits(i, outputIdx, resultRows, resultInputNumbers, numResults);
+            }
+            elementStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+        }
+        addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
+        if (filter == null) {
+            // The lengths are unchanged.
+            for (int i = 0; i < numInput; i++) {
+                elementOffset[numValues] = lastElementOffset;
+                lastElementOffset += elementLength[i];
+                numValues++;
+            }
+            elementOffset[numValues] = lastElementOffset;
+        }
+        if (numNullsToAdd > 0) {
+            // Fill null positions in elementOffset  with the offset of the next non-null.
+            elementOffset[numValues + numResults] = lastElementOffset;
+            int nextNonNull = lastElementOffset;
+            for (int i = numValues + numResults - 1; i >= numValues; i--) {
+                if (elementOffset[i] == -1) {
+                    elementOffset[i] = nextNonNull;
+                }
+                else {
+                    nextNonNull = elementOffset[i];
+                }
+            }
+        }
+        endScan(presentStream);
+    }
+
+    // Counts how many hits one array has. Adds the array to surviving
+    // if all hit and all filters existed. Adds array to errors if all
+    // hit but not all subscripts existed. Else the array did not
+    // pass. Returns the index to the first element of the next array
+    // in the inner outputQualifyingSet.
+    int processFilterHits(int inputIdx, int outputIdx, int[] resultRows, int[] resultInputNumbers, int numResults)
+    {
+        int filterHits = 0;
+        int count = 0;
+        int initialOutputIdx = outputIdx;
+        while (outputIdx < numResults && resultInputNumbers[outputIdx] == inputIdx) {
+            count++;
+            int posInArray = resultRows[outputIdx] - elementStart[inputIdx];
+            if (subscriptToFilter.get(posInArray) != null) {
+                filterHits++;
+            }
+            outputIdx++;
+        }
+        if (filterHits < numElementFilters[inputIdx]) {
+            // Some filter did not hit.
+            return outputIdx;
+        }
+        outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIdx], inputIdx);
+        if (numElementFilters[inputIdx] == subscriptToFilter.size()) {
+            addArrayToResult(inputIdx, initialOutputIdx, outputIdx);
+        }
+        else {
+            ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
+            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("List subscript out of bounds"));
+        }
+        return outputIdx;
+    }
+
+    private void addArrayToResult(int inputIdx, int beginResult, int endResult)
+    {
+        elementOffset[numInnerResults] = numInnerSurviving + numValues;
+        for (int i = beginResult; i < endResult; i++) {
+            innerSurviving[numInnerSurviving++] = i;
+        }
+        elementOffset[numValues + numResults + 1] = numInnerSurviving;
+        numInnerResults++;
+    }
+
+    void ensureValuesCapacity(int numAdded)
+    {
+        int newSize = numValues + numAdded * 2;
+        if (presentStream != null && valueIsNull == null) {
+            valueIsNull = new boolean[newSize];
+        }
+        if (valueIsNull != null && valueIsNull.length < numValues + numAdded) {
+            valueIsNull = Arrays.copyOf(valueIsNull, newSize);
+        }
+        if (elementOffset == null) {
+            elementOffset = new int[newSize];
+        }
+        else if (elementOffset.length < numValues + numAdded + 1) {
+            elementOffset = Arrays.copyOf(elementOffset, newSize);
+        }
+    }
+
+    @Override
+    protected void shiftUp(int from, int to)
+    {
+        elementOffset[to] = elementOffset[from];
+    }
+
+    @Override
+    protected void writeNull(int position)
+    {
+        elementOffset[position] = -1;
     }
 
     @Override

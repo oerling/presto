@@ -52,7 +52,7 @@ public class ColumnGroupReader
 
     private int lastTruncatedStreamIdx = -1;
     private int maxOutputChannel = -1;
-    private int targetResultBytes;
+    private long targetResultBytes;
     // The number of leading elements in sortedStreamReaders that is subject to reordering.
     private int numFilters;
     private int firstNonFilter;
@@ -119,7 +119,7 @@ public class ColumnGroupReader
 
     public void setResultSizeBudget(long bytes)
     {
-        targetResultBytes = (int) bytes;
+        targetResultBytes = bytes;
     }
 
     private static int compareReaders(StreamReader a, StreamReader b)
@@ -328,7 +328,7 @@ public class ColumnGroupReader
         if (totalAsk == 0) {
             return false;
         }
-        int available = targetResultBytes - bytesSoFar;
+        long available = targetResultBytes - bytesSoFar;
         if (available < targetResultBytes / 10 && mayReturn) {
             return true;
         }

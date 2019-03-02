@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
+import static com.google.common.base.Verify.verify;
 
 public class Filters
 {
@@ -221,6 +222,11 @@ public class Filters
         {
             filters.put(member, filter);
         }
+
+        public HashMap<SubfieldPath.PathElement, Filter> getFilters()
+        {
+            return filters;
+        }
     }
 
     public static class MultiRange
@@ -348,6 +354,124 @@ public class Filters
         }
         else {
             return new MultiRange(filters, nullAllowed);
+        }
+    }
+
+    public static class PositionalFilter
+            extends Filter
+    {
+        // The set of rows for which this specifies a Filter.
+        private int[] filterRows;
+        int numFilterRows;
+        //Filter for each row in filterRows. A null element means that the row has no filter.
+        private Filter[] filters;
+        // True if applying all in filters in sequence.
+        boolean allFilters;
+        // Indices into filters. Each consecutive test consumes one. Used if allFilters is false.
+        private int[] filterOrder;
+        // Count of valid elements in filters/filterOrder.
+        int numFilters;
+        // Last used index in filters/filterOrder. -1 after initialization.
+        int filterIdx;
+
+        public PositionalFilter()
+        {
+            super(false);
+        }
+
+        // Sets the filters to apply. filters corresponds pairwise to the rows in qualifyingSet.
+        public void setFilters(QualifyingSet rows, Filter[] filters)
+        {
+            this.filterRows = rows.getPositions();
+            int numFilterRows = rows.getPositionCount();
+            this.filters = filters;
+            filterIdx = -1;
+        }
+
+        @Override
+        public boolean isDeterministic()
+        {
+            return false;
+        }
+
+        @Override
+        public void setScanRows(int[] rows, int[] rowIndices, int numRows)
+        {
+            filterIdx = -1;
+            if (numRows == numFilterRows) {
+                allFilters = true;
+                numFilters = numFilterRows;
+            }
+            else {
+                allFilters = false;
+                numFilters = numRows;
+                if (numFilters == 0) {
+                    return;
+                }
+                if (filterOrder == null || filterOrder.length < numRows) {
+                    filterOrder = new int[numRows];
+                }
+                int row = rowIndices != null ? rows[rowIndices[0]] : rows[0];
+                int first = Arrays.binarySearch(filterRows, 0, numFilterRows, row);
+                if (first < 0) {
+                    throw new IllegalArgumentException("Filter row not in defined row set for PositionalFilter");
+                }
+                filterOrder[0] = first;
+                for (int i = 1; i < numRows; i++) {
+                    row = rowIndices != null ? rows[rowIndices[i]] : rows[i];
+                    boolean found = false;
+                    for (int j = filterOrder[i - 1] + 1; j < numFilterRows; j++) {
+                        if (filterRows[j] == row) {
+                            filterOrder[i] = j;
+                            found = true;
+                            break;
+                        }
+                        if (filterRows[j] > row) {
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        throw new IllegalArgumentException("Setting a filtered row that is not in the set of defined rows for PositionalFilter");
+                    }
+                }
+            }
+        }
+
+        @Override
+        public boolean testNull()
+        {
+            Filter filter = nextFilter();
+            if (filter != null) {
+                return filter.testNull();
+            }
+            return true;
+        }
+
+        @Override
+        public boolean testLong(long value)
+        {
+            Filter filter = nextFilter();
+            if (filter != null) {
+                return filter.testLong(value);
+            }
+            return true;
+        }
+
+        @Override
+        public boolean testBytes(byte[] value, int offset, int length)
+        {
+            Filter filter = nextFilter();
+            if (filter != null) {
+                return filter.testBytes(value, offset, length);
+            }
+            return true;
+        }
+
+        private Filter nextFilter()
+        {
+            filterIdx++;
+            verify(filterIdx < numFilters);
+            return allFilters ? filters[filterIdx] : filters[filterOrder[filterIdx]];
         }
     }
 }

@@ -13,8 +13,8 @@
  */
 package com.facebook.presto.orc.reader;
 
-// import com.facebook.presto.orc.Filter;
-// import com.facebook.presto.orc.QualifyingSet;
+import com.facebook.presto.orc.Filter;
+import com.facebook.presto.orc.QualifyingSet;
 // import com.facebook.presto.orc.stream.BooleanInputStream;
 // import com.facebook.presto.orc.stream.LongInputStream;
 // import com.facebook.presto.spi.block.Block;
@@ -23,8 +23,144 @@ package com.facebook.presto.orc.reader;
 // import java.io.IOException;
 // import java.util.Arrays;
 
+// import static com.google.common.base.Verify.verify;
+
 abstract class RepeatedColumnReader
         extends NullWrappingColumnReader
-        implements StreamReader
 {
+    // Starting offset of each result in the element reader's Block.
+    protected int[] elementOffset;
+    // Length of each row in the input QualifyingSet.
+    protected int[] elementLength;
+    // Start of each row of inputQualifyingSet in the inner  data.
+    protected int[] elementStart;
+    // Filter to apply to the corresponding element of innerQualifyingSet.
+    Filter[] elementFilter;
+
+    // Number of filters for the corresponding element of the
+    // inputQualifyingSet. If this is less than the number of filters
+    // per element, then this means that the subscript of some filter
+    // did not exist in this element. Thus, if this many filters
+    // passed, we have an error because a missing subscript would have
+    // been accessed.
+    int[] numElementFilters;
+
+    // Used for compactValues of repeated content.
+    protected int[] innerSurviving;
+    protected int numInnerSurviving;
+    protected int innerSurvivingBase;
+
+    // Number of rows of nested content read. This is after applying any pushed down filters.
+    protected long innerRowCount;
+    // Number of top level rows read.
+    protected long outerRowCount;
+
+    protected int getInnerPosition(int position)
+    {
+        return elementOffset[position];
+    }
+
+    protected void computeInnerSurviving(int[]surviving, int base, int numSurviving)
+    {
+        innerSurvivingBase = elementOffset[base];
+        if (numSurviving == 0) {
+            numInnerSurviving = 0;
+            return;
+        }
+        int numInner = 0;
+        for (int i = 0; i < numSurviving; i++) {
+            int position = surviving[base + i];
+            numInner += elementOffset[position + 1] - elementOffset[position];
+        }
+        if (innerSurviving == null || innerSurviving.length < numInner) {
+            innerSurviving = new int[numInner];
+        }
+        numInnerSurviving = numInner;
+        int fill = 0;
+        for (int i = 0; i < numSurviving; i++) {
+            int position = elementOffset[surviving[i]];
+            int startIdx = elementOffset[position];
+            int endIdx = elementOffset[position + 1];
+            for (int innerPosition = startIdx; innerPosition < endIdx; innerPosition++) {
+                innerSurviving[fill++] = innerPosition;
+            }
+        }
+    }
+
+    @Override
+    protected void makeInnerQualifyingSet()
+    {
+        hasNulls = presentStream != null;
+        int nonNullRowIdx = 0;
+        if (innerQualifyingSet == null) {
+            innerQualifyingSet = new QualifyingSet();
+        }
+        int[] inputRows = inputQualifyingSet.getPositions();
+        int numActive = inputQualifyingSet.getPositionCount();
+        if (elementLength == null || elementLength.length < numActive) {
+            elementLength = new int[numActive];
+            elementStart = new int[numActive];
+        }
+        innerQualifyingSet.reset(countInnerActive());
+        int prevRow = posInRowGroup;
+        int prevInner = innerPosInRowGroup;
+        numNullsToAdd = 0;
+        boolean keepNulls = filter == null || filter.testNull();
+        for (int activeIdx = 0; activeIdx < numActive; activeIdx++) {
+            int row = inputRows[activeIdx] - posInRowGroup;
+            if (!present[row]) {
+                elementLength[activeIdx] = 0;
+                elementStart[activeIdx] = prevInner;
+                if (keepNulls) {
+                    addNullToKeep(inputRows[activeIdx], activeIdx);
+                }
+            }
+            else {
+                prevInner += innerDistance(prevRow, row, nonNullRowIdx);
+                nonNullRowIdx += countPresent(prevRow, row);
+                prevRow = row;
+                int length = lengths[nonNullRowIdx];
+                elementLength[activeIdx] = length;
+                elementStart[activeIdx] = prevInner;
+                for (int i = 0; i < length; i++) {
+                    innerQualifyingSet.append(prevInner + i, activeIdx);
+                }
+            }
+        }
+        numInnerRows = innerQualifyingSet.getPositionCount();
+        int skip = innerDistance(prevRow, inputQualifyingSet.getEnd() - posInRowGroup, nonNullRowIdx);
+        innerQualifyingSet.setEnd(skip + prevInner);
+        skip = countPresent(prevRow, inputQualifyingSet.getEnd() - posInRowGroup);
+        lengthIdx = nonNullRowIdx + skip;
+    }
+
+    // Returns the number of nested rows to skip to go from
+    // 'outerBegin' to 'outerEnd'. 'outerBegin' and 'outerEnd' are
+    // offsets from 'posInRowGroup' of the map/list reader. nonNullRowIdx is the number of non-null map/list rows before outerBegin.
+    private int innerDistance(int outerBegin, int outerEnd, int nonNullRowIdx)
+    {
+        int distance = 0;
+        int numPresent = countPresent(outerBegin, outerEnd);
+        for (int ctr = 0; ctr < numPresent; ctr++) {
+            distance = lengths[nonNullRowIdx + ctr];
+        }
+        return distance;
+    }
+
+    private int countInnerActive()
+    {
+        int[] inputRows = inputQualifyingSet.getPositions();
+        int numActive = innerQualifyingSet.getPositionCount();
+        int nonNullRowIdx = 0;
+        int total = 0;
+        for (int i = 0; i < numActive; i++) {
+            int row = inputRows[i];
+            if (presentStream != null && !present[row]) {
+                continue;
+            }
+            total += lengths[nonNullRowIdx];
+            nonNullRowIdx++;
+        }
+        return total;
+    }
 }

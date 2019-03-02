@@ -25,15 +25,16 @@ import static com.google.common.base.Verify.verify;
 abstract class NullWrappingColumnReader
         extends ColumnReader
 {
-    QualifyingSet innerQualifyingSet;
-    boolean hasNulls;
-    int innerPosInRowGroup;
-    int numInnerRows;
-    int[] nullsToAdd;
-    int[] nullsToAddIndexes;
-    int numNullsToAdd;
+    protected QualifyingSet innerQualifyingSet;
+    protected boolean hasNulls;
+    protected int innerPosInRowGroup;
+    protected int numInnerRows;
+    protected int[] nullsToAdd;
+    protected int[] nullsToAddIndexes;
+    protected int numNullsToAdd;
     // Number of elements retrieved from inner reader.
-    int numInnerResults;
+    protected int numInnerResults;
+    private int[] tempInt;
 
     protected void beginScan(BooleanInputStream presentStream, LongInputStream lengthStream)
             throws IOException
@@ -52,6 +53,7 @@ abstract class NullWrappingColumnReader
             hasNulls = false;
             return;
         }
+        boolean nonDeterministic = filter != null && !filter.isDeterministic();
         hasNulls = true;
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
@@ -63,11 +65,11 @@ abstract class NullWrappingColumnReader
         int prevRow = posInRowGroup;
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
-        boolean keepNulls = filter == null || filter.testNull();
+        boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());
         for (int activeIdx = 0; activeIdx < numActive; activeIdx++) {
             int row = inputRows[activeIdx] - posInRowGroup;
             if (!present[row]) {
-                if (keepNulls) {
+                if (keepNulls || (nonDeterministic && testNullAt(row + posInRowGroup))) {
                     addNullToKeep(inputRows[activeIdx], activeIdx);
                 }
             }
@@ -80,9 +82,23 @@ abstract class NullWrappingColumnReader
         numInnerRows = innerQualifyingSet.getPositionCount();
         int skip = countPresent(prevRow, inputQualifyingSet.getEnd() - posInRowGroup);
         innerQualifyingSet.setEnd(skip + prevInner);
+        if (nonDeterministic) {
+            // The filter will be called on non-null rows in sequence.
+            filter.setScanRows(inputQualifyingSet.getPositions(), innerQualifyingSet.getInputNumbers(), innerQualifyingSet.getPositionCount());
+        }
     }
 
-    private void addNullToKeep(int position, int inputIndex)
+    protected boolean testNullAt(int row)
+    {
+        if (tempInt == null) {
+            tempInt = new int[1];
+        }
+        tempInt[0] = row;
+        filter.setScanRows(tempInt, null, 1);
+        return filter.testNull();
+    }
+
+    protected void addNullToKeep(int position, int inputIndex)
     {
         if (nullsToAdd == null) {
             nullsToAdd = new int[100];
