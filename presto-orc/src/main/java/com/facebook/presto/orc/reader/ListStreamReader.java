@@ -78,9 +78,6 @@ public class ListStreamReader
     // is null, values for all subscripts must be returned.
     long[] subscripts;
 
-    int[] elementOffset;
-    int[] innerSurviving;
-
     HashMap<Long, Filter> subscriptToFilter;
     Filters.PositionalFilter positionalFilter;
     boolean filterIsSetup;
@@ -255,6 +252,9 @@ public class ListStreamReader
     @Override
     public void erase(int end)
     {
+        if (outputChannel == -1 || numValues == 0) {
+            return;
+        }
         int innerEnd = getInnerPosition(end);
         int innerNumValues = elementStreamReader.getNumValues();
         verify(innerEnd <= innerNumValues);
@@ -262,11 +262,12 @@ public class ListStreamReader
         if (valueIsNull != null) {
             System.arraycopy(valueIsNull, end, valueIsNull, 0, numValues);
         }
-        System.arraycopy(elementOffset, 0, elementOffset, innerEnd, numValues - innerEnd);
+        System.arraycopy(elementOffset, 0, elementOffset, end, numValues);
         for (int i = 0; i < numValues; i++) {
             verify(elementOffset[i] >= innerEnd);
             elementOffset[i] -= innerEnd;
         }
+        elementStreamReader.erase(innerEnd);
     }
 
     @Override
@@ -496,6 +497,24 @@ public class ListStreamReader
         else if (elementOffset.length < numValues + numAdded + 1) {
             elementOffset = Arrays.copyOf(elementOffset, newSize);
         }
+    }
+
+    @Override
+    public Block getBlock(int numFirstRows, boolean mayReuse)
+    {
+        int innerFirstRows = getInnerPosition(numFirstRows);
+            int[] offsets = mayReuse ? elementOffset : Arrays.copyOf(elementOffset, numFirstRows + 1);
+        boolean[] nulls = valueIsNull == null ? null
+            : mayReuse ? valueIsNull : Arrays.copyOf(valueIsNull, numFirstRows);
+        Block elements;
+        if (innerFirstRows == 0) {
+            Type elementType = type.getTypeParameters().get(0);
+            elements = elementType.createBlockBuilder(null, 0).build();
+        }
+        else {
+            elements = elementStreamReader.getBlock(innerFirstRows, mayReuse);
+        }
+        return ArrayBlock.fromElementBlock(numFirstRows, Optional.ofNullable(nulls), offsets, elements);
     }
 
     @Override

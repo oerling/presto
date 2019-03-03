@@ -92,6 +92,7 @@ abstract class RepeatedColumnReader
     {
         hasNulls = presentStream != null;
         int nonNullRowIdx = 0;
+        boolean nonDeterministic = filter != null && !deterministicFilter;
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
         }
@@ -105,19 +106,19 @@ abstract class RepeatedColumnReader
         int prevRow = posInRowGroup;
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
-        boolean keepNulls = filter == null || filter.testNull();
+        boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());
         for (int activeIdx = 0; activeIdx < numActive; activeIdx++) {
-            int row = inputRows[activeIdx] - posInRowGroup;
-            if (!present[row]) {
+            int row = inputRows[activeIdx];
+            if (presentStream != null && !present[row]) {
                 elementLength[activeIdx] = 0;
                 elementStart[activeIdx] = prevInner;
-                if (keepNulls) {
+                if (keepNulls || (nonDeterministic && testNullAt(row))) {
                     addNullToKeep(inputRows[activeIdx], activeIdx);
                 }
             }
             else {
-                prevInner += innerDistance(prevRow, row, nonNullRowIdx);
-                nonNullRowIdx += countPresent(prevRow, row);
+                prevInner += innerDistance(prevRow - posInRowGroup, row - posInRowGroup, nonNullRowIdx);
+                nonNullRowIdx += countPresent(prevRow - posInRowGroup, row - posInRowGroup);
                 prevRow = row;
                 int length = lengths[nonNullRowIdx];
                 elementLength[activeIdx] = length;
@@ -128,21 +129,23 @@ abstract class RepeatedColumnReader
             }
         }
         numInnerRows = innerQualifyingSet.getPositionCount();
-        int skip = innerDistance(prevRow, inputQualifyingSet.getEnd() - posInRowGroup, nonNullRowIdx);
+        int skip = innerDistance(prevRow - posInRowGroup, inputQualifyingSet.getEnd() - posInRowGroup, nonNullRowIdx);
         innerQualifyingSet.setEnd(skip + prevInner);
-        skip = countPresent(prevRow, inputQualifyingSet.getEnd() - posInRowGroup);
+        skip = countPresent(prevRow - posInRowGroup, inputQualifyingSet.getEnd() - posInRowGroup);
         lengthIdx = nonNullRowIdx + skip;
     }
 
     // Returns the number of nested rows to skip to go from
     // 'outerBegin' to 'outerEnd'. 'outerBegin' and 'outerEnd' are
-    // offsets from 'posInRowGroup' of the map/list reader. nonNullRowIdx is the number of non-null map/list rows before outerBegin.
+    // offsets from 'posInRowGroup' of the map/list
+    // reader. nonNullRowIdx is the number of non-null map/list rows
+    // before outerBegin.
     private int innerDistance(int outerBegin, int outerEnd, int nonNullRowIdx)
     {
         int distance = 0;
         int numPresent = countPresent(outerBegin, outerEnd);
         for (int ctr = 0; ctr < numPresent; ctr++) {
-            distance = lengths[nonNullRowIdx + ctr];
+            distance += lengths[nonNullRowIdx + ctr];
         }
         return distance;
     }
@@ -150,16 +153,16 @@ abstract class RepeatedColumnReader
     private int countInnerActive()
     {
         int[] inputRows = inputQualifyingSet.getPositions();
-        int numActive = innerQualifyingSet.getPositionCount();
+        int numActive = inputQualifyingSet.getPositionCount();
         int nonNullRowIdx = 0;
         int total = 0;
+        int prevRow = 0;
         for (int i = 0; i < numActive; i++) {
-            int row = inputRows[i];
-            if (presentStream != null && !present[row]) {
-                continue;
-            }
+            int row = inputRows[i] - posInRowGroup;
+            int distance = countPresent(prevRow, row);
+            nonNullRowIdx += distance;
             total += lengths[nonNullRowIdx];
-            nonNullRowIdx++;
+            prevRow = row;
         }
         return total;
     }
