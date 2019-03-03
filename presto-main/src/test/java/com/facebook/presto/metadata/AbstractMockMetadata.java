@@ -25,7 +25,9 @@ import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.security.GrantInfo;
+import com.facebook.presto.spi.security.PrestoPrincipal;
 import com.facebook.presto.spi.security.Privilege;
+import com.facebook.presto.spi.security.RoleGrant;
 import com.facebook.presto.spi.statistics.ComputedStatistics;
 import com.facebook.presto.spi.statistics.TableStatistics;
 import com.facebook.presto.spi.statistics.TableStatisticsMetadata;
@@ -131,6 +133,12 @@ public abstract class AbstractMockMetadata
 
     @Override
     public Optional<PartitioningHandle> getCommonPartitioning(Session session, PartitioningHandle left, PartitioningHandle right)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PartitioningHandle getPartitioningHandleForExchange(Session session, String catalogName, int partitionCount, List<Type> partitionTypes)
     {
         throw new UnsupportedOperationException();
     }
@@ -376,13 +384,61 @@ public abstract class AbstractMockMetadata
     }
 
     @Override
-    public void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption)
+    public void createRole(Session session, String role, Optional<PrestoPrincipal> grantor, String catalog)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption)
+    public void dropRole(Session session, String role, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Set<String> listRoles(Session session, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void grantRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean withAdminOption, Optional<PrestoPrincipal> grantor, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void revokeRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean adminOptionFor, Optional<PrestoPrincipal> grantor, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Set<RoleGrant> listApplicableRoles(Session session, PrestoPrincipal principal, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Set<String> listEnabledRoles(Session session, String catalog)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Set<RoleGrant> listRoleGrants(Session session, String catalog, PrestoPrincipal principal)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption)
     {
         throw new UnsupportedOperationException();
     }

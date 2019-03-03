@@ -42,6 +42,7 @@ abstract class ColumnReader
     Block block;
     int outputChannel = -1;
     Filter filter;
+    protected boolean deterministicFilter;
     int columnIndex;
     Type type;
     // First row number in row group that is not processed due to
@@ -117,6 +118,7 @@ abstract class ColumnReader
     public void setFilterAndChannel(Filter filter, int channel, int columnIndex, Type type)
     {
         this.filter = filter;
+        this.deterministicFilter = filter != null && filter.isDeterministic();
         outputChannel = channel;
         this.columnIndex = columnIndex;
         this.type = type;
@@ -174,7 +176,7 @@ abstract class ColumnReader
         throw new UnsupportedOperationException("Variable width streams must implement getResultSizeInBytes()");
     }
 
-    public void compactQualifyingSet(int[] surviving, int numSurviving)
+    protected void compactQualifyingSet(int[] surviving, int numSurviving)
     {
         if (outputQualifyingSet == null) {
             return;

@@ -16,9 +16,11 @@ package com.facebook.presto.hive;
 import com.facebook.presto.Session;
 import com.facebook.presto.hive.authentication.NoHdfsAuthentication;
 import com.facebook.presto.hive.metastore.Database;
-import com.facebook.presto.hive.metastore.PrincipalType;
 import com.facebook.presto.hive.metastore.file.FileHiveMetastore;
 import com.facebook.presto.metadata.QualifiedObjectName;
+import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.PrincipalType;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.DistributedQueryRunner;
 import com.facebook.presto.tpch.TpchPlugin;
@@ -120,7 +122,7 @@ public final class HiveQueryRunner
                     .putAll(hiveProperties)
                     .put("hive.max-initial-split-size", "10kB") // so that each bucket has multiple splits
                     .put("hive.max-split-size", "10kB") // so that each bucket has multiple splits
-                //                    .put("hive.storage-format", "TEXTFILE")
+                //.put("hive.storage-format", "TEXTFILE")
                     .put("hive.compression-codec", "NONE") // so that the file is splittable
                     .build();
             queryRunner.createCatalog(HIVE_CATALOG, HIVE_CATALOG, hiveProperties);
@@ -133,7 +135,7 @@ public final class HiveQueryRunner
 
             if (!metastore.getDatabase(TPCH_BUCKETED_SCHEMA).isPresent()) {
                 metastore.createDatabase(createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA));
-                copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, createBucketedSession(), tables);
+                copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, createBucketedSession(Optional.empty()), tables);
             }
 
             return queryRunner;
@@ -167,9 +169,15 @@ public final class HiveQueryRunner
                 .build();
     }
 
-    public static Session createBucketedSession()
+    public static Session createBucketedSession(Optional<SelectedRole> role)
     {
         return testSessionBuilder()
+                .setIdentity(new Identity(
+                        "hive",
+                        Optional.empty(),
+                        role.map(selectedRole -> ImmutableMap.of("hive", selectedRole))
+                                .orElse(ImmutableMap.of())))
+                .setCatalog(HIVE_CATALOG)
                 .setCatalog(HIVE_BUCKETED_CATALOG)
                 .setSchema(TPCH_BUCKETED_SCHEMA)
                 .build();

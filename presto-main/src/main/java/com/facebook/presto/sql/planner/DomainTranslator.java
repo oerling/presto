@@ -338,8 +338,8 @@ public final class DomainTranslator
             this.literalEncoder = new LiteralEncoder(metadata.getBlockEncodingSerde());
             this.session = requireNonNull(session, "session is null");
             this.types = requireNonNull(types, "types is null");
-            this.includeSubfields = includeSubfields;
             this.functionInvoker = new InterpretedFunctionInvoker(metadata.getFunctionManager());
+            this.includeSubfields = includeSubfields;
         }
 
         private Type checkedTypeLookup(Symbol symbol)

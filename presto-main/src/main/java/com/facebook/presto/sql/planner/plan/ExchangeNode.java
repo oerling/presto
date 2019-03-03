@@ -114,21 +114,37 @@ public class ExchangeNode
         this.orderingScheme = orderingScheme;
     }
 
-    public static ExchangeNode partitionedExchange(PlanNodeId id, Scope scope, PlanNode child, List<Symbol> partitioningColumns, Optional<Symbol> hashColumns)
+    public static ExchangeNode systemPartitionedExchange(PlanNodeId id, Scope scope, PlanNode child, List<Symbol> partitioningColumns, Optional<Symbol> hashColumn)
     {
-        return partitionedExchange(id, scope, child, partitioningColumns, hashColumns, false);
+        return systemPartitionedExchange(id, scope, child, partitioningColumns, hashColumn, false);
     }
 
-    public static ExchangeNode partitionedExchange(PlanNodeId id, Scope scope, PlanNode child, List<Symbol> partitioningColumns, Optional<Symbol> hashColumns, boolean replicateNullsAndAny)
+    public static ExchangeNode systemPartitionedExchange(PlanNodeId id, Scope scope, PlanNode child, List<Symbol> partitioningColumns, Optional<Symbol> hashColumn, boolean replicateNullsAndAny)
+    {
+        return partitionedExchange(
+                id,
+                scope,
+                child,
+                Partitioning.create(FIXED_HASH_DISTRIBUTION, partitioningColumns),
+                hashColumn,
+                replicateNullsAndAny);
+    }
+
+    public static ExchangeNode partitionedExchange(PlanNodeId id, Scope scope, PlanNode child, Partitioning partitioning, Optional<Symbol> hashColumn)
+    {
+        return partitionedExchange(id, scope, child, partitioning, hashColumn, false);
+    }
+
+    public static ExchangeNode partitionedExchange(PlanNodeId id, Scope scope, PlanNode child, Partitioning partitioning, Optional<Symbol> hashColumn, boolean replicateNullsAndAny)
     {
         return partitionedExchange(
                 id,
                 scope,
                 child,
                 new PartitioningScheme(
-                        Partitioning.create(FIXED_HASH_DISTRIBUTION, partitioningColumns),
+                        partitioning,
                         child.getOutputSymbols(),
-                        hashColumns,
+                        hashColumn,
                         replicateNullsAndAny,
                         Optional.empty()));
     }
@@ -144,7 +160,7 @@ public class ExchangeNode
                 scope,
                 partitioningScheme,
                 ImmutableList.of(child),
-                ImmutableList.of(partitioningScheme.getOutputLayout()).asList(),
+                ImmutableList.of(partitioningScheme.getOutputLayout()),
                 Optional.empty());
     }
 

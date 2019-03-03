@@ -58,6 +58,7 @@ public final class SystemSessionProperties
     public static final String DISTRIBUTED_JOIN = "distributed_join";
     public static final String DISTRIBUTED_INDEX_JOIN = "distributed_index_join";
     public static final String HASH_PARTITION_COUNT = "hash_partition_count";
+    public static final String PARTITIONING_PROVIDER_CATALOG = "partitioning_provider_catalog";
     public static final String GROUPED_EXECUTION_FOR_AGGREGATION = "grouped_execution_for_aggregation";
     public static final String DYNAMIC_SCHEDULE_FOR_GROUPED_EXECUTION = "dynamic_schedule_for_grouped_execution";
     public static final String PREFER_STREAMING_OPERATORS = "prefer_streaming_operators";
@@ -119,6 +120,7 @@ public final class SystemSessionProperties
     public static final String ARIA_FLAGS = "aria_flags";
     public static final String IGNORE_STATS_CALCULATOR_FAILURES = "ignore_stats_calculator_failures";
     public static final String MAX_DRIVERS_PER_TASK = "max_drivers_per_task";
+    public static final String MAX_TASKS_PER_STAGE = "max_tasks_per_stage";
     public static final String DEFAULT_FILTER_FACTOR_ENABLED = "default_filter_factor_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
@@ -180,7 +182,12 @@ public final class SystemSessionProperties
                 integerProperty(
                         HASH_PARTITION_COUNT,
                         "Number of partitions for distributed joins and aggregations",
-                        queryManagerConfig.getInitialHashPartitions(),
+                        queryManagerConfig.getHashPartitionCount(),
+                        false),
+                stringProperty(
+                        PARTITIONING_PROVIDER_CATALOG,
+                        "Name of the catalog providing custom partitioning",
+                        queryManagerConfig.getPartitioningProviderCatalog(),
                         false),
                 booleanProperty(
                         GROUPED_EXECUTION_FOR_AGGREGATION,
@@ -529,6 +536,11 @@ public final class SystemSessionProperties
                         "Experimental: Enable statistics calculator",
                         featuresConfig.isEnableStatsCalculator(),
                         false),
+                integerProperty(
+                        MAX_TASKS_PER_STAGE,
+                        "Maximum number of tasks for a non source distributed stage",
+                        taskManagerConfig.getMaxTasksPerStage(),
+                        false),
                 booleanProperty(ARIA_SCAN,
                                 "Enable Aria Presto! scan operator",
                                 true,
@@ -608,6 +620,11 @@ public final class SystemSessionProperties
     public static int getHashPartitionCount(Session session)
     {
         return session.getSystemProperty(HASH_PARTITION_COUNT, Integer.class);
+    }
+
+    public static String getPartitioningProviderCatalog(Session session)
+    {
+        return session.getSystemProperty(PARTITIONING_PROVIDER_CATALOG, String.class);
     }
 
     public static boolean isGroupedExecutionForAggregationEnabled(Session session)
@@ -891,6 +908,11 @@ public final class SystemSessionProperties
             return OptionalInt.empty();
         }
         return OptionalInt.of(value);
+    }
+
+    public static int getMaxTasksPerStage(Session session)
+    {
+        return session.getSystemProperty(MAX_TASKS_PER_STAGE, Integer.class);
     }
 
     private static int validateValueIsPowerOfTwo(Object value, String property)

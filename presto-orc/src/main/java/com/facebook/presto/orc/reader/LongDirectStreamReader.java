@@ -211,10 +211,12 @@ public class LongDirectStreamReader
             if (filter != null) {
                 int numInput = input.getPositionCount();
                 outputQualifyingSet.reset(numInput);
+                resultsProcessor.reset();
                 numInnerResults = dataStream.scan(input.getPositions(), 0, numInput, input.getEnd(), resultsProcessor);
                 outputQualifyingSet.setPositionCount(numInnerResults);
             }
             else {
+                resultsProcessor.reset();
                 numInnerResults = dataStream.scan(input.getPositions(), 0, input.getPositionCount(), input.getEnd(), resultsProcessor);
             }
         }
@@ -269,16 +271,21 @@ public class LongDirectStreamReader
         }
 
         @Override
-        public boolean consumeRepeated(int offsetIndex, long value, int count)
+        public int consumeRepeated(int offsetIndex, long value, int count)
         {
-            if (filter != null && !filter.testLong(value)) {
-                return false;
+            if (deterministicFilter && !filter.testLong(value)) {
+                return 0;
             }
 
+            int added = 0;
             for (int i = 0; i < count; i++) {
+                if (!deterministicFilter && filter != null && !filter.testLong(value)) {
+                    continue;
+                }
                 addResult(offsetIndex + i, value);
+                added++;
             }
-            return true;
+            return added;
         }
 
         private void addResult(int offsetIndex, long value)
