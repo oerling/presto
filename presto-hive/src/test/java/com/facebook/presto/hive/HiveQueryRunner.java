@@ -37,7 +37,6 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 
-import static com.facebook.presto.spi.security.SelectedRole.Type.ROLE;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static com.facebook.presto.tests.QueryAssertions.copyTpchTables;
 import static com.facebook.presto.tpch.TpchMetadata.TINY_SCHEMA_NAME;
@@ -84,27 +83,28 @@ public final class HiveQueryRunner
             throws Exception
     {
         assertEquals(DateTimeZone.getDefault(), TIME_ZONE, "Timezone not configured correctly. Add -Duser.timezone=America/Bahia_Banderas to your JVM arguments");
+        String singleThreadEnv = System.getenv("SINGLE_THREAD");
+        boolean singleThreaded = singleThreadEnv != null && singleThreadEnv.equals("y");
         setupLogging();
 
         DistributedQueryRunner queryRunner =
-                DistributedQueryRunner.builder(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))))
-                        .setNodeCount(4)
+                DistributedQueryRunner.builder(createSession())
+                        .setNodeCount(singleThreaded ? 1 : 4)
                         .setExtraProperties(extraProperties)
                         .setBaseDataDir(baseDataDir)
                         .build();
+
         try {
             queryRunner.installPlugin(new TpchPlugin());
             queryRunner.createCatalog("tpch", "tpch");
 
-            File baseDir = queryRunner.getCoordinator().getBaseDataDir().resolve("hive_data").toFile();
+            File baseDir = new File("/home/oerling/hmd");
 
             HiveClientConfig hiveClientConfig = new HiveClientConfig();
             HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationUpdater(hiveClientConfig));
             HdfsEnvironment hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hiveClientConfig, new NoHdfsAuthentication());
 
             FileHiveMetastore metastore = new FileHiveMetastore(hdfsEnvironment, baseDir.toURI().toString(), "test");
-            metastore.createDatabase(createDatabaseMetastoreObject(TPCH_SCHEMA));
-            metastore.createDatabase(createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA));
             queryRunner.installPlugin(new HivePlugin(HIVE_CATALOG, Optional.of(metastore)));
 
             Map<String, String> hiveProperties = ImmutableMap.<String, String>builder()
@@ -114,12 +114,15 @@ public final class HiveQueryRunner
                     .put("hive.max-partitions-per-scan", "1000")
                     .put("hive.assume-canonical-partition-keys", "true")
                     .put("hive.collect-column-statistics-on-write", "true")
+                    .put("hive.storage-format", "ORC") // so that there's no minimum split size for the file
+                    .put("hive.orc.optimized-writer.enabled", "true")
+                    .put("hive.orc.writer.validation-percentage", "0.0")
                     .build();
             Map<String, String> hiveBucketedProperties = ImmutableMap.<String, String>builder()
                     .putAll(hiveProperties)
                     .put("hive.max-initial-split-size", "10kB") // so that each bucket has multiple splits
                     .put("hive.max-split-size", "10kB") // so that each bucket has multiple splits
-                    .put("hive.storage-format", "TEXTFILE")
+                //.put("hive.storage-format", "TEXTFILE")
                     .put("hive.compression-codec", "NONE") // so that the file is splittable
                     .build();
             queryRunner.createCatalog(HIVE_CATALOG, HIVE_CATALOG, hiveProperties);
@@ -127,7 +130,7 @@ public final class HiveQueryRunner
 
             if (!metastore.getDatabase(TPCH_SCHEMA).isPresent()) {
                 metastore.createDatabase(createDatabaseMetastoreObject(TPCH_SCHEMA));
-                copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(Optional.empty()), tables);
+                copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(), tables);
             }
 
             if (!metastore.getDatabase(TPCH_BUCKETED_SCHEMA).isPresent()) {
@@ -147,7 +150,6 @@ public final class HiveQueryRunner
     {
         Logging logging = Logging.initialize();
         logging.setLevel("org.apache.parquet.hadoop", WARN);
-        logging.setLevel("parquet.hadoop", WARN);
     }
 
     private static Database createDatabaseMetastoreObject(String name)
@@ -159,14 +161,9 @@ public final class HiveQueryRunner
                 .build();
     }
 
-    public static Session createSession(Optional<SelectedRole> role)
+    public static Session createSession()
     {
         return testSessionBuilder()
-                .setIdentity(new Identity(
-                        "hive",
-                        Optional.empty(),
-                        role.map(selectedRole -> ImmutableMap.of("hive", selectedRole))
-                                .orElse(ImmutableMap.of())))
                 .setCatalog(HIVE_CATALOG)
                 .setSchema(TPCH_SCHEMA)
                 .build();
