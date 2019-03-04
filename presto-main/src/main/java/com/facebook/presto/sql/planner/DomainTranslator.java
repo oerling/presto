@@ -41,6 +41,7 @@ import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.DereferenceExpression;
 import com.facebook.presto.sql.tree.Expression;
+import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.Identifier;
 import com.facebook.presto.sql.tree.InListExpression;
 import com.facebook.presto.sql.tree.InPredicate;
@@ -122,7 +123,7 @@ public final class DomainTranslator
                 SubfieldPath.PathElement element = path.getPath().get(i);
                 String field = element.getField();
                 if (element.getIsSubscript()) {
-                    base = new SubscriptExpression(base, field != null ? new StringLiteral(field) : new LongLiteral(Long.valueOf(element.getSubscript()).toString()));
+                    base = new SubscriptExpression(base, field != null ? new StringLiteral(field) : new GenericLiteral("BIGINT", Long.valueOf(element.getSubscript()).toString()));
                 }
                 else if (field != null) {
                     base = new DereferenceExpression(base, new Identifier(field));

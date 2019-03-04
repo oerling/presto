@@ -9,3 +9,5 @@
 ../test.sh strings_struct_filter1.sql
 ../test.sh strings_struct_nulls1.sql
 ../test.sh strings_struct_nulls_filter1.sql
+../test.sh list_nulls1.sql
+../test.sh list_filter1.sql

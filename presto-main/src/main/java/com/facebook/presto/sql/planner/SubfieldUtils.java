@@ -16,6 +16,7 @@ package com.facebook.presto.sql.planner;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.sql.tree.DereferenceExpression;
 import com.facebook.presto.sql.tree.Expression;
+import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.LongLiteral;
 import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.StringLiteral;
@@ -52,7 +53,17 @@ public class SubfieldUtils
             else if (expr instanceof SubscriptExpression) {
                 SubscriptExpression subscript = (SubscriptExpression) expr;
                 Expression index = subscript.getIndex();
-                if (index instanceof LongLiteral) {
+                if (index instanceof GenericLiteral) {
+                    GenericLiteral literal = (GenericLiteral) index;
+                    String type = literal.getType();
+                    if (type.equals("BIGINT")) {
+                        steps.add(new SubfieldPath.PathElement(null, new Integer(literal.getValue()).intValue(), true));
+                    }
+                    else {
+                        return null;
+                    }
+                }
+                else if (index instanceof LongLiteral) {
                     LongLiteral literal = (LongLiteral) index;
                     steps.add(new SubfieldPath.PathElement(null, literal.getValue(), true));
                 }

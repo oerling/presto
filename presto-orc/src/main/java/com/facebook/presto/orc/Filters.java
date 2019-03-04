@@ -362,10 +362,15 @@ public class Filters
     {
         // The set of rows for which this specifies a Filter.
         private int[] filterRows;
+        // The array/map number to which the filter refers to. All
+        // filters with the same value here refer to the same
+        // array/map. The first to fail will disqualify the rest of
+        // the array/map.
+        int[] filterContainer;
         int numFilterRows;
         //Filter for each row in filterRows. A null element means that the row has no filter.
         private Filter[] filters;
-        // True if applying all in filters in sequence.
+        // True if applying all filters in sequence.
         boolean allFilters;
         // Indices into filters. Each consecutive test consumes one. Used if allFilters is false.
         private int[] filterOrder;
@@ -373,6 +378,12 @@ public class Filters
         int numFilters;
         // Last used index in filters/filterOrder. -1 after initialization.
         int filterIdx;
+        // Count of upcoming textXx calls to fail. Suppose an array of
+        // 4 elements with a failed filter at first element. There
+        // would be 3 elements to go that are in any case
+        // disqualifuied, so the failing filter on the first element
+        // would set this to 3.
+        int failNext;
 
         public PositionalFilter()
         {
@@ -383,7 +394,8 @@ public class Filters
         public void setFilters(QualifyingSet rows, Filter[] filters)
         {
             this.filterRows = rows.getPositions();
-            int numFilterRows = rows.getPositionCount();
+            this.filterContainer = rows.getInputNumbers();
+            numFilterRows = rows.getPositionCount();
             this.filters = filters;
             filterIdx = -1;
         }
@@ -398,6 +410,7 @@ public class Filters
         public void setScanRows(int[] rows, int[] rowIndices, int numRows)
         {
             filterIdx = -1;
+            failNext = 0;
             if (numRows == numFilterRows) {
                 allFilters = true;
                 numFilters = numFilterRows;
@@ -440,9 +453,14 @@ public class Filters
         @Override
         public boolean testNull()
         {
+            if (failNext > 0) {
+                filterIdx++;
+                failNext--;
+                return false;
+            }
             Filter filter = nextFilter();
             if (filter != null) {
-                return filter.testNull();
+                return processResult(filter.testNull());
             }
             return true;
         }
@@ -450,9 +468,14 @@ public class Filters
         @Override
         public boolean testLong(long value)
         {
+            if (failNext > 0) {
+                filterIdx++;
+                failNext--;
+                return false;
+            }
             Filter filter = nextFilter();
             if (filter != null) {
-                return filter.testLong(value);
+                return processResult(filter.testLong(value));
             }
             return true;
         }
@@ -460,9 +483,14 @@ public class Filters
         @Override
         public boolean testBytes(byte[] value, int offset, int length)
         {
+            if (failNext > 0) {
+                filterIdx++;
+                failNext--;
+                return false;
+            }
             Filter filter = nextFilter();
             if (filter != null) {
-                return filter.testBytes(value, offset, length);
+                return processResult(filter.testBytes(value, offset, length));
             }
             return true;
         }
@@ -472,6 +500,32 @@ public class Filters
             filterIdx++;
             verify(filterIdx < numFilters);
             return allFilters ? filters[filterIdx] : filters[filterOrder[filterIdx]];
+        }
+
+        private boolean processResult(boolean result)
+        {
+            if (result == false) {
+                // The remaining elements of the containing array/map will also be disqualified.
+                if (allFilters) {
+                    int nthArray = filterContainer[filterIdx];
+                    for (int i = filterIdx + 1; i <numFilters; i++) {
+                        if (filterContainer[i] != nthArray) {
+                            break;
+                        }
+                        failNext++;
+                    }
+                }
+                else {
+                    int nthArray = filterContainer[filterOrder[filterIdx]];
+                    for (int i = filterIdx + 1; i <numFilters; i++) {
+                        if (filterContainer[filterOrder[i]] != nthArray) {
+                            break;
+                        }
+                        failNext++;
+                    }
+                }
+            }
+            return result;
         }
     }
 }

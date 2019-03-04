@@ -69,7 +69,7 @@ abstract class RepeatedColumnReader
         }
         int numInner = 0;
         for (int i = 0; i < numSurviving; i++) {
-            int position = surviving[base + i];
+            int position = surviving[i] + base;
             numInner += elementOffset[position + 1] - elementOffset[position];
         }
         if (innerSurviving == null || innerSurviving.length < numInner) {
@@ -78,11 +78,11 @@ abstract class RepeatedColumnReader
         numInnerSurviving = numInner;
         int fill = 0;
         for (int i = 0; i < numSurviving; i++) {
-            int position = elementOffset[surviving[i]];
+            int position = surviving[i] + base;
             int startIdx = elementOffset[position];
             int endIdx = elementOffset[position + 1];
             for (int innerPosition = startIdx; innerPosition < endIdx; innerPosition++) {
-                innerSurviving[fill++] = innerPosition;
+                innerSurviving[fill++] = innerPosition - innerSurvivingBase;
             }
         }
     }
@@ -159,6 +159,9 @@ abstract class RepeatedColumnReader
         int prevRow = 0;
         for (int i = 0; i < numActive; i++) {
             int row = inputRows[i] - posInRowGroup;
+            if (presentStream != null && !present[row]) {
+                continue;
+            }
             int distance = countPresent(prevRow, row);
             nonNullRowIdx += distance;
             total += lengths[nonNullRowIdx];

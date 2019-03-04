@@ -191,7 +191,7 @@ public class PageSourceOptions
                              int ariaFlags)
     {
         requireNonNull(internalChannels, "internalChannels is null");
-        if (internalChannels.length == 0) {
+        if (false && internalChannels.length == 0) {
             throw new IllegalArgumentException("internalChannels must not be empty");
         };
         this.internalChannels = internalChannels;

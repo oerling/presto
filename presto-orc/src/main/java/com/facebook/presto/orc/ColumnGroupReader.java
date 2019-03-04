@@ -399,6 +399,11 @@ public class ColumnGroupReader
             throws IOException
     {
         int firstStreamIdx;
+        if (sortedStreamReaders.length == 0) {
+            numRowsInResult += inputQualifyingSet.getPositionCount();
+            inputQualifyingSet.eraseBelowRow(inputQualifyingSet.getEnd());
+            return;
+        }
         lastTruncatedStreamIdx = findLastTruncatedStreamIdx();
         QualifyingSet qualifyingSet;
         if (lastTruncatedStreamIdx == -1) {

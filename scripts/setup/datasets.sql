@@ -28,9 +28,15 @@ create table hive.tpch.lineitem1_nulls
    as
 select *,
         if (mod (l_orderkey, 198000) > 99000 and mod(l_orderkey + l_linenumber, 5) = 0, null,
-          map(array[1, 2, 3], array[l_orderkey, l_partkey, l_suppkey])) as l_map,
+        if (l_returnflag = 'N',
+        map(array[1, 2, 3], array[l_orderkey, l_partkey, l_suppkey]),
+        map(array[1, 2, 3, 4], array[l_orderkey, l_partkey, l_suppkey, if (l_returnflag = 'A', 1, 2)]))
+) as l_map,
         if (mod (l_orderkey, 198000) > 99000 and mod(l_orderkey + l_linenumber, 5) = 0, null,
-           array[l_orderkey, l_partkey, l_suppkey]) as l_array
+           if (l_returnflag = 'N',
+          array[l_orderkey, l_partkey, l_suppkey],
+          array[l_orderkey, l_partkey, l_suppkey, if (l_returnflag = 'A', 1, 2)]))
+                                as l_array
 
 from (
 select  orderkey as l_orderkey,
@@ -42,7 +48,8 @@ linenumber as l_linenumber,
   if (have_nulls and mod (orderkey + linenumber, 23) = 0, null, shipmode) as l_shipmode,
   if (have_nulls and mod (orderkey + linenumber, 7) = 0, null, comment) as l_comment,
     if (have_nulls and mod(orderkey + linenumber, 31) = 0, null, returnflag = 'R') as is_returned,
-      if (have_nulls and mod(orderkey + linenumber, 37) = 0, null, cast (quantity + 1 as real)) as l_floatQuantity
+      if (have_nulls and mod(orderkey + linenumber, 37) = 0, null, cast (quantity + 1 as real)) as l_floatQuantity,
+      returnflag as l_returnflag      
   from (select mod (orderkey, 198000) > 99000 as have_nulls, * from tpch.sf1.lineitem));
   
 

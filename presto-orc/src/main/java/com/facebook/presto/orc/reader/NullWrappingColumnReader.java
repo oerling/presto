@@ -53,6 +53,7 @@ abstract class NullWrappingColumnReader
             hasNulls = false;
             return;
         }
+        hasNulls = true;
         boolean nonDeterministic = filter != null && !deterministicFilter;
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
