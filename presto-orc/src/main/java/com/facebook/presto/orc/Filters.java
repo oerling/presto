@@ -47,7 +47,7 @@ public class Filters
         private final long lower;
         private final long upper;
 
-        BigintRange(long lower, long upper, boolean nullAllowed)
+        public BigintRange(long lower, long upper, boolean nullAllowed)
         {
             super(nullAllowed);
             this.lower = lower;

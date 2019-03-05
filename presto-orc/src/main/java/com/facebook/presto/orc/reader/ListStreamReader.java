@@ -251,51 +251,13 @@ public class ListStreamReader
     }
 
     @Override
-    public void erase(int end)
-    {
-        if (outputChannel == -1 || numValues == 0) {
-            return;
-        }
-        int innerEnd = getInnerPosition(end);
-        int innerNumValues = elementStreamReader.getNumValues();
-        verify(innerEnd <= innerNumValues);
-        numValues -= end;
-        if (valueIsNull != null) {
-            System.arraycopy(valueIsNull, end, valueIsNull, 0, numValues);
-        }
-        System.arraycopy(elementOffset, end, elementOffset, 0, numValues);
-        for (int i = 0; i < numValues; i++) {
-            verify(elementOffset[i] >= innerEnd);
-            elementOffset[i] -= innerEnd;
-        }
-        elementStreamReader.erase(innerEnd);
+    protected void eraseContent(int innerEnd)
+    {elementStreamReader.erase(innerEnd);
     }
-
     @Override
-    public void compactValues(int[] surviving, int base, int numSurviving)
+    protected void compactContent(int[] innerSurviving, int innerSurvivingDase, int numInnerSurviving)
     {
-        if (outputChannel != -1) {
-            computeInnerSurviving(surviving, base, numSurviving);
-            int elementBase = getInnerPosition(base);
-            for (int i = 0; i < numSurviving; i++) {
-                int survivingRow = surviving[i] + base;
-                if (valueIsNull != null && valueIsNull[survivingRow]) {
-                    valueIsNull[base + i] = true;
-                    elementOffset[base + i] = elementBase;
-                }
-                else {
-                    if (valueIsNull != null) {
-                        valueIsNull[base + i] = false;
-                    }
-                    elementOffset[base + i] = elementBase;
-                    elementBase += elementOffset[survivingRow + 1] - elementOffset[survivingRow];
-                }
-            }
-            elementOffset[base + numSurviving] = elementBase;
-            elementStreamReader.compactValues(innerSurviving, innerSurvivingBase, numInnerSurviving);
-            numValues = base + numSurviving;
-        }
-        compactQualifyingSet(surviving, numSurviving);
+        elementStreamReader.compactValues(innerSurviving, innerSurvivingBase, numInnerSurviving);
     }
 
     @Override
@@ -501,23 +463,6 @@ public class ListStreamReader
         }
         elementOffset[numValues + numInnerResults + 1] = numInnerSurviving + initialNumElements;
         numInnerResults++;
-    }
-
-    void ensureValuesCapacity(int numAdded)
-    {
-        int newSize = numValues + numAdded * 2;
-        if (presentStream != null && valueIsNull == null) {
-            valueIsNull = new boolean[newSize];
-        }
-        if (valueIsNull != null && valueIsNull.length < numValues + numAdded) {
-            valueIsNull = Arrays.copyOf(valueIsNull, newSize);
-        }
-        if (elementOffset == null) {
-            elementOffset = new int[newSize];
-        }
-        else if (elementOffset.length < numValues + numAdded + 1) {
-            elementOffset = Arrays.copyOf(elementOffset, newSize);
-        }
     }
 
     @Override

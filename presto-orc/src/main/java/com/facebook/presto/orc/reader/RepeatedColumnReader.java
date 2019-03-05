@@ -21,9 +21,9 @@ import com.facebook.presto.orc.QualifyingSet;
 // import com.facebook.presto.spi.type.Type;
 
 // import java.io.IOException;
-// import java.util.Arrays;
+ import java.util.Arrays;
 
-// import static com.google.common.base.Verify.verify;
+import static com.google.common.base.Verify.verify;
 
 abstract class RepeatedColumnReader
         extends NullWrappingColumnReader
@@ -169,4 +169,71 @@ abstract class RepeatedColumnReader
         }
         return total;
     }
+
+@Override
+    public void erase(int end)
+    {
+        if (outputChannel == -1 || numValues == 0) {
+            return;
+        }
+        int innerEnd = getInnerPosition(end);
+        numValues -= end;
+        if (valueIsNull != null) {
+            System.arraycopy(valueIsNull, end, valueIsNull, 0, numValues);
+        }
+        System.arraycopy(elementOffset, end, elementOffset, 0, numValues);
+        for (int i = 0; i < numValues; i++) {
+            verify(elementOffset[i] >= innerEnd);
+            elementOffset[i] -= innerEnd;
+        }
+        eraseContent(innerEnd);
+    }
+
+    @Override
+    public void compactValues(int[] surviving, int base, int numSurviving)
+    {
+        if (outputChannel != -1) {
+            computeInnerSurviving(surviving, base, numSurviving);
+            int elementBase = getInnerPosition(base);
+            for (int i = 0; i < numSurviving; i++) {
+                int survivingRow = surviving[i] + base;
+                if (valueIsNull != null && valueIsNull[survivingRow]) {
+                    valueIsNull[base + i] = true;
+                    elementOffset[base + i] = elementBase;
+                }
+                else {
+                    if (valueIsNull != null) {
+                        valueIsNull[base + i] = false;
+                    }
+                    elementOffset[base + i] = elementBase;
+                    elementBase += elementOffset[survivingRow + 1] - elementOffset[survivingRow];
+                }
+            }
+            elementOffset[base + numSurviving] = elementBase;
+            compactContent(innerSurviving, innerSurvivingBase, numInnerSurviving);
+            numValues = base + numSurviving;
+        }
+        compactQualifyingSet(surviving, numSurviving);
+    }
+    protected abstract void eraseContent(int innerEnd);
+
+    protected abstract void compactContent(int[] innerSurviving, int innerSurvivingDase, int numInnerSurviving);
+
+    protected void ensureValuesCapacity(int numAdded)
+    {
+        int newSize = numValues + numAdded * 2;
+        if (presentStream != null && valueIsNull == null) {
+            valueIsNull = new boolean[newSize];
+        }
+        if (valueIsNull != null && valueIsNull.length < numValues + numAdded) {
+            valueIsNull = Arrays.copyOf(valueIsNull, newSize);
+        }
+        if (elementOffset == null) {
+            elementOffset = new int[newSize];
+        }
+        else if (elementOffset.length < numValues + numAdded + 1) {
+            elementOffset = Arrays.copyOf(elementOffset, newSize);
+        }
+    }
+
 }
