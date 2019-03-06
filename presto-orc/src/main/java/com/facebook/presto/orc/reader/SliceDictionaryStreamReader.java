@@ -413,6 +413,13 @@ public class SliceDictionaryStreamReader
     }
 
     @Override
+    public int getAverageResultSize()
+    {
+        // 4 for the int in the ids array and 1 to represent the dictionary size.
+        return 5;
+    }
+
+    @Override
     public void scan()
             throws IOException
     {

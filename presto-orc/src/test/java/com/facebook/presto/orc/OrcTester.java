@@ -266,12 +266,14 @@ public class OrcTester
     public static OrcTester ariaOrcTester()
     {
         OrcTester orcTester = new OrcTester();
-        orcTester.structTestsEnabled = false;
+        orcTester.structTestsEnabled = true;
         orcTester.mapTestsEnabled = false;
-        orcTester.listTestsEnabled = false;
+        orcTester.listTestsEnabled = true;
         orcTester.nullTestsEnabled = true;
         orcTester.missingStructFieldsTestsEnabled = false;
         orcTester.skipBatchTestsEnabled = false;
+        orcTester.complexStructuralTestsEnabled = true;
+        orcTester.structuralNullTestsEnabled = true;
         orcTester.formats = ImmutableSet.of(ORC_12);
         orcTester.compressions = ImmutableSet.of(ZLIB);
         orcTester.ariaEnabled = true;
@@ -420,31 +422,35 @@ public class OrcTester
         }
     }
 
+    static private Long global = new Long(11);
+    
     private void testListRoundTrip(Type type, List<?> readValues)
             throws Exception
     {
-        Type arrayType = arrayType(type);
-        // values in simple list
-        testRoundTripType(
-                arrayType,
-                readValues.stream()
-                        .map(OrcTester::toHiveList)
-                        .collect(toList()));
-
-        if (structuralNullTestsEnabled) {
-            // values and nulls in simple list
+        synchronized (global) {
+            Type arrayType = arrayType(type);
+            // values in simple list
             testRoundTripType(
-                    arrayType,
-                    insertNullEvery(5, readValues).stream()
-                            .map(OrcTester::toHiveList)
-                            .collect(toList()));
+                              arrayType,
+                              readValues.stream()
+                              .map(OrcTester::toHiveList)
+                              .collect(toList()));
 
-            // all null values in simple list
-            testRoundTripType(
-                    arrayType,
-                    readValues.stream()
-                            .map(value -> toHiveList(null))
-                            .collect(toList()));
+            if (structuralNullTestsEnabled) {
+                // values and nulls in simple list
+                testRoundTripType(
+                                  arrayType,
+                                  insertNullEvery(5, readValues).stream()
+                                  .map(OrcTester::toHiveList)
+                                  .collect(toList()));
+
+                // all null values in simple list
+                testRoundTripType(
+                                  arrayType,
+                                  readValues.stream()
+                                  .map(value -> toHiveList(null))
+                                  .collect(toList()));
+            }
         }
     }
 

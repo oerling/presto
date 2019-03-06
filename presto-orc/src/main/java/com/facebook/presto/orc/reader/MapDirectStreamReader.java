@@ -368,6 +368,13 @@ public class MapDirectStreamReader
         return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * innerRowCount / (1 + outerRowCount)));
     }
 
+    @Override
+    public void setResultSizeBudget(long bytes)
+    {
+        keyStreamReader.setResultSizeBudget(bytes / 2);
+        valueStreamReader.setResultSizeBudget(bytes / 2);
+    }
+
     private void setupFilterAndChannel()
     {
         Filter elementFilter = null;

@@ -85,21 +85,21 @@ public abstract class AbstractTestOrcReader
         assertEquals(DateTimeZone.getDefault(), HIVE_STORAGE_TIME_ZONE);
     }
 
-    @Test
+@Test
     public void testBooleanSequence()
             throws Exception
     {
         tester.testRoundTrip(BOOLEAN, newArrayList(limit(cycle(ImmutableList.of(true, false, false)), 30_000)));
     }
 
-    @Test
+@Test
     public void testLongSequence()
             throws Exception
     {
         testRoundTripNumeric(intsBetween(0, 31_234));
     }
 
-    @Test
+@Test
     public void testNegativeLongSequence()
             throws Exception
     {
@@ -109,21 +109,21 @@ public abstract class AbstractTestOrcReader
         testRoundTripNumeric(intsBetween(-31_234, -999));
     }
 
-    @Test
+@Test
     public void testLongSequenceWithHoles()
             throws Exception
     {
         testRoundTripNumeric(skipEvery(5, intsBetween(0, 31_234)));
     }
 
-    @Test
+@Test
     public void testLongDirect()
             throws Exception
     {
         testRoundTripNumeric(limit(cycle(ImmutableList.of(1, 3, 5, 7, 11, 13, 17)), 30_000));
     }
 
-    @Test
+@Test
     public void testLongDirect2()
             throws Exception
     {
@@ -135,21 +135,21 @@ public abstract class AbstractTestOrcReader
         testRoundTripNumeric(values);
     }
 
-    @Test
+@Test
     public void testLongShortRepeat()
             throws Exception
     {
         testRoundTripNumeric(limit(repeatEach(4, cycle(ImmutableList.of(1, 3, 5, 7, 11, 13, 17))), 30_000));
     }
 
-    @Test
+@Test
     public void testLongPatchedBase()
             throws Exception
     {
         testRoundTripNumeric(limit(cycle(concat(intsBetween(0, 18), intsBetween(0, 18), ImmutableList.of(30_000, 20_000, 400_000, 30_000, 20_000))), 30_000));
     }
 
-    @Test
+@Test
     public void testLongStrideDictionary()
             throws Exception
     {
@@ -196,14 +196,14 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testFloatSequence()
             throws Exception
     {
         tester.testRoundTrip(REAL, floatSequence(0.0f, 0.1f, 30_000));
     }
 
-    @Test
+@Test
     public void testFloatNaNInfinity()
             throws Exception
     {
@@ -217,14 +217,14 @@ public abstract class AbstractTestOrcReader
         tester.testRoundTrip(REAL, ImmutableList.of(Float.NaN, Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY));
     }
 
-    @Test
+@Test
     public void testDoubleSequence()
             throws Exception
     {
         tester.testRoundTrip(DOUBLE, doubleSequence(0, 0.1, 30_000));
     }
 
-    @Test
+@Test
     public void testDecimalSequence()
             throws Exception
     {
@@ -236,7 +236,7 @@ public abstract class AbstractTestOrcReader
         tester.testRoundTrip(DECIMAL_TYPE_PRECISION_38, decimalSequence("-3000000000000000000", "100000000000000", 60_000, 38, 16));
     }
 
-    @Test
+@Test
     public void testDoubleNaNInfinity()
             throws Exception
     {
@@ -250,14 +250,14 @@ public abstract class AbstractTestOrcReader
         tester.testRoundTrip(DOUBLE, ImmutableList.of(Double.NaN, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY));
     }
 
-    @Test
+@Test
     public void testStringUnicode()
             throws Exception
     {
         tester.testRoundTrip(VARCHAR, newArrayList(limit(cycle(ImmutableList.of("apple", "apple pie", "apple\uD835\uDC03", "apple\uFFFD")), 30_000)));
     }
 
-    @Test
+@Test
     public void testStringDirectSequence()
             throws Exception
     {
@@ -268,7 +268,7 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testStringDictionarySequence()
             throws Exception
     {
@@ -279,21 +279,21 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testStringStrideDictionary()
             throws Exception
     {
         tester.testRoundTrip(VARCHAR, newArrayList(concat(ImmutableList.of("a"), nCopies(9999, "123"), ImmutableList.of("b"), nCopies(9999, "123"))));
     }
 
-    @Test
+@Test
     public void testEmptyStringSequence()
             throws Exception
     {
         tester.testRoundTrip(VARCHAR, newArrayList(limit(cycle(""), 30_000)));
     }
 
-    @Test
+@Test
     public void testCharDirectSequence()
             throws Exception
     {
@@ -304,7 +304,7 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testCharDictionarySequence()
             throws Exception
     {
@@ -315,7 +315,7 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testEmptyCharSequence()
             throws Exception
     {
@@ -327,7 +327,7 @@ public abstract class AbstractTestOrcReader
         return Strings.padEnd(value.toString(), CHAR_LENGTH, ' ');
     }
 
-    @Test
+    @Test(threadPoolSize=1)
     public void testBinaryDirectSequence()
             throws Exception
     {
@@ -340,7 +340,7 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testBinaryDictionarySequence()
             throws Exception
     {
@@ -352,14 +352,14 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testEmptyBinarySequence()
             throws Exception
     {
         tester.testRoundTrip(VARBINARY, nCopies(30_000, new SqlVarbinary(new byte[0])));
     }
 
-    @Test
+@Test
     public void testDwrfInvalidCheckpointsForRowGroupDictionary()
             throws Exception
     {
@@ -380,7 +380,7 @@ public abstract class AbstractTestOrcReader
                         .collect(toList()));
     }
 
-    @Test
+@Test
     public void testDwrfInvalidCheckpointsForStripeDictionary()
             throws Exception
     {

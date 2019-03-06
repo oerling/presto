@@ -274,6 +274,12 @@ public class ListStreamReader
         return (int) (1 + (elementStreamReader.getAverageResultSize() * innerRowCount / (1 + outerRowCount)));
     }
 
+    @Override
+    public void setResultSizeBudget(long bytes)
+    {
+        elementStreamReader.setResultSizeBudget(bytes);
+    }
+
     private void setupFilterAndChannel()
     {
         Filter elementFilter = null;

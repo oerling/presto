@@ -200,6 +200,7 @@ public abstract class AbstractMapBlock
         booleanArrayPool.release(entryPositions);
         return size;
     }
+
     @Override
     public Block copyRegion(int position, int length)
     {

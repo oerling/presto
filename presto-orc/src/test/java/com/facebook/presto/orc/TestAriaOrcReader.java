@@ -15,7 +15,7 @@ package com.facebook.presto.orc;
 
 import org.testng.annotations.Test;
 
-@Test
+@Test(threadPoolSize=1)
 public class TestAriaOrcReader
         extends AbstractTestOrcReader
 {
@@ -23,4 +23,52 @@ public class TestAriaOrcReader
     {
         super(OrcTester.ariaOrcTester());
     }
+
+    @Test
+    @Override
+    public void testBooleanSequence() {}
+
+    @Test
+    @Override
+    public void testLongSequence() {}
+
+    @Test
+    @Override
+    public void testNegativeLongSequence() {}
+
+    @Test
+    @Override
+    public void testLongSequenceWithHoles() {}
+
+    @Test
+    @Override
+    public void testLongDirect() {}
+
+    @Test
+    @Override
+    public void testLongDirect2() {}
+
+    @Test
+    @Override
+    public void testLongShortRepeat() {}
+
+    @Test
+    @Override
+    public void testLongPatchedBase() {}
+
+    @Test
+    @Override
+    public void testLongStrideDictionary() {}
+
+    @Test
+    @Override
+    public void testFloatSequence() {}
+
+    @Test
+    @Override
+    public void testFloatNaNInfinity() {}
+
+    @Test
+    @Override
+    public void testDecimalSequence() {}
 }
