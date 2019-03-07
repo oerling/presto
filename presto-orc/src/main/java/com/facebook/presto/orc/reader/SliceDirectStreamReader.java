@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.DATA;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -81,11 +82,12 @@ public class SliceDirectStreamReader
     private int[] resultOffsets;
     // Temp space for extracting values to filter when a value straddles buffers.
     private byte[] tempBytes;
-    long totalBytes;
-    long totalRows;
+    private long totalBytes;
+    private long totalRows;
 
     public SliceDirectStreamReader(StreamDescriptor streamDescriptor)
     {
+        super(OptionalInt.empty());
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
     }
 
@@ -282,7 +284,7 @@ public class SliceDirectStreamReader
     @Override
     public void compactValues(int[] positions, int base, int numPositions)
     {
-        if (outputChannel != -1) {
+        if (outputChannelSet) {
             int toOffset = resultOffsets[base];
             for (int i = 0; i < numPositions; i++) {
                 int fromPosition = base + positions[i];
@@ -299,12 +301,6 @@ public class SliceDirectStreamReader
             numValues = base + numPositions;
         }
         compactQualifyingSet(positions, numPositions);
-    }
-
-    @Override
-    public int getFixedWidth()
-    {
-        return -1;
     }
 
     @Override
@@ -333,9 +329,9 @@ public class SliceDirectStreamReader
             openRowGroup();
         }
         beginScan(presentStream, lengthStream);
-        if (resultOffsets == null && outputChannel != -1) {
-            resultOffsets = new int[10001];
-            bytes = new byte[100000];
+        if (resultOffsets == null && outputChannelSet) {
+            resultOffsets = new int[10_001];
+            bytes = new byte[100_000];
             numValues = 0;
             resultOffsets[0] = 0;
             resultOffsets[1] = 0;
@@ -355,8 +351,7 @@ public class SliceDirectStreamReader
         int activeIdx = 0;
         int numActive = input.getPositionCount();
         int toSkip = 0;
-        int i = 0;
-        for (; i < rowsInRange; i++) {
+        for (int i = 0; i < rowsInRange; i++) {
             if (i + posInRowGroup == nextActive) {
                 if (truncationRow == nextActive) {
                     break;
@@ -394,17 +389,13 @@ public class SliceDirectStreamReader
                         }
                         if (filter.testBytes(buffer, pos, length)) {
                             output.append(i + posInRowGroup, activeIdx);
-                            if (outputChannel != -1) {
-                                addResultBytes(buffer, pos, length);
-                                bytesToGo -= length + 4;
-                            }
-                            numResults++;
+                            addResult(buffer, pos, length);
+                            bytesToGo -= length + 4;
                         }
                     }
                     else {
                         // No filter.
                         addResultFromStream(length);
-                        numResults++;
                         bytesToGo -= length + 4;
                     }
                     lengthIdx++;
@@ -429,7 +420,7 @@ public class SliceDirectStreamReader
                 continue;
             }
             else {
-                // The row is notg in the input qualifying set. Add length to skip if non-null.
+                // The row is not in the input qualifying set. Add length to skip if non-null.
                 if (presentStream == null || present[i]) {
                     toSkip += lengths[lengthIdx++];
                 }
@@ -438,71 +429,82 @@ public class SliceDirectStreamReader
         if (toSkip > 0) {
             dataStream.skip(toSkip);
         }
-        if (outputChannel != -1) {
+        if (outputChannelSet) {
             totalRows += numResults;
             totalBytes += resultOffsets[numValues + numResults] - resultOffsets[numValues];
         }
         endScan(presentStream);
     }
 
-    void addNullResult()
+    @Override
+    protected void addNullResult()
     {
-        if (outputChannel != -1) {
-            if (valueIsNull == null) {
-                valueIsNull = new boolean[resultOffsets.length];
-            }
-            ensureResultRows();
-            valueIsNull[numResults + numValues] = true;
-            resultOffsets[numValues + numResults + 1] = resultOffsets[numValues + numResults];
+        if (!outputChannelSet) {
+            return;
+        }
+
+        int position = numResults + numValues;
+        int endOffset = resultOffsets[position];
+        ensureResultsCapacity(position + 2, endOffset, true);
+        valueIsNull[position] = true;
+        resultOffsets[position + 1] = endOffset;
+        numResults++;
+    }
+
+    private void addResult(byte[] buffer, int pos, int length)
+    {
+        if (!outputChannelSet) {
+            return;
+        }
+
+        int position = numValues + numResults;
+        int endOffset = resultOffsets[position];
+        ensureResultsCapacity(position + 2, endOffset + length, false);
+        System.arraycopy(buffer, pos, bytes, endOffset, length);
+        resultOffsets[position + 1] = endOffset + length;
+        if (valueIsNull != null) {
+            valueIsNull[position] = false;
         }
         numResults++;
     }
 
-    void addResultBytes(byte[] buffer, int pos, int length)
-    {
-        ensureResultBytes(length);
-        ensureResultRows();
-        int endOffset = resultOffsets[numValues + numResults];
-        System.arraycopy(buffer, pos, bytes, endOffset, length);
-        resultOffsets[numValues + numResults + 1] = endOffset + length;
-        if (valueIsNull != null) {
-            valueIsNull[numValues + numResults] = false;
-        }
-    }
-
-    void addResultFromStream(int length)
+    private void addResultFromStream(int length)
             throws IOException
     {
-        ensureResultBytes(length);
-        ensureResultRows();
-        int endOffset = resultOffsets[numValues + numResults];
+        if (!outputChannelSet) {
+            return;
+        }
+
+        int position = numValues + numResults;
+        int endOffset = resultOffsets[position];
+        ensureResultsCapacity(position + 2, endOffset + length, false);
         if (length > 0) {
             // This is an unaccountable perversion and a violation of
             // every principle of consistent design: The argument of next()called
             // length is in fact an end offset into the buffer.
             dataStream.next(bytes, endOffset, endOffset + length);
         }
-        resultOffsets[numValues + numResults + 1] = endOffset + length;
+        resultOffsets[position + 1] = endOffset + length;
         if (valueIsNull != null) {
-            valueIsNull[numValues + numResults] = false;
+            valueIsNull[position] = false;
         }
+        numResults++;
     }
 
-    void ensureResultBytes(int length)
+    private void ensureResultsCapacity(int count, int totalSize, boolean includeNulls)
     {
-        int offset = resultOffsets[numResults + numValues];
-        if (bytes.length < length + offset) {
-            bytes = Arrays.copyOf(bytes, Math.max(bytes.length * 2, bytes.length + length));
+        if (bytes.length < totalSize) {
+            bytes = Arrays.copyOf(bytes, Math.max(bytes.length * 2, totalSize));
         }
-    }
 
-    void ensureResultRows()
-    {
-        if (resultOffsets.length <= numValues + numResults + 2) {
-            resultOffsets = Arrays.copyOf(resultOffsets, resultOffsets.length * 2);
+        if (resultOffsets.length < count) {
+            resultOffsets = Arrays.copyOf(resultOffsets, Math.max(count + 10, resultOffsets.length * 2));
             if (valueIsNull != null) {
                 valueIsNull = Arrays.copyOf(valueIsNull, resultOffsets.length);
             }
+        }
+        if (includeNulls && valueIsNull == null) {
+            valueIsNull = new boolean[resultOffsets.length];
         }
     }
 

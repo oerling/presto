@@ -44,6 +44,21 @@ public class Filter
         return false;
     }
 
+    public boolean testFloat(float value)
+    {
+        return false;
+    }
+
+    public boolean testDecimal(long low, long high)
+    {
+        return false;
+    }
+
+    public boolean testBoolean(boolean value)
+    {
+        return false;
+    }
+
     public boolean testBytes(byte[] buffer, int offset, int length)
     {
         return false;
