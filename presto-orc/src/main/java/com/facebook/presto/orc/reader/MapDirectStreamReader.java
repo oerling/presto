@@ -398,7 +398,7 @@ public class MapDirectStreamReader
                 }
             }
         }
-        valueStreamReader.setFilterAndChannel(elementFilter, 0, -1, type.getTypeParameters().get(1));
+        valueStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(1));
         if (mayPruneKey) {
             List<Filter> filters = null;
             if (longSubscripts != null) {
@@ -417,6 +417,9 @@ public class MapDirectStreamReader
                 filter = Filters.createMultiRange(filters, false);
             }
             keyStreamReader.setFilterAndChannel(filter, 0, -1, type.getTypeParameters().get(0));
+        }
+        else {
+            keyStreamReader.setFilterAndChannel(null, 0, -1, type.getTypeParameters().get(0));
         }
         filterIsSetup = true;
     }

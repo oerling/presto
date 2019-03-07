@@ -267,7 +267,7 @@ public class OrcTester
     {
         OrcTester orcTester = new OrcTester();
         orcTester.structTestsEnabled = true;
-        orcTester.mapTestsEnabled = false;
+        orcTester.mapTestsEnabled = true;
         orcTester.listTestsEnabled = true;
         orcTester.nullTestsEnabled = true;
         orcTester.missingStructFieldsTestsEnabled = false;

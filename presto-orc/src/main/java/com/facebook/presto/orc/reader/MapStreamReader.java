@@ -136,7 +136,6 @@ public class MapStreamReader
     public void setFilterAndChannel(Filter filter, int channel, int columnIndex, Type type)
     {
         directReader.setFilterAndChannel(filter, channel, columnIndex, type);
-        flatReader.setFilterAndChannel(filter, channel, columnIndex, type);
     }
 
     @Override
