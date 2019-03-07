@@ -18,25 +18,129 @@ import com.facebook.presto.spi.SubfieldPath;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
+import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
 
 public class Filters
 {
+    private static final Filter IS_NULL = new IsNull();
+    private static final Filter IS_NOT_NULL = new IsNotNull();
+
     private Filters() {}
 
-    public static class IsNull
+    private static class IsNull
             extends Filter
     {
-        IsNull()
+        public IsNull()
         {
             super(true);
         }
+    }
+
+    private static class IsNotNull
+            extends Filter
+    {
+        public IsNotNull()
+        {
+            super(false);
+        }
 
         @Override
-        public boolean testNull()
+        public boolean testLong(long value)
         {
             return true;
+        }
+
+        @Override
+        public boolean testDouble(double value)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean testFloat(float value)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean testDecimal(long low, long high)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean testBoolean(boolean value)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean testBytes(byte[] buffer, int offset, int length)
+        {
+            return true;
+        }
+    }
+
+    public static Filter isNull()
+    {
+        return IS_NULL;
+    }
+
+    public static Filter isNotNull()
+    {
+        return IS_NOT_NULL;
+    }
+
+    public static class BooleanValue
+            extends Filter
+    {
+        private final boolean value;
+
+        public BooleanValue(boolean value, boolean nullAllowed)
+        {
+            super(nullAllowed);
+            this.value = value;
+        }
+
+        @Override
+        public boolean testBoolean(boolean value)
+        {
+            return this.value == value;
+        }
+
+        @Override
+        public int staticScore()
+        {
+            return 1;
+        }
+
+        @Override
+        public boolean isEquality()
+        {
+            return true;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(value, nullAllowed);
+        }
+
+        @Override
+        public boolean equals(Object obj)
+        {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            BooleanValue other = (BooleanValue) obj;
+            return this.value == other.value &&
+                    this.nullAllowed == other.nullAllowed;
         }
     }
 
@@ -137,6 +241,120 @@ public class Filters
                 return 1;
             }
             return upper != Long.MAX_VALUE && lower != Long.MIN_VALUE ? 2 : 3;
+        }
+    }
+
+    public static class FloatRange
+            extends Filter
+    {
+        private final float lower;
+        private final boolean lowerUnbounded;
+        private final boolean lowerExclusive;
+        private final float upper;
+        private final boolean upperUnbounded;
+        private final boolean upperExclusive;
+
+        FloatRange(float lower, boolean lowerUnbounded, boolean lowerExclusive, float upper, boolean upperUnbounded, boolean upperExclusive, boolean nullAllowed)
+        {
+            super(nullAllowed);
+            this.lower = lower;
+            this.lowerUnbounded = lowerUnbounded;
+            this.lowerExclusive = lowerExclusive;
+            this.upper = upper;
+            this.upperUnbounded = upperUnbounded;
+            this.upperExclusive = upperExclusive;
+        }
+
+        @Override
+        public boolean testFloat(float value)
+        {
+            if (!lowerUnbounded) {
+                if (value < lower) {
+                    return false;
+                }
+                if (lowerExclusive && lower == value) {
+                    return false;
+                }
+            }
+            if (!upperUnbounded) {
+                if (value > upper) {
+                    return false;
+                }
+                if (upperExclusive && value == upper) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        int staticScore()
+        {
+            // Equality is better than range with both ends, which is better than a range with one end.
+            if (upper == lower) {
+                return 1;
+            }
+            return !lowerUnbounded && !upperUnbounded ? 2 : 3;
+        }
+    }
+
+    public static class LongDecimalRange
+            extends Filter
+    {
+        private final long lowerLow;
+        private final long lowerHigh;
+        private final boolean lowerUnbounded;
+        private final boolean lowerExclusive;
+        private final long upperLow;
+        private final long upperHigh;
+        private final boolean upperUnbounded;
+        private final boolean upperExclusive;
+
+        public LongDecimalRange(long lowerLow, long lowerHigh, boolean lowerUnbounded, boolean lowerExclusive, long upperLow, long upperHigh, boolean upperUnbounded, boolean upperExclusive, boolean nullAllowed)
+        {
+            super(nullAllowed);
+            this.lowerLow = lowerLow;
+            this.lowerHigh = lowerHigh;
+            this.lowerUnbounded = lowerUnbounded;
+            this.lowerExclusive = lowerExclusive;
+            this.upperLow = upperLow;
+            this.upperHigh = upperHigh;
+            this.upperUnbounded = upperUnbounded;
+            this.upperExclusive = upperExclusive;
+        }
+
+        @Override
+        public boolean testDecimal(long valueLow, long valueHigh)
+        {
+            if (!lowerUnbounded) {
+                int result = compare(valueLow, valueHigh, lowerLow, lowerHigh);
+                if (result < 0) {
+                    return false;
+                }
+                if (lowerExclusive && result == 0) {
+                    return false;
+                }
+            }
+            if (!upperUnbounded) {
+                int result = compare(valueLow, valueHigh, upperLow, upperHigh);
+                if (result > 0) {
+                    return false;
+                }
+                if (upperExclusive && result == 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        int staticScore()
+        {
+            // Equality is better than range with both ends, which is better than a range with one end.
+            if (lowerLow == upperLow && lowerHigh == upperHigh) {
+                return 1;
+            }
+            return !lowerUnbounded && !upperUnbounded ? 2 : 3;
         }
     }
 

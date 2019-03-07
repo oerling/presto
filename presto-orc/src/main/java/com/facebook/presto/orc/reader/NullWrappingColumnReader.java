@@ -19,21 +19,27 @@ import com.facebook.presto.orc.stream.LongInputStream;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.OptionalInt;
 
 import static com.google.common.base.Verify.verify;
 
 abstract class NullWrappingColumnReader
         extends ColumnReader
 {
-    QualifyingSet innerQualifyingSet;
-    boolean hasNulls;
-    int innerPosInRowGroup;
-    int numInnerRows;
-    int[] nullsToAdd;
-    int[] nullsToAddIndexes;
-    int numNullsToAdd;
+    protected QualifyingSet innerQualifyingSet;
+    protected boolean hasNulls;
+    protected int innerPosInRowGroup;
+    protected int numInnerRows;
+    protected int[] nullsToAdd;
+    protected int[] nullsToAddIndexes;
+    protected int numNullsToAdd;
     // Number of elements retrieved from inner reader.
-    int numInnerResults;
+    protected int numInnerResults;
+
+    protected NullWrappingColumnReader(OptionalInt fixedValueSize)
+    {
+        super(fixedValueSize);
+    }
 
     protected void beginScan(BooleanInputStream presentStream, LongInputStream lengthStream)
             throws IOException
@@ -138,7 +144,6 @@ abstract class NullWrappingColumnReader
         if (lastNull < 0) {
             lastNull = -1 - lastNull;
         }
-        int end = lastNull == numNullsToAdd ? endRow : nullsToAdd[lastNull];
         numNullsToAdd = lastNull;
         if (numNullsToAdd == 0 && valueIsNull == null) {
             numResults = numInnerResults;
@@ -201,7 +206,7 @@ abstract class NullWrappingColumnReader
             outputQualifyingSet.insert(nullsToAdd, nullsToAddIndexes, numNullsToAdd);
         }
 
-        if (outputChannel != -1) {
+        if (outputChannelSet) {
             int sourceRow = numInnerResults - 1;
 
             for (int i = numInnerResults + numNullsToAdd - 1; i >= 0; i--) {

@@ -32,6 +32,7 @@ import com.facebook.presto.spi.type.VarbinaryType;
 import com.facebook.presto.spi.type.VarcharType;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slice;
 import org.apache.hive.common.util.BloomFilter;
 
@@ -54,12 +55,16 @@ import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.RealType.REAL;
 import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
+import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 import static java.lang.Float.floatToRawIntBits;
+import static java.lang.Float.intBitsToFloat;
+import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
@@ -306,16 +311,18 @@ public class TupleDomainOrcPredicate<C>
         }
     }
 
-    public Map<Integer, Filter> getFilters(Map<Integer, ?> columnIndices)
+    @Override
+    public Map<Integer, Filter> getFilters()
     {
         Optional<Map<C, Domain>> optionalEffectivePredicateDomains = effectivePredicate.getDomains();
-        HashMap<Integer, Filter> filters = new HashMap();
         if (!optionalEffectivePredicateDomains.isPresent()) {
             // No filters
-            return filters;
+            return ImmutableMap.of();
         }
+
         Map<C, Domain> effectivePredicateDomains = optionalEffectivePredicateDomains.get();
 
+        Map<Integer, Filter> filters = new HashMap();
         for (Map.Entry<C, Domain> entry : effectivePredicateDomains.entrySet()) {
             Domain predicateDomain = entry.getValue();
             C column = entry.getKey();
@@ -340,17 +347,18 @@ public class TupleDomainOrcPredicate<C>
             if (values instanceof SortedRangeSet) {
                 List<Range> ranges = ((SortedRangeSet) values).getOrderedRanges();
                 Type type = predicateDomain.getType();
+                boolean nullAllowed = predicateDomain.isNullAllowed();
 
-                Filter filter = null;
-                if (ranges.isEmpty() && predicateDomain.isNullAllowed()) {
-                    filter = new Filters.IsNull();
+                Filter filter;
+                if (ranges.isEmpty() && nullAllowed) {
+                    filter = Filters.isNull();
                 }
                 else if (ranges.size() == 1) {
-                    filter = createRangeFilter(type, ranges.get(0), predicateDomain.isNullAllowed());
+                    filter = createRangeFilter(type, ranges.get(0), nullAllowed);
                 }
                 else {
                     List<Filter> rangeFilters = ranges.stream().map(r -> createRangeFilter(type, r, false)).collect(toList());
-                    filter = Filters.createMultiRange(rangeFilters, predicateDomain.isNullAllowed());
+                    filter = Filters.createMultiRange(rangeFilters, nullAllowed);
                 }
                 if (filter == null) {
                     // The domain cannot be converted to a filter. Pushdown fails.
@@ -367,16 +375,33 @@ public class TupleDomainOrcPredicate<C>
 
     private static Filter createRangeFilter(Type type, Range range, boolean nullAllowed)
     {
-        if (isVarcharType(type)) {
-            return VarcharRangeToFilter(range, nullAllowed);
+        if (range.isAll()) {
+            return nullAllowed ? null : Filters.isNotNull();
         }
-        if (type == BIGINT) {
-            return BigintRangeToFilter(range, nullAllowed);
+        if (isVarcharType(type)) {
+            return varcharRangeToFilter(range, nullAllowed);
+        }
+        if (type == TINYINT || type == SMALLINT || type == INTEGER || type == BIGINT || type == TIMESTAMP) {
+            return bigintRangeToFilter(range, nullAllowed);
         }
         if (type == DOUBLE) {
             return doubleRangeToFilter(range, nullAllowed);
         }
-        return null;
+        if (type == REAL) {
+            return floatRangeToFilter(range, nullAllowed);
+        }
+        if (type instanceof DecimalType) {
+            if (((DecimalType) type).isShort()) {
+                return bigintRangeToFilter(range, nullAllowed);
+            }
+            return longDecimalRangeToFilter(range, nullAllowed);
+        }
+        if (type == BOOLEAN) {
+            boolean booleanValue = ((Boolean) range.getSingleValue()).booleanValue();
+            return range.isSingleValue() ? new Filters.BooleanValue(booleanValue, nullAllowed) : null;
+        }
+
+        throw new UnsupportedOperationException("Unsupported type: " + type.getDisplayName());
     }
 
     private static void addFilter(Integer ordinal, SubfieldPath subfield, Filter filter, Map<Integer, Filter> filters)
@@ -413,12 +438,12 @@ public class TupleDomainOrcPredicate<C>
         }
     }
 
-    private static Filter BigintRangeToFilter(Range range, boolean nullAllowed)
+    private static Filter bigintRangeToFilter(Range range, boolean nullAllowed)
     {
         Marker low = range.getLow();
         Marker high = range.getHigh();
-        long lowerLong = low.isLowerUnbounded() ? Long.MIN_VALUE : ((Long) low.getValue()).longValue();
-        long upperLong = high.isUpperUnbounded() ? Long.MAX_VALUE : ((Long) high.getValue()).longValue();
+        long lowerLong = low.isLowerUnbounded() ? Long.MIN_VALUE : (long) low.getValue();
+        long upperLong = high.isUpperUnbounded() ? Long.MAX_VALUE : (long) high.getValue();
         if (high.getBound() == Marker.Bound.BELOW) {
             --upperLong;
         }
@@ -432,19 +457,51 @@ public class TupleDomainOrcPredicate<C>
     {
         Marker low = range.getLow();
         Marker high = range.getHigh();
-        double lowerDouble = low.isLowerUnbounded() ? Double.MIN_VALUE
-                : ((Double) low.getValue()).doubleValue();
-        double upperDouble = high.isUpperUnbounded() ? Double.MAX_VALUE
-                : ((Double) high.getValue()).doubleValue();
-        return new Filters.DoubleRange(lowerDouble,
+        double lowerDouble = low.isLowerUnbounded() ? Double.MIN_VALUE : (double) low.getValue();
+        double upperDouble = high.isUpperUnbounded() ? Double.MAX_VALUE : (double) high.getValue();
+        return new Filters.DoubleRange(
+                lowerDouble,
                 low.isLowerUnbounded(),
                 low.getBound() == Marker.Bound.ABOVE,
                 upperDouble,
                 high.isUpperUnbounded(),
-                                       high.getBound() == Marker.Bound.BELOW, nullAllowed);
+                high.getBound() == Marker.Bound.BELOW,
+                nullAllowed);
     }
 
-    private static Filter VarcharRangeToFilter(Range range, boolean nullAllowed)
+    private static Filter floatRangeToFilter(Range range, boolean nullAllowed)
+    {
+        Marker low = range.getLow();
+        Marker high = range.getHigh();
+        float lowerFloat = low.isLowerUnbounded() ? Float.MIN_VALUE : intBitsToFloat(toIntExact((long) low.getValue()));
+        float upperFloat = high.isUpperUnbounded() ? Float.MAX_VALUE : intBitsToFloat(toIntExact((long) high.getValue()));
+        return new Filters.FloatRange(
+                lowerFloat,
+                low.isLowerUnbounded(),
+                low.getBound() == Marker.Bound.ABOVE,
+                upperFloat,
+                high.isUpperUnbounded(),
+                high.getBound() == Marker.Bound.BELOW,
+                nullAllowed);
+    }
+
+    private static Filter longDecimalRangeToFilter(Range range, boolean nullAllowed)
+    {
+        Marker low = range.getLow();
+        Marker high = range.getHigh();
+        return new Filters.LongDecimalRange(
+                low.isLowerUnbounded() ? 0 : ((Slice) low.getValue()).getLong(0),
+                low.isLowerUnbounded() ? 0 : ((Slice) low.getValue()).getLong(SIZE_OF_LONG),
+                low.isLowerUnbounded(),
+                low.getBound() == Marker.Bound.ABOVE,
+                high.isLowerUnbounded() ? 0 : ((Slice) high.getValue()).getLong(0),
+                high.isLowerUnbounded() ? 0 : ((Slice) high.getValue()).getLong(SIZE_OF_LONG),
+                high.isUpperUnbounded(),
+                high.getBound() == Marker.Bound.BELOW,
+                nullAllowed);
+    }
+
+    private static Filter varcharRangeToFilter(Range range, boolean nullAllowed)
     {
         Marker low = range.getLow();
         Marker high = range.getHigh();
