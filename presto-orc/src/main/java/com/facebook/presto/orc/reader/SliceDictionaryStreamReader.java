@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.DATA;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.DICTIONARY_DATA;
@@ -108,9 +109,11 @@ public class SliceDictionaryStreamReader
 
     private int[] values;
     private ResultsProcessor resultsProcessor = new ResultsProcessor();
+    private int averageResultSize = SIZE_OF_DOUBLE;
 
     public SliceDictionaryStreamReader(StreamDescriptor streamDescriptor, LocalMemoryContext systemMemoryContext)
     {
+        super(OptionalInt.empty());
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.systemMemoryContext = requireNonNull(systemMemoryContext, "systemMemoryContext is null");
     }
@@ -413,13 +416,6 @@ public class SliceDictionaryStreamReader
     }
 
     @Override
-    public int getAverageResultSize()
-    {
-        // 4 for the int in the ids array and 1 to represent the dictionary size.
-        return 5;
-    }
-
-    @Override
     public void scan()
             throws IOException
     {
@@ -475,6 +471,14 @@ public class SliceDictionaryStreamReader
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (filter != null) {
             outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
+        }
+        if (outputChannelSet) {
+            if (numValues > 0) {
+                averageResultSize = SIZE_OF_DOUBLE + toIntExact(dictionaryBlock.getSizeInBytes() / numValues);
+            }
+            else {
+                averageResultSize = SIZE_OF_DOUBLE;
+            }
         }
         endScan(presentStream);
     }
@@ -599,6 +603,12 @@ public class SliceDictionaryStreamReader
     }
 
     @Override
+    public int getAverageResultSize()
+    {
+        return averageResultSize;
+    }
+
+    @Override
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
         checkEnoughValues(numFirstRows);
@@ -635,7 +645,7 @@ public class SliceDictionaryStreamReader
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
-        if (outputChannel != -1) {
+        if (outputChannelSet) {
             StreamReaders.compactArrays(surviving, base, numSurviving, values, valueIsNull);
             numValues = base + numSurviving;
         }
@@ -644,7 +654,7 @@ public class SliceDictionaryStreamReader
 
     private void ensureValuesCapacity()
     {
-        if (outputChannel == -1) {
+        if (!outputChannelSet) {
             return;
         }
         int capacity = numValues + inputQualifyingSet.getPositionCount();

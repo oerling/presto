@@ -18,16 +18,17 @@ import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.InputStreamSource;
 import com.facebook.presto.orc.stream.LongInputStream;
-import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 
 abstract class ColumnReader
         implements StreamReader
@@ -37,50 +38,57 @@ abstract class ColumnReader
     @Nullable
     protected BooleanInputStream presentStream;
 
-    QualifyingSet inputQualifyingSet;
-    QualifyingSet outputQualifyingSet;
-    Block block;
-    int outputChannel = -1;
-    Filter filter;
+    protected QualifyingSet inputQualifyingSet;
+    protected QualifyingSet outputQualifyingSet;
+    protected int outputChannel = -1;
+    protected boolean outputChannelSet;
+    protected Filter filter;
     protected boolean deterministicFilter;
-    int columnIndex;
-    Type type;
+    protected int columnIndex;
+    protected Type type;
     // First row number in row group that is not processed due to
     // reaching target size. This must occur as a position in
     // inputQualifyingSet. -1 if all inputQualifyingSet is processed.
-    int truncationRow = -1;
+    protected int truncationRow = -1;
 
-    boolean rowGroupOpen;
+    protected boolean rowGroupOpen;
 
     // position of first unprocessed row from the start of the row group.
-    int posInRowGroup;
+    protected int posInRowGroup;
 
     //Present flag for each row between posInRowGroup and end of inputQualifyingSet.
-    boolean[] present;
+    protected boolean[] present;
 
     // Number of values in 'present'.
-    int numPresent;
+    protected int numPresent;
 
     // Lengths for present rows from posInRowGroup to end of inputQualifyingSet.
-    int[] lengths;
+    protected int[] lengths;
 
     // Number of elements in lengths.
-    int numLengths;
+    protected int numLengths;
 
-    // Index of length of first unprocessed element in 'lemgths'.
-    int lengthIdx;
+    // Index of length of first unprocessed element in 'lengths'.
+    protected int lengthIdx;
 
     // Number of values in Block to be returned by getBlock.
-    int numValues;
+    protected int numValues;
 
     // Number of result rows in scan() so far.
-    int numResults;
+    protected int numResults;
 
     // Number of bytes the next scan() may add to the result.
-    long resultSizeBudget = 8 * 10000;
+    protected long resultSizeBudget = 8 * 10000;
 
     // Null flags for retrieved values. At least numValues + numResults elements.
-    boolean[] valueIsNull;
+    protected boolean[] valueIsNull;
+
+    private final OptionalInt fixedValueSize;
+
+    protected ColumnReader(OptionalInt fixedValueSize)
+    {
+        this.fixedValueSize = requireNonNull(fixedValueSize, "fixedValueSize is null");
+    }
 
     public QualifyingSet getInputQualifyingSet()
     {
@@ -119,7 +127,8 @@ abstract class ColumnReader
     {
         this.filter = filter;
         this.deterministicFilter = filter != null && filter.isDeterministic();
-        outputChannel = channel;
+        this.outputChannel = channel;
+        this.outputChannelSet = channel != -1;
         this.columnIndex = columnIndex;
         this.type = type;
     }
@@ -169,11 +178,21 @@ abstract class ColumnReader
     @Override
     public int getResultSizeInBytes()
     {
-        int fixedSize = getFixedWidth();
-        if (fixedSize != -1) {
-            return numValues * fixedSize;
+        if (fixedValueSize.isPresent()) {
+            return numValues * fixedValueSize.getAsInt();
         }
-        throw new UnsupportedOperationException("Variable width streams must implement getResultSizeInBytes()");
+
+        throw new UnsupportedOperationException("Variable width readers must implement getResultSizeInBytes()");
+    }
+
+    @Override
+    public int getAverageResultSize()
+    {
+        if (fixedValueSize.isPresent()) {
+            return fixedValueSize.getAsInt();
+        }
+
+        throw new UnsupportedOperationException("Variable width readers must implement getAverageResultSize()");
     }
 
     protected void compactQualifyingSet(int[] surviving, int numSurviving)
@@ -230,6 +249,41 @@ abstract class ColumnReader
         numLengths = neededLengths;
     }
 
+    protected void processAllNulls()
+    {
+        if (deterministicFilter && !filter.testNull()) {
+            return;
+        }
+
+        int[] inputPositions = inputQualifyingSet.getPositions();
+        for (int i = 0; i < inputQualifyingSet.getPositionCount(); i++) {
+            if (filter != null) {
+                if (!deterministicFilter && !filter.testNull()) {
+                    continue;
+                }
+                outputQualifyingSet.append(inputPositions[i], i);
+            }
+            addNullResult();
+        }
+    }
+
+    protected void addNullResult()
+    {
+        if (!outputChannelSet) {
+            return;
+        }
+
+        int position = numValues + numResults;
+        ensureValuesCapacity(position + 1, true);
+        valueIsNull[position] = true;
+        numResults++;
+    }
+
+    protected void ensureValuesCapacity(int capacity, boolean includeNulls)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     protected void endScan(BooleanInputStream presentStream)
     {
         // The reader is positioned at inputQualifyingSet.end() or
@@ -254,7 +308,7 @@ abstract class ColumnReader
         if (outputQualifyingSet != null) {
             outputQualifyingSet.setEnd(posInRowGroup);
         }
-        if (outputChannel != -1) {
+        if (outputChannelSet) {
             numValues += numResults;
         }
     }

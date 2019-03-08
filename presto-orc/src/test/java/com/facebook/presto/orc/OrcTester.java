@@ -274,7 +274,7 @@ public class OrcTester
         orcTester.skipBatchTestsEnabled = false;
         orcTester.complexStructuralTestsEnabled = true;
         orcTester.structuralNullTestsEnabled = true;
-        orcTester.formats = ImmutableSet.of(ORC_12);
+        orcTester.formats = ImmutableSet.of(ORC_12, ORC_11, DWRF);
         orcTester.compressions = ImmutableSet.of(ZLIB);
         orcTester.ariaEnabled = true;
         return orcTester;

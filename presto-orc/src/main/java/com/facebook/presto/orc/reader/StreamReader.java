@@ -120,7 +120,7 @@ public interface StreamReader
 
     default void compactValues(int[] surviving, int base, int numSurviving)
     {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("compactValues is not supported by " + this.getClass().getSimpleName());
     }
 
     default int getPosition()
@@ -149,18 +149,9 @@ public interface StreamReader
         throw new UnsupportedOperationException();
     }
 
-    // Returns the number of bytes per non-null row. -1 if variable.
-    default int getFixedWidth()
-    {
-        return -1;
-    }
-
+    // Returns the average number of bytes per non-null output value.
     default int getAverageResultSize()
     {
-        int fixed = getFixedWidth();
-        if (fixed != -1) {
-            return fixed;
-        }
         throw new UnsupportedOperationException();
     }
 

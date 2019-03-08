@@ -48,6 +48,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Set;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
@@ -78,23 +80,24 @@ public class MapDirectStreamReader
     @Nullable
     private LongInputStream lengthStream;
 
-    Type keyType;
-    Type valueType;
-    HashSet<Long> longSubscripts;
-    HashSet<Slice> sliceSubscripts;
-    HashMap<Object, Filter> subscriptToFilter;
-    boolean mayPruneKey;
-    boolean filterIsSetup = false;
-    Filters.PositionalFilter positionalFilter;
-    Filter[] elementFilters;
+    private Type keyType;
+    private Type valueType;
+    private HashSet<Long> longSubscripts;
+    private HashSet<Slice> sliceSubscripts;
+    private HashMap<Object, Filter> subscriptToFilter;
+    private boolean mayPruneKey;
+    private boolean filterIsSetup = false;
+    private Filters.PositionalFilter positionalFilter;
+    private Filter[] elementFilters;
     // For each map in the inputQualifyingSet, the number of element filters that fit.
-    int[] numElementFilters;
+    private int[] numElementFilters;
     // Count of elements at the beginning of current call to scan().
-    int initialNumElements;
-    Block keyBlock;
+    private int initialNumElements;
+    private Block keyBlock;
 
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
+        super();
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.keyStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(0), hiveStorageTimeZone, systemMemoryContext);
         this.valueStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(1), hiveStorageTimeZone, systemMemoryContext);

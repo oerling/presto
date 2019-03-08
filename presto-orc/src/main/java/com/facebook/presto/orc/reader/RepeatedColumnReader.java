@@ -22,6 +22,7 @@ import com.facebook.presto.orc.QualifyingSet;
 
 // import java.io.IOException;
  import java.util.Arrays;
+import java.util.OptionalInt;
 
 import static com.google.common.base.Verify.verify;
 
@@ -54,6 +55,11 @@ abstract class RepeatedColumnReader
     protected long innerRowCount;
     // Number of top level rows read.
     protected long outerRowCount;
+
+    RepeatedColumnReader()
+    {
+        super(OptionalInt.empty());
+    }
 
     protected int getInnerPosition(int position)
     {
