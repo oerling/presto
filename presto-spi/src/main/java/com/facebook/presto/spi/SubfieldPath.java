@@ -31,6 +31,8 @@ public class SubfieldPath
         private final String field;
         private final long subscript;
         private final boolean isSubscript;
+        // Record if subscript should be a LongLiteral or GenericLiteral when translating back to expression.
+        private boolean isSubscriptGenericLiteral = false;
 
         @JsonCreator
         public PathElement(
@@ -43,6 +45,17 @@ public class SubfieldPath
             this.isSubscript = isSubscript;
         }
 
+        public PathElement(
+                           String field,
+                           long subscript,
+                           boolean isSubscript,
+                           boolean isGenericLiteral)
+        {
+            this(field, subscript, isSubscript);
+            isSubscriptGenericLiteral = isGenericLiteral;
+        }
+
+        
         public PathElement(String field, long subscript)
         {
             this(field, subscript, false);
@@ -64,6 +77,11 @@ public class SubfieldPath
         public boolean getIsSubscript()
         {
             return isSubscript;
+        }
+
+        public boolean getIsSubscriptGenericLiteral()
+        {
+            return isSubscriptGenericLiteral;
         }
 
         @Override

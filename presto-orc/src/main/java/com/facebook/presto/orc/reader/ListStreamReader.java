@@ -350,9 +350,6 @@ public class ListStreamReader
         }
         beginScan(presentStream, lengthStream);
         initialNumElements = elementStreamReader.getNumValues();
-        if (numValues == 771) {
-            System.out.println("1");
-        }
         makeInnerQualifyingSet();
         if (positionalFilter != null) {
             setupPositionalFilter();
@@ -384,9 +381,6 @@ public class ListStreamReader
                 outputIdx = processFilterHits(i, outputIdx, resultRows, resultInputNumbers, numElementResults);
             }
             elementStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
-            if (numValues == 771) {
-                System.out.println("2");
-            }
         }
         else {
             numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;

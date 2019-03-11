@@ -57,7 +57,7 @@ public class SubfieldUtils
                     GenericLiteral literal = (GenericLiteral) index;
                     String type = literal.getType();
                     if (type.equals("BIGINT")) {
-                        steps.add(new SubfieldPath.PathElement(null, new Integer(literal.getValue()).intValue(), true));
+                        steps.add(new SubfieldPath.PathElement(null, new Integer(literal.getValue()).intValue(), true, true));
                     }
                     else {
                         return null;

@@ -94,6 +94,8 @@ public class MapDirectStreamReader
     // Count of elements at the beginning of current call to scan().
     private int initialNumElements;
     private Block keyBlock;
+    // Qualifying rows after filter on key. If no filter on key, this is innerQualifyingSet.
+    private QualifyingSet keyQualifyingSet;
 
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -427,35 +429,61 @@ public class MapDirectStreamReader
         filterIsSetup = true;
     }
 
-    private void setupPositionalFilter()
+    private Filter valueFilterAt(Filters.StructFilter mapFilter, int keyPosition)
+    {
+        long subscript = keyBlock.getLong(keyPosition, 0);
+        return mapFilter.getMember(subscript);
+    }
+
+    private void setupPositionalFilter(int[] keyInputNumbers)
     {
         if (numElementFilters == null || numElementFilters.length < inputQualifyingSet.getPositionCount()) {
             numElementFilters = new int[inputQualifyingSet.getPositionCount()];
         }
         Arrays.fill(numElementFilters, 0, inputQualifyingSet.getPositionCount(), 0);
-        if (elementFilters == null || elementFilters.length < innerQualifyingSet.getPositionCount()) {
-            elementFilters = new Filter[innerQualifyingSet.getPositionCount()];
+        if (elementFilters == null || elementFilters.length < keyQualifyingSet.getPositionCount()) {
+            elementFilters = new Filter[keyQualifyingSet.getPositionCount()];
         }
         else {
-            Arrays.fill(elementFilters, 0, innerQualifyingSet.getPositionCount(), null);
+            Arrays.fill(elementFilters, 0, keyQualifyingSet.getPositionCount(), null);
         }
-        int innerStart = 0;
         int numInput = inputQualifyingSet.getPositionCount();
+        int numKeys = keyQualifyingSet.getPositionCount();
+        int keyIdx = 0;
         for (int i = 0; i < numInput; i++) {
-            int length = elementLength[i];
-            int filterCount = 0;
-            for (Map.Entry<Object, Filter> entry : subscriptToFilter.entrySet()) {
-                Object subscript = entry.getKey();
-                if (true) {
-                    int keyPosition = 0;
-                    elementFilters[innerStart + keyPosition] = entry.getValue();
-                    filterCount++;
+            Filters.StructFilter mapFilter = (Filters.StructFilter) filter.nextFilter();
+            int length = 0;
+            int startKeyIdx = keyIdx;
+            for (; keyIdx < numKeys; keyIdx++) {
+                if (keyInputNumbers[keyIdx] != i) {
+                    break;
                 }
-                numElementFilters[i] = filterCount;
+                length++;
             }
-            innerStart += length;
+            int filterCount = 0;
+            for (int key = startKeyIdx; key < keyIdx; key++) {
+                Filter filter = valueFilterAt(mapFilter, key);
+                if (filter != null) {
+                    filterCount++;
+                    elementFilters[key] = filter;
+                }
+            }
+            numElementFilters[i] = filterCount;
         }
-        positionalFilter.setFilters(innerQualifyingSet, elementFilters);
+        positionalFilter.setFilters(keyQualifyingSet, elementFilters);
+    }
+
+    private void adjustElementLengths()
+    {
+        int numInput = inputQualifyingSet.getPositionCount();
+        Arrays.fill(elementLength, 0, numInput, 0);
+        int numKeys = keyQualifyingSet.getPositionCount();
+        int[] inputNumbers = innerQualifyingSet.getInputNumbers();
+        int[] keyInputNumbers = keyQualifyingSet.getInputNumbers();
+        for (int i = 0; i < numKeys; i++) {
+            keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
+            elementLength[keyInputNumbers[i]]++;
+        }
     }
 
     @Override
@@ -477,34 +505,58 @@ public class MapDirectStreamReader
             keyStreamReader.setInputQualifyingSet(innerQualifyingSet);
             keyStreamReader.scan();
             keyBlock = keyStreamReader.getBlock(keyStreamReader.getNumValues(), true);
-            if (keyStreamReader.getFilter() != null) {
-            }
             if (positionalFilter != null) {
-                setupPositionalFilter();
+                // The position in inputQualifyingSet for each value in
+                // keyBlock. Positions with the same value in this array
+                // belong to the same map.
+            int[] keyInputNumbers;
+            if (keyStreamReader.getFilter() != null) {
+                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                int numKeys = keyQualifyingSet.getPositionCount();
+                int[] inputNumbers = innerQualifyingSet.getInputNumbers();
+                keyInputNumbers = keyQualifyingSet.getInputNumbers();
+                for (int i = 0; i < numKeys; i++) {
+                    keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
+                }
             }
-            if (innerQualifyingSet.getPositionCount() > 0) {
-                valueStreamReader.setInputQualifyingSet(innerQualifyingSet);
+            else {
+                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                keyInputNumbers = innerQualifyingSet.getInputNumbers();
+            }
+            setupPositionalFilter(keyInputNumbers);
+            }
+            else {
+                if (keyStreamReader.getFilter() == null) {
+                    keyQualifyingSet = innerQualifyingSet;
+                }
+                else {
+                    keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                    adjustElementLengths();
+                }
+            }
+            if (keyQualifyingSet.getPositionCount() > 0) {
+                valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
                 valueStreamReader.scan();
                 innerPosInRowGroup = innerQualifyingSet.getEnd();
             }
             else {
-                keyStreamReader.getOrCreateOutputQualifyingSet().reset(0);
+                valueStreamReader.getOrCreateOutputQualifyingSet().reset(0);
             }
             ensureValuesCapacity(inputQualifyingSet.getPositionCount());
             if (filter != null) {
                 QualifyingSet filterResult = valueStreamReader.getOutputQualifyingSet();
                 outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
-                int numElementResults = filterResult.getPositionCount();
+                int numValueResults = filterResult.getPositionCount();
                 int[] resultInputNumbers = filterResult.getInputNumbers();
                 int[] resultRows = filterResult.getPositions();
-                if (innerSurviving == null || innerSurviving.length < numElementResults) {
-                    innerSurviving = new int[numElementResults];
+                if (innerSurviving == null || innerSurviving.length < numValueResults) {
+                    innerSurviving = new int[numValueResults];
                 }
                 numInnerSurviving = 0;
                 int outputIdx = 0;
                 numInnerResults = 0;
                 for (int i = 0; i < numInput; i++) {
-                    outputIdx = processFilterHits(i, outputIdx, resultRows, resultInputNumbers, numElementResults);
+                    outputIdx = processFilterHits(i, outputIdx, resultRows, resultInputNumbers, numValueResults);
                 }
                 keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
                 valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
@@ -515,7 +567,7 @@ public class MapDirectStreamReader
         }
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (filter == null) {
-            // The lengths are unchanged.
+            // The lengths are unchanged by reading the values.
             int valueIdx = numValues;
             for (int i = 0; i < numInput; i++) {
                 elementOffset[valueIdx] = lastElementOffset;
@@ -544,12 +596,12 @@ public class MapDirectStreamReader
         endScan(presentStream);
     }
 
-    // Counts how many hits one array has. Adds the array to surviving
-    // if all hit and all filters existed. Adds array to errors if all
-    // hit but not all subscripts existed. Else the array did not
-    // pass. Returns the index to the first element of the next array
-    // in the inner outputQualifyingSet.
-    int processFilterHits(int inputIdx, int outputIdx, int[] resultRows, int[] resultInputNumbers, int numElementResults)
+    // Counts how many hits one map has. Adds the map to surviving
+    // if all hit and all filters existed. Adds map to errors if all
+    // hit but not all subscripts existed. Else the map did not
+    // pass. Returns the index to the first element of the next value
+    // in the keyQualifyingSet.
+    int processFilterHits(int inputIdx, int outputIdx, int[] resultRows, int[] resultInputNumbers, int numValueResults)
     {
         int filterHits = 0;
         int count = 0;
@@ -557,12 +609,11 @@ public class MapDirectStreamReader
         if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIdx]]) {
             return outputIdx;
         }
-        int[] inputNumbers = innerQualifyingSet.getInputNumbers(); 
-        // Count rows and filter hits from the array corresponding to inputIdx.
-        while (outputIdx < numElementResults && inputNumbers[resultInputNumbers[outputIdx]] == inputIdx) {
+        int[] inputNumbers = keyQualifyingSet.getInputNumbers(); 
+        // Count rows and filter hits from the map corresponding to inputIdx.
+        while (outputIdx < numValueResults && inputNumbers[resultInputNumbers[outputIdx]] == inputIdx) {
             count++;
-            long subscript = keyBlock.getLong(outputIdx + initialNumElements, 0);
-            if (subscriptToFilter.get(Long.valueOf(subscript)) != null) {
+            if (elementFilters[resultInputNumbers[outputIdx]] != null) {
                 filterHits++;
             }
             outputIdx++;
@@ -575,7 +626,7 @@ public class MapDirectStreamReader
         addArrayToResult(inputIdx, initialOutputIdx, outputIdx);
         if (numElementFilters[inputIdx] < subscriptToFilter.size()) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
-            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("List subscript out of bounds"));
+            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("Map subscript not found"));
         }
         return outputIdx;
     }

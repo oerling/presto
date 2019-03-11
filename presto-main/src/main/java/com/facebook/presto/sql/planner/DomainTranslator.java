@@ -123,7 +123,7 @@ public final class DomainTranslator
                 SubfieldPath.PathElement element = path.getPath().get(i);
                 String field = element.getField();
                 if (element.getIsSubscript()) {
-                    base = new SubscriptExpression(base, field != null ? new StringLiteral(field) : new GenericLiteral("BIGINT", Long.valueOf(element.getSubscript()).toString()));
+                    base = new SubscriptExpression(base, field != null ? new StringLiteral(field) : element.getIsSubscriptGenericLiteral() ? new GenericLiteral("BIGINT", Long.valueOf(element.getSubscript()).toString()) : new LongLiteral(Long.valueOf(element.getSubscript()).toString()));
                 }
                 else if (field != null) {
                     base = new DereferenceExpression(base, new Identifier(field));

@@ -425,6 +425,7 @@ public class Filters
             extends Filter
     {
         private final HashMap<SubfieldPath.PathElement, Filter> filters = new HashMap();
+        private HashMap<Long, Filter> longToFilter;
 
         StructFilter()
         {
@@ -436,11 +437,21 @@ public class Filters
             return filters.get(member);
         }
 
+        public Filter getMember(long subscript)
+        {
+            return longToFilter.get(subscript);
+        }
+
         public void addMember(SubfieldPath.PathElement member, Filter filter)
         {
             filters.put(member, filter);
+            if (member.getField() == null) {
+                if (longToFilter == null) {
+                    longToFilter = new HashMap();
+                }
+                longToFilter.put(Long.valueOf(member.getSubscript()), filter);
+            }
         }
-
         public HashMap<SubfieldPath.PathElement, Filter> getFilters()
         {
             return filters;
@@ -772,6 +783,7 @@ public class Filters
             return true;
         }
 
+        @Override
         public Filter nextFilter()
         {
             filterIdx++;

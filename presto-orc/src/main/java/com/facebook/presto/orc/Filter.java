@@ -91,4 +91,9 @@ public class Filter
     public void setScanRows(int[] rows, int[] rowIndices, int numRows)
     {
     }
+
+    public Filter nextFilter()
+    {
+        return this;
+    }
 }
