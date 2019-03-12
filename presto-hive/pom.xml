@@ -319,7 +319,8 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <excludes>
+                          <argLine>-Xmx8096M</argLine>
+                          <excludes>
                                 <!-- Exclude tests against Glue from build -->
                                 <exclude>**/TestHiveClientGlueMetastore.java</exclude>
                             </excludes>
