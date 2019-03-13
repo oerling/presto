@@ -235,7 +235,7 @@ public class DictionaryBlock
         else {
             this.sizeInBytes = dictionary.getPositionsSizeInBytes(used) + (Integer.BYTES * (long) positionCount);
         }
-            this.uniqueIds = uniqueIds;
+        this.uniqueIds = uniqueIds;
         booleanArrayPool.release(used);
     }
 

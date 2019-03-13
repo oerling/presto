@@ -135,7 +135,7 @@ public class VariableWidthBlock
         long sizeInBytes = 0;
         int usedPositionCount = 0;
         int end = Math.min( positionCount, positions.length);
-        for (int i = 0; i< end; ++i) {
+        for (int i = 0; i < end; ++i) {
             if (positions[i]) {
                 usedPositionCount++;
                 sizeInBytes += offsets[arrayOffset + i + 1] - offsets[arrayOffset + i];
