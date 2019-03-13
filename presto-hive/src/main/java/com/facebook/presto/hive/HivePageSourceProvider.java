@@ -137,10 +137,14 @@ public class HivePageSourceProvider
             Optional<BucketConversion> bucketConversion,
             boolean s3SelectPushdownEnabled)
     {
+        ImmutableSet.Builder<HiveColumnHandle> requiredInterimColumns = ImmutableSet.builder();
+        requiredInterimColumns.addAll(effectivePredicate.getDomains().map(Map::keySet).orElse(ImmutableSet.of()));
+        requiredInterimColumns.addAll(bucketConversion.map(BucketConversion::getBucketColumnHandles).orElse(ImmutableList.of()));
+
         List<ColumnMapping> columnMappings = ColumnMapping.buildColumnMappings(
                 partitionKeys,
                 hiveColumns,
-                bucketConversion.map(BucketConversion::getBucketColumnHandles).orElse(ImmutableList.of()),
+                requiredInterimColumns.build(),
                 columnCoercions,
                 path,
                 bucketNumber);
@@ -307,7 +311,7 @@ public class HivePageSourceProvider
         public static List<ColumnMapping> buildColumnMappings(
                 List<HivePartitionKey> partitionKeys,
                 List<HiveColumnHandle> columns,
-                List<HiveColumnHandle> requiredInterimColumns,
+                Set<HiveColumnHandle> requiredInterimColumns,
                 Map<Integer, HiveType> columnCoercions,
                 Path path,
                 OptionalInt bucketNumber)
