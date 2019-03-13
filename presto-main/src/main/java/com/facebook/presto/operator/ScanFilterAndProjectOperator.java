@@ -464,7 +464,7 @@ public class ScanFilterAndProjectOperator
                     lazyBlock.setBlock(loadedBlock);
                 });
             }
-            else{
+            else {
                 operatorContext.recordProcessedInput(block.getSizeInBytes(), 0L);
                 blocks[i] = block;
             }

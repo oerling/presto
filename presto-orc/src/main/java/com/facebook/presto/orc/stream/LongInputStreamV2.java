@@ -135,7 +135,6 @@ public class LongInputStreamV2
                 scanLiterals();
             }
         }
-        //skip(endOffset - offsets[beginOffset + numOffsets - 1] - 1);
         this.offsets = null;
         return numResults;
     }
