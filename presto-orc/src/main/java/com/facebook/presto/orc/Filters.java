@@ -22,14 +22,33 @@ import java.util.Objects;
 
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
 import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
+import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static java.util.Objects.requireNonNull;
 
 public class Filters
 {
+    private static final Filter ALWAYS_FALSE = new AlwaysFalse();
     private static final Filter IS_NULL = new IsNull();
     private static final Filter IS_NOT_NULL = new IsNotNull();
 
     private Filters() {}
+
+    private static class AlwaysFalse
+            extends Filter
+    {
+        public AlwaysFalse()
+        {
+            super(false);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this).toString();
+        }
+    }
 
     private static class IsNull
             extends Filter
@@ -37,6 +56,12 @@ public class Filters
         public IsNull()
         {
             super(true);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this).toString();
         }
     }
 
@@ -83,6 +108,17 @@ public class Filters
         {
             return true;
         }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this).toString();
+        }
+    }
+
+    public static Filter alwaysFalse()
+    {
+        return ALWAYS_FALSE;
     }
 
     public static Filter isNull()
@@ -154,6 +190,7 @@ public class Filters
         public BigintRange(long lower, long upper, boolean nullAllowed)
         {
             super(nullAllowed);
+            checkArgument(lower <= upper, "lower must be <= upper");
             this.lower = lower;
             this.upper = upper;
         }
@@ -188,6 +225,39 @@ public class Filters
         public boolean isEquality()
         {
             return upper == lower;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) {
+                return true;
+            }
+
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            BigintRange that = (BigintRange) o;
+            return lower == that.lower &&
+                    upper == that.upper &&
+                    nullAllowed == that.nullAllowed;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(lower, upper, nullAllowed);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                    .add("lower", lower)
+                    .add("upper", upper)
+                    .add("nullAllowed", nullAllowed)
+                    .toString();
         }
     }
 
@@ -461,25 +531,31 @@ public class Filters
     public static class MultiRange
             extends Filter
     {
-        Filter[] filters;
-        long[] longLowerBounds;
+        private final Filter[] filters;
+        private final long[] longLowerBounds;
 
         MultiRange(List<Filter> filters, boolean nullAllowed)
         {
             super(nullAllowed);
-            this.filters = new Filter[filters.size()];
-            for (int i = 0; i < this.filters.length; i++) {
-                this.filters[i] = filters.get(i);
-            }
-            if (this.filters[0] instanceof BigintRange) {
-                longLowerBounds = new long[this.filters.length];
-                for (int i = 0; i < this.filters.length; i++) {
-                    BigintRange range = (BigintRange) this.filters[i];
-                    longLowerBounds[i] = range.getLower();
-                    if (i > 0 && longLowerBounds[i] < ((BigintRange) this.filters[i - 1]).getUpper()) {
-                        throw new IllegalArgumentException("Bigint filter range set must be in ascending order of lower bound and ranges must be disjoint");
-                    }
+            requireNonNull(filters, "filters is null");
+            checkArgument(filters.size() > 0, "filters is empty");
+
+            this.filters = filters.toArray(new Filter[0]);
+            if (filters.get(0) instanceof BigintRange) {
+                this.longLowerBounds = filters.stream()
+                        .mapToLong(filter -> ((BigintRange) filter).getLower())
+                        .toArray();
+
+                long[] upperBounds = filters.stream()
+                        .mapToLong(filter -> ((BigintRange) filter).getUpper())
+                        .toArray();
+
+                for (int i = 1; i < longLowerBounds.length; i++) {
+                    checkArgument(longLowerBounds[i] >= upperBounds[i - 1], "bigint ranges must not overlap");
                 }
+            }
+            else {
+                this.longLowerBounds = null;
             }
         }
 
@@ -520,25 +596,59 @@ public class Filters
             }
             return false;
         }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) {
+                return true;
+            }
+
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            MultiRange that = (MultiRange) o;
+            return Arrays.equals(filters, that.filters) &&
+                    Arrays.equals(longLowerBounds, that.longLowerBounds) &&
+                    nullAllowed == that.nullAllowed;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(filters, longLowerBounds, nullAllowed);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                    .add("filters", filters)
+                    .add("nullAllowed", nullAllowed)
+                    .toString();
+        }
     }
 
-    public static class InTest
+    public static class BingintValues
             extends Filter
     {
-        static final long emptyMarker = 0xdeadbeefbadefeedL;
-        static final long M = 0xc6a4a7935bd1e995L;
-        private long[] longs;
-        int size;
+        private static final long emptyMarker = 0xdeadbeefbadefeedL;
+        private static final long M = 0xc6a4a7935bd1e995L;
+
+        private final long[] originalValues;
+        private final long[] longs;
+        private final int size;
         private boolean containsEmptyMarker;
 
-        public InTest(List<Filter> filters, boolean nullAllowed)
+        public BingintValues(long[] values, boolean nullAllowed)
         {
             super(nullAllowed);
-            size = Integer.highestOneBit((int) (filters.size() * 3));
+            originalValues = values;
+            size = Integer.highestOneBit(values.length * 3);
             longs = new long[size];
             Arrays.fill(longs, emptyMarker);
-            for (Filter filter : filters) {
-                long value = ((BigintRange) filter).getLower();
+            for (long value : values) {
                 if (value == emptyMarker) {
                     containsEmptyMarker = true;
                 }
@@ -574,12 +684,47 @@ public class Filters
             }
             return false;
         }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) {
+                return true;
+            }
+
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            BingintValues that = (BingintValues) o;
+            return size == that.size &&
+                    containsEmptyMarker == that.containsEmptyMarker &&
+                    Arrays.equals(longs, that.longs) &&
+                    nullAllowed == that.nullAllowed;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(size, containsEmptyMarker, longs, nullAllowed);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                    .add("values", originalValues)
+                    .add("nullAllowed", nullAllowed)
+                    .toString();
+        }
     }
 
     public static Filter createMultiRange(List<Filter> filters, boolean nullAllowed)
     {
+        requireNonNull(filters, "filters is null");
+        checkArgument(filters.size() > 0, "filters is empty");
         if (filters.get(0) instanceof BigintRange && filters.stream().allMatch(Filter::isEquality)) {
-            return new InTest(filters, nullAllowed);
+            return new BingintValues(filters.stream().mapToLong(filter -> ((BigintRange) filter).getLower()).toArray(), nullAllowed);
         }
         else {
             return new MultiRange(filters, nullAllowed);
