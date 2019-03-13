@@ -423,7 +423,7 @@ public class OrcTester
     }
 
     static private Long global = new Long(11);
-    
+
     private void testListRoundTrip(Type type, List<?> readValues)
             throws Exception
     {

@@ -49,7 +49,7 @@ public class DictionaryBlock
     private volatile int uniqueIds = -1;
     private final DictionaryId dictionarySourceId;
     private static ArrayPool<boolean[]> booleanArrayPool = Caches.getBooleanArrayPool();
-    
+
     public DictionaryBlock(Block dictionary, int[] ids)
     {
         this(requireNonNull(ids, "ids is null").length, dictionary, ids);

@@ -55,7 +55,7 @@ public class SubfieldPath
             isSubscriptGenericLiteral = isGenericLiteral;
         }
 
-        
+
         public PathElement(String field, long subscript)
         {
             this(field, subscript, false);

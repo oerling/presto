@@ -63,7 +63,7 @@ public class Caches
         }
     }
 
-    
+
     private static ArrayPool<boolean[]> booleanArrayPool;
 
     public static ArrayPool<boolean[]> getBooleanArrayPool()

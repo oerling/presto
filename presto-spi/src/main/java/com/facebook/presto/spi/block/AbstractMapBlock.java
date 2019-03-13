@@ -39,7 +39,7 @@ public abstract class AbstractMapBlock
     static final int HASH_MULTIPLIER = 2;
 
     private static ArrayPool<boolean[]> booleanArrayPool = Caches.getBooleanArrayPool();
-    
+
     protected final Type keyType;
     protected final MethodHandle keyNativeHashCode;
     protected final MethodHandle keyBlockNativeEquals;

@@ -609,7 +609,7 @@ public class MapDirectStreamReader
         if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIdx]]) {
             return outputIdx;
         }
-        int[] inputNumbers = keyQualifyingSet.getInputNumbers(); 
+        int[] inputNumbers = keyQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the map corresponding to inputIdx.
         while (outputIdx < numValueResults && inputNumbers[resultInputNumbers[outputIdx]] == inputIdx) {
             count++;
@@ -681,7 +681,7 @@ public class MapDirectStreamReader
         elementOffset[position] = -1;
     }
 
-    
+
     @Override
     public String toString()
     {

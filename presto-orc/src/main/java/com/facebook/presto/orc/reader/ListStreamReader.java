@@ -429,7 +429,7 @@ public class ListStreamReader
         if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIdx]]) {
             return outputIdx;
         }
-        int[] inputNumbers = innerQualifyingSet.getInputNumbers(); 
+        int[] inputNumbers = innerQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the array corresponding to inputIdx.
         while (outputIdx < numElementResults && inputNumbers[resultInputNumbers[outputIdx]] == inputIdx) {
             count++;
