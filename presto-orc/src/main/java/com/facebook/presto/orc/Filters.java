@@ -633,7 +633,7 @@ public class Filters
     public static class BingintValues
             extends Filter
     {
-        private static final long emptyMarker = 0xdeadbeefbadefeedL;
+        private static final long EMPTY_MARKER = 0xdeadbeefbadefeedL;
         private static final long M = 0xc6a4a7935bd1e995L;
 
         private final long[] originalValues;
@@ -647,16 +647,16 @@ public class Filters
             originalValues = values;
             size = Integer.highestOneBit(values.length * 3);
             longs = new long[size];
-            Arrays.fill(longs, emptyMarker);
+            Arrays.fill(longs, EMPTY_MARKER);
             for (long value : values) {
-                if (value == emptyMarker) {
+                if (value == EMPTY_MARKER) {
                     containsEmptyMarker = true;
                 }
                 else {
                     int pos = (int) ((value * M) & (size - 1));
                     for (int i = pos; i < pos + size; i++) {
                         int idx = i & (size - 1);
-                        if (longs[idx] == emptyMarker) {
+                        if (longs[idx] == EMPTY_MARKER) {
                             longs[idx] = value;
                             break;
                         }
@@ -668,14 +668,14 @@ public class Filters
         @Override
         public boolean testLong(long value)
         {
-            if (containsEmptyMarker && value == emptyMarker) {
+            if (containsEmptyMarker && value == EMPTY_MARKER) {
                 return true;
             }
             int pos = (int) ((value * M) & (size - 1));
             for (int i = pos; i < pos + size; i++) {
                 int idx = i & (size - 1);
                 long l = longs[idx];
-                if (l == emptyMarker) {
+                if (l == EMPTY_MARKER) {
                     return false;
                 }
                 if (l == value) {
