@@ -16,7 +16,6 @@ package com.facebook.presto.spi.memory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 
 public class ArrayPool<ArrayType>
 {

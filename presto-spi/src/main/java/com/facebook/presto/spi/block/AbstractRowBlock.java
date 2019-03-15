@@ -15,6 +15,7 @@ package com.facebook.presto.spi.block;
 
 import com.facebook.presto.spi.memory.ArrayPool;
 import com.facebook.presto.spi.memory.Caches;
+
 import static com.facebook.presto.spi.block.BlockUtil.arraySame;
 import static com.facebook.presto.spi.block.BlockUtil.checkArrayRange;
 import static com.facebook.presto.spi.block.BlockUtil.checkValidPositions;
@@ -26,7 +27,6 @@ import static com.facebook.presto.spi.block.RowBlock.createRowBlockInternal;
 public abstract class AbstractRowBlock
         implements Block
 {
-
     private static ArrayPool<boolean[]> booleanArrayPool = Caches.getBooleanArrayPool();
 
     protected final int numFields;

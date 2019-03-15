@@ -134,7 +134,7 @@ public class VariableWidthBlock
     {
         long sizeInBytes = 0;
         int usedPositionCount = 0;
-        int end = Math.min( positionCount, positions.length);
+        int end = Math.min(positionCount, positions.length);
         for (int i = 0; i < end; ++i) {
             if (positions[i]) {
                 usedPositionCount++;
