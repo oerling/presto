@@ -24,4 +24,5 @@ public class AriaFlags
     public static final int noReaderBudget = 16;
     public static final int exchangeReusePages = 32;
     public static final int pruneSubfields = 64;
+    public static final int budgetByException = 128;
 }
