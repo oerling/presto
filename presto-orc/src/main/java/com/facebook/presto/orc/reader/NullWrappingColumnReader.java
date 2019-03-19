@@ -68,7 +68,7 @@ abstract class NullWrappingColumnReader
         int numActive = inputQualifyingSet.getPositionCount();
 
         innerQualifyingSet.reset(numActive);
-        int prevRow = posInRowGroup;
+        int prevRow = 0;
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
         boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());

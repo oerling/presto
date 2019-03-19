@@ -102,6 +102,7 @@ abstract class RepeatedColumnReader
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
         }
+        innerQualifyingSet.setParent(inputQualifyingSet);
         int[] inputRows = inputQualifyingSet.getPositions();
         int numActive = inputQualifyingSet.getPositionCount();
         if (elementLength == null || elementLength.length < numActive) {
@@ -109,12 +110,12 @@ abstract class RepeatedColumnReader
             elementStart = new int[numActive];
         }
         innerQualifyingSet.reset(countInnerActive());
-        int prevRow = posInRowGroup;
+        int prevRow = 0;
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
         boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());
         for (int activeIdx = 0; activeIdx < numActive; activeIdx++) {
-            int row = inputRows[activeIdx];
+            int row = inputRows[activeIdx] - posInRowGroup;
             if (presentStream != null && !present[row]) {
                 elementLength[activeIdx] = 0;
                 elementStart[activeIdx] = prevInner;
@@ -123,8 +124,8 @@ abstract class RepeatedColumnReader
                 }
             }
             else {
-                prevInner += innerDistance(prevRow - posInRowGroup, row - posInRowGroup, nonNullRowIdx);
-                nonNullRowIdx += countPresent(prevRow - posInRowGroup, row - posInRowGroup);
+                prevInner += innerDistance(prevRow, row, nonNullRowIdx);
+                nonNullRowIdx += countPresent(prevRow, row);
                 prevRow = row;
                 int length = lengths[nonNullRowIdx];
                 elementLength[activeIdx] = length;
@@ -135,9 +136,9 @@ abstract class RepeatedColumnReader
             }
         }
         numInnerRows = innerQualifyingSet.getPositionCount();
-        int skip = innerDistance(prevRow - posInRowGroup, inputQualifyingSet.getEnd() - posInRowGroup, nonNullRowIdx);
+        int skip = innerDistance(prevRow, inputQualifyingSet.getEnd() - posInRowGroup, nonNullRowIdx);
         innerQualifyingSet.setEnd(skip + prevInner);
-        skip = countPresent(prevRow - posInRowGroup, inputQualifyingSet.getEnd() - posInRowGroup);
+        skip = countPresent(prevRow, inputQualifyingSet.getEnd() - posInRowGroup);
         lengthIdx = nonNullRowIdx + skip;
     }
 
