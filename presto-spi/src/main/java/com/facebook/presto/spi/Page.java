@@ -64,16 +64,6 @@ public class Page
         return positionCount;
     }
 
-    public void setPositionCount(int count)
-    {
-        positionCount = count;
-    }
-
-    public void setBlocks(Block[] blocks)
-    {
-        this.blocks = blocks;
-    }
-
     public long getSizeInBytes()
     {
         long sizeInBytes = this.sizeInBytes.get();

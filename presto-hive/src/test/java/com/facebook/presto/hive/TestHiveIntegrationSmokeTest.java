@@ -3629,7 +3629,33 @@ public class TestHiveIntegrationSmokeTest
                 "SELECT * FROM test_prune_failure\n" +
                 "WHERE x < 0 AND cast(p AS int) > 0");
 
+        assertQueryFails("SELECT * FROM test_prune_failure " +
+                "WHERE x > 0 AND cast(p AS int) > 0",
+                "Cannot cast 'abc' to INT");
+
         assertUpdate("DROP TABLE test_prune_failure");
+    }
+
+    @Test
+    public void testPartitionPredicates()
+    {
+        assertUpdate("CREATE TABLE test_partition_predicates " +
+                "WITH (partitioned_by = ARRAY['p']) AS " +
+                "SELECT 123 x, 'abc' p", 1);
+
+        assertQuery("SELECT x FROM test_partition_predicates WHERE p = 'abc'", "SELECT 123");
+
+        assertQueryReturnsEmptyResult("SELECT x FROM test_partition_predicates WHERE p = 'ddd'");
+
+        assertQuery("SELECT x FROM test_partition_predicates WHERE p like 'ab%'", "SELECT 123");
+
+        assertQueryReturnsEmptyResult("SELECT x FROM test_partition_predicates WHERE p like 'ddd'");
+
+        assertQuery("SELECT x, p FROM test_partition_predicates WHERE p like 'ab%'", "SELECT 123, 'abc'");
+
+        assertQuery("SELECT p, x FROM test_partition_predicates WHERE p like 'ab%'", "SELECT 'abc', 123");
+
+        assertUpdate("DROP TABLE test_partition_predicates");
     }
 
     @Test

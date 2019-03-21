@@ -15,9 +15,11 @@ package com.facebook.presto.hive;
 
 import com.facebook.presto.hive.HivePageSourceProvider.BucketAdaptation;
 import com.facebook.presto.hive.HivePageSourceProvider.ColumnMapping;
+import com.facebook.presto.hive.HivePageSourceProvider.ColumnMappingKind;
 import com.facebook.presto.spi.ConnectorPageSource;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageSourceOptions;
+import com.facebook.presto.spi.PageSourceOptions.FilterFunction;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.ArrayBlock;
 import com.facebook.presto.spi.block.Block;
@@ -35,6 +37,8 @@ import com.facebook.presto.spi.type.MapType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.VarcharType;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
@@ -44,8 +48,10 @@ import org.joda.time.DateTimeZone;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static com.facebook.presto.hive.HiveBucketing.getHiveBucket;
@@ -82,6 +88,7 @@ import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.block.ColumnarArray.toColumnarArray;
 import static com.facebook.presto.spi.block.ColumnarMap.toColumnarMap;
 import static com.facebook.presto.spi.block.ColumnarRow.toColumnarRow;
+import static com.facebook.presto.spi.predicate.Utils.nativeValueToBlock;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.Chars.isCharType;
@@ -96,8 +103,10 @@ import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.Slices.utf8Slice;
 import static java.lang.Float.intBitsToFloat;
+import static java.lang.Math.max;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
@@ -113,6 +122,9 @@ public class HivePageSource
 
     private final ConnectorPageSource delegate;
     private boolean filterAndProjectPushedDown;
+    private boolean filterOnPrefilledValuesFailed;
+    private int[] outputChannels;
+    private Optional<Throwable> filterOnPrefilledValuesException = Optional.empty();
     private final boolean needsColumnMapping;
 
     public HivePageSource(
@@ -230,22 +242,45 @@ public class HivePageSource
     @Override
     public Page getNextPage()
     {
+        if (filterOnPrefilledValuesFailed) {
+            return null;
+        }
+
         try {
             Page dataPage = delegate.getNextPage();
             if (dataPage == null) {
                 return null;
             }
+
+            if (dataPage.getPositionCount() > 0 && filterOnPrefilledValuesException.isPresent()) {
+                if (filterOnPrefilledValuesException.get() instanceof PrestoException) {
+                    throw (PrestoException) filterOnPrefilledValuesException.get();
+                }
+                throw new RuntimeException(filterOnPrefilledValuesException.get());
+            }
+
             if (filterAndProjectPushedDown) {
                 if (!needsColumnMapping) {
                     return dataPage;
                 }
                 int batchSize = dataPage.getPositionCount();
-                List<Block> blocks = new ArrayList<>();
-                for (int fieldId = 0; fieldId < columnMappings.size(); fieldId++) {
+                int maxOutputChannel = -1;
+                for (int i = 0; i < outputChannels.length; i++) {
+                    if (outputChannels[i] == -1) {
+                        continue;
+                    }
+                    maxOutputChannel = max(maxOutputChannel, outputChannels[i]);
+                }
+                Block[] blocks = new Block[maxOutputChannel + 1];
+                for (int fieldId = 0; fieldId < outputChannels.length; fieldId++) {
+                    if (outputChannels[fieldId] == -1) {
+                        continue;
+                    }
+
                     ColumnMapping columnMapping = columnMappings.get(fieldId);
                     switch (columnMapping.getKind()) {
                         case PREFILLED:
-                            blocks.add(RunLengthEncodedBlock.create(types[fieldId], prefilledValues[fieldId], batchSize));
+                            blocks[outputChannels[fieldId]] = RunLengthEncodedBlock.create(types[fieldId], prefilledValues[fieldId], batchSize);
                             break;
                         case REGULAR:
                             int index = columnMapping.getIndex();
@@ -260,7 +295,7 @@ public class HivePageSource
                             if (coercers[fieldId] != null) {
                                 throw new UnsupportedOperationException();
                             }
-                            blocks.add(block);
+                            blocks[outputChannels[fieldId]] = block;
                             break;
                         case INTERIM:
                             // interim columns don't show up in output
@@ -269,8 +304,9 @@ public class HivePageSource
                             throw new UnsupportedOperationException();
                     }
                 }
-                return new Page(batchSize, blocks.toArray(new Block[0]));
+                return new Page(batchSize, blocks);
             }
+
             if (bucketAdapter.isPresent()) {
                 IntArrayList rowsToKeep = bucketAdapter.get().computeEligibleRowIds(dataPage);
                 Block[] adaptedBlocks = new Block[dataPage.getChannelCount()];
@@ -357,6 +393,7 @@ public class HivePageSource
         }
     }
 
+    @VisibleForTesting
     public ConnectorPageSource getPageSource()
     {
         return delegate;
@@ -752,6 +789,32 @@ public class HivePageSource
     @Override
     public boolean pushdownFilterAndProjection(PageSourceOptions options)
     {
+        ImmutableList.Builder<FilterFunction> remainingFilterFunctions = ImmutableList.builder();
+        for (FilterFunction filterFunction : options.getFilterFunctions()) {
+            Set<ColumnMappingKind> inputKinds = getInputKinds(filterFunction);
+            if (!inputKinds.contains(PREFILLED)) {
+                remainingFilterFunctions.add(filterFunction);
+                continue;
+            }
+
+            if (inputKinds.size() > 1) {
+                // TODO Pass necessary pre-filled values to the delegate so it can evaluate these filters
+                throw new UnsupportedOperationException("Filters on a mix of partition and non-partition columns are not supported");
+            }
+
+            if (!evaluateFilterFunction(filterFunction)) {
+                filterOnPrefilledValuesFailed = true;
+                close();
+                break;
+            }
+        }
+
+        if (filterOnPrefilledValuesFailed) {
+            return true;
+        }
+
+        this.outputChannels = Arrays.copyOf(options.getOutputChannels(), options.getOutputChannels().length);
+
         // Remove non-regular and non-interim columns from internal and output channels
         int[] internalChannels = options.getInternalChannels();
         int[] outputChannels = options.getOutputChannels();
@@ -759,11 +822,46 @@ public class HivePageSource
             ColumnMapping columnMapping = columnMappings.get(i);
             if (columnMapping.getKind() != REGULAR && columnMapping.getKind() != INTERIM) {
                 internalChannels[i] = -1;
-                outputChannels[i] = -1;
+                if (i < outputChannels.length) {
+                    outputChannels[i] = -1;
+                }
             }
         }
 
-        filterAndProjectPushedDown = delegate.pushdownFilterAndProjection(options);
+        filterAndProjectPushedDown = delegate.pushdownFilterAndProjection(
+                new PageSourceOptions(
+                        internalChannels,
+                        outputChannels,
+                        options.getReusePages(),
+                        remainingFilterFunctions.build().toArray(new FilterFunction[0]),
+                        options.getReorderFilters(),
+                        options.getTargetBytes(),
+                        options.getAriaFlags()));
         return filterAndProjectPushedDown;
+    }
+
+    private Set<ColumnMappingKind> getInputKinds(FilterFunction filterFunction)
+    {
+        return Arrays.stream(filterFunction.getInputChannels())
+                .mapToObj(columnMappings::get)
+                .map(ColumnMapping::getKind)
+                .collect(toImmutableSet());
+    }
+
+    private boolean evaluateFilterFunction(FilterFunction filterFunction)
+    {
+        int[] inputChannels = filterFunction.getInputChannels();
+        Block[] blocks = new Block[inputChannels.length];
+        for (int i = 0; i < inputChannels.length; i++) {
+            blocks[i] = nativeValueToBlock(types[inputChannels[i]], prefilledValues[inputChannels[i]]);
+        }
+        PageSourceOptions.ErrorSet errorSet = new PageSourceOptions.ErrorSet();
+        int[] outputRows = new int[1];
+        int numRows = filterFunction.filter(new Page(blocks), outputRows, errorSet);
+        if (!errorSet.isEmpty()) {
+            filterOnPrefilledValuesException = Optional.of(errorSet.getFirstError(1));
+            return true;
+        }
+        return numRows == 1;
     }
 }
