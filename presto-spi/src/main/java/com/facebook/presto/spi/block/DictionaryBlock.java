@@ -198,11 +198,8 @@ public class DictionaryBlock
     }
 
     @Override
-
     public long getSizeInBytes()
     {
-        /* We return the size this takes passing through a partitioned output.*/
-
         if (sizeInBytes < 0) {
             calculateCompactSize();
             /*
