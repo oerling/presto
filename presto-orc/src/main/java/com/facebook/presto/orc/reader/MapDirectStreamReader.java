@@ -51,6 +51,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 
+import static com.facebook.presto.orc.QualifyingSet.roundupCapacity;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
@@ -438,11 +439,11 @@ public class MapDirectStreamReader
     private void setupPositionalFilter(int[] keyInputNumbers)
     {
         if (numElementFilters == null || numElementFilters.length < inputQualifyingSet.getPositionCount()) {
-            numElementFilters = new int[inputQualifyingSet.getPositionCount()];
+            numElementFilters = new int[roundupCapacity(inputQualifyingSet.getPositionCount())];
         }
         Arrays.fill(numElementFilters, 0, inputQualifyingSet.getPositionCount(), 0);
         if (elementFilters == null || elementFilters.length < keyQualifyingSet.getPositionCount()) {
-            elementFilters = new Filter[keyQualifyingSet.getPositionCount()];
+            elementFilters = new Filter[roundupCapacity(keyQualifyingSet.getPositionCount())];
         }
         else {
             Arrays.fill(elementFilters, 0, keyQualifyingSet.getPositionCount(), null);
@@ -520,7 +521,7 @@ public class MapDirectStreamReader
                 }
             }
             else {
-                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                keyQualifyingSet = innerQualifyingSet;
                 keyInputNumbers = innerQualifyingSet.getInputNumbers();
             }
             setupPositionalFilter(keyInputNumbers);
@@ -535,6 +536,9 @@ public class MapDirectStreamReader
                 }
             }
             if (keyQualifyingSet.getPositionCount() > 0) {
+                if (keyQualifyingSet != innerQualifyingSet) {
+                    keyQualifyingSet.setParent(inputQualifyingSet);
+                }
                 valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
                 valueStreamReader.scan();
                 innerPosInRowGroup = innerQualifyingSet.getEnd();
@@ -550,7 +554,7 @@ public class MapDirectStreamReader
                 int[] resultInputNumbers = filterResult.getInputNumbers();
                 int[] resultRows = filterResult.getPositions();
                 if (innerSurviving == null || innerSurviving.length < numValueResults) {
-                    innerSurviving = new int[numValueResults];
+                    innerSurviving = new int[roundupCapacity(numValueResults)];
                 }
                 numInnerSurviving = 0;
                 int outputIdx = 0;

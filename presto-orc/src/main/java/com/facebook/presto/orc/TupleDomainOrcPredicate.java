@@ -433,17 +433,33 @@ public class TupleDomainOrcPredicate<C>
         }
 
         Filter topFilter = filters.get(ordinal);
-        verify(topFilter == null || topFilter instanceof Filters.StructFilter);
+        Filter newFilter = combineFilter(topFilter, filter);
+        if (newFilter != topFilter) {
+            filters.put(ordinal, newFilter);
+            if (!(newFilter instanceof Filters.StructFilter)) {
+                return;
+            }
+            topFilter = newFilter;
+            }
+        verify(topFilter instanceof Filters.StructFilter);
         Filters.StructFilter structFilter = (Filters.StructFilter) topFilter;
-        if (structFilter == null) {
-            structFilter = new Filters.StructFilter();
-            filters.put(ordinal, structFilter);
-        }
         int depth = subfield.getPath().size();
         for (int i = 1; i < depth; i++) {
             Filter memberFilter = structFilter.getMember(subfield.getPath().get(i));
             if (i == depth - 1) {
-                verify(memberFilter == null);
+                if (memberFilter != null && memberFilter instanceof Filters.AlwaysFalse) {
+                    return;
+                }
+                if (memberFilter != null && memberFilter instanceof Filters.StructFilter) {
+                    if (filter instanceof Filters.IsNotNull) {
+                        return;
+                    }
+                    if (filter instanceof Filters.IsNull) {
+                        if (!((Filters.StructFilter) memberFilter).isOnlyIsNulls()) {
+                            filter = new Filters.AlwaysFalse();
+                        }
+                    }
+                }
                 structFilter.addMember(subfield.getPath().get(i), filter);
                 return;
             }
@@ -453,10 +469,43 @@ public class TupleDomainOrcPredicate<C>
                 structFilter = (Filters.StructFilter) memberFilter;
             }
             else {
+                newFilter = combineFilter(memberFilter, filter);
+                if (newFilter != memberFilter) {
+                    structFilter.addMember(subfield.getPath().get(i), newFilter);
+                    if (!(newFilter instanceof Filters.StructFilter)) {
+                        return;
+                    }
+                    memberFilter = newFilter;
+                }
                 verify(memberFilter instanceof Filters.StructFilter);
                 structFilter = (Filters.StructFilter) memberFilter;
             }
         }
+    }
+
+    // A struct can have IsNull, IsNotNull or a StructFilter.
+    // AlwaysFalse + anything is AlwaysFalse
+    // IsNotNull + anything = StructFilter.
+    // IsNull + IsNull is unchanged. Isnull otherwise is AlwaysFalse.
+    // StructFilter + IsNull is always false if StructFilter contains anything except is null
+    private static Filter combineFilter(Filter structFilter, Filter memberFilter)
+    {
+        if (structFilter == null) {
+            return new Filters.StructFilter();
+        }
+        if (structFilter instanceof Filters.AlwaysFalse) {
+            return structFilter;
+        }
+        if (structFilter instanceof Filters.IsNull) {
+            if (memberFilter instanceof Filters.IsNull) {
+                return structFilter;
+            }
+            return new Filters.AlwaysFalse();
+        }
+        if (structFilter instanceof Filters.IsNotNull) {
+            return new Filters.StructFilter();
+        }
+        return structFilter;
     }
 
     private static Filter bigintRangeToFilter(Range range, boolean nullAllowed)

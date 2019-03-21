@@ -186,11 +186,11 @@ public class TestAriaHiveDistributedQueries
                 .setSystemProperty(ARIA_SCAN, "true")
                 .setSystemProperty(ARIA_REORDER, "true")
                 .setSystemProperty(ARIA_REUSE_PAGES, "true")
-                .setSystemProperty(ARIA_FLAGS, "127")
+                .setSystemProperty(ARIA_FLAGS, "255")
                 .build();
     }
 
-    Session noAriaSession()
+    private Session noAriaSession()
     {
         return Session.builder(getQueryRunner().getDefaultSession())
             .setSystemProperty(ARIA_SCAN, "false")
@@ -211,7 +211,7 @@ public class TestAriaHiveDistributedQueries
                 "    comment\n" +
                 "FROM lineitem\n" +
                 "WHERE\n" +
-                "    orderkey BETWEEN 100000 AND 200000\n" +
+                "    orderkey BETWEEN 1000 AND 59000\n" +
                 "    AND partkey BETWEEN 10000 AND 30000\n" +
                 "    AND suppkey BETWEEN 1000 AND 5000\n" +
                 "    AND comment > 'f'");
@@ -224,7 +224,7 @@ public class TestAriaHiveDistributedQueries
                 "    comment\n" +
                 "FROM lineitem_aria_nulls\n" +
                 "WHERE\n" +
-                "    orderkey BETWEEN 100000 AND 200000\n" +
+                "    orderkey BETWEEN 1000 AND 59000\n" +
                 "    AND partkey BETWEEN 10000 AND 30000\n" +
                 "    AND suppkey BETWEEN 1000 AND 5000\n" +
                 "    AND comment > 'f'");

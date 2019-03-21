@@ -128,7 +128,9 @@ public class FullConnectorSession
         if (properties == null) {
             throw new PrestoException(INVALID_SESSION_PROPERTY, format("Unknown session property: %s.%s", catalog, propertyName));
         }
-
+        if (propertyName.startsWith("__system__.")) {
+            return session.getSystemProperty(propertyName.substring(11, propertyName.length()), type);
+        }
         return sessionPropertyManager.decodeCatalogPropertyValue(connectorId, catalog, propertyName, properties.get(propertyName), type);
     }
 

@@ -140,8 +140,8 @@ public class HivePageSourceProvider
         ImmutableSet.Builder<HiveColumnHandle> requiredInterimColumns = ImmutableSet.builder();
         requiredInterimColumns.addAll(effectivePredicate.getDomains().map(Map::keySet).orElse(ImmutableSet.of()).stream()
                 .filter(c -> c.getColumnType() == REGULAR)
-                                      .map(c -> c.getSubfieldPath() != null ? (HiveColumnHandle) c.createSubfieldColumnHandle(null) : c) 
-                                      .collect(toImmutableList()));
+                .map(c -> c.getSubfieldPath() != null ? (HiveColumnHandle) c.createSubfieldColumnHandle(null) : c)
+                .collect(toImmutableList()));
         requiredInterimColumns.addAll(bucketConversion.map(BucketConversion::getBucketColumnHandles).orElse(ImmutableList.of()));
 
         List<ColumnMapping> columnMappings = ColumnMapping.buildColumnMappings(

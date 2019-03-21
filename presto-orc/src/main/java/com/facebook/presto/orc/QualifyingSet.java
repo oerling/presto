@@ -47,6 +47,8 @@ public class QualifyingSet
     // numbers that include the nulls.
     boolean translateResultToParentRows;
 
+    boolean exceptionOnTruncate = false;
+
     static {
         wholeRowGroup = new int[10000];
         allZeros = new int[10000];
@@ -84,26 +86,24 @@ public class QualifyingSet
         return newWholeRowGroup;
     }
 
-    public void setRange(int end)
+    public void setRange(int begin, int end)
     {
         this.end = end;
         int[] wholeRowGroup = ensureWholeRowGroupCapacity(end);
         if (positions == null || positions.length < end) {
-            positions = Arrays.copyOf(wholeRowGroup, end);
+            positions = new int[end];
         }
-        else {
-            System.arraycopy(wholeRowGroup, 0, positions, 0, end);
-        }
+        System.arraycopy(wholeRowGroup, begin, positions, 0, end - begin);
 
         int[] allZeroes = ensureAllZeroesCapacity(end);
-        if (inputNumbers == null || inputNumbers.length < end) {
-            inputNumbers = Arrays.copyOf(allZeroes, end);
+        if (inputNumbers == null || inputNumbers.length < end - begin) {
+            inputNumbers = Arrays.copyOf(allZeroes, end - begin);
         }
         else {
-            System.arraycopy(allZeroes, 0, inputNumbers, 0, end);
+            System.arraycopy(allZeroes, 0, inputNumbers, 0, end - begin);
         }
 
-        positionCount = end;
+        positionCount = end - begin;
     }
 
     public boolean isEmpty()
@@ -230,6 +230,9 @@ public class QualifyingSet
     // is already nested within the last top level row, the row is -1.
     public int truncateAndReturnTruncationRow(int position)
     {
+        if (exceptionOnTruncate) {
+            throw new BatchTooLargeException();
+        }
         if (firstOfLevel == null || firstOfLevel.parent == null) {
             truncationPosition = position;
             return positions[position];
@@ -262,6 +265,9 @@ public class QualifyingSet
 
     public void setTruncationPosition(int position)
     {
+        if (exceptionOnTruncate) {
+            throw new BatchTooLargeException();
+        }
         if (position >= positionCount || position <= 0) {
             throw new IllegalArgumentException();
         }
@@ -302,11 +308,13 @@ public class QualifyingSet
     public void setParent(QualifyingSet parent)
     {
         this.parent = parent;
+        this.exceptionOnTruncate = parent.exceptionOnTruncate;
     }
 
     public void setFirstOfLevel(QualifyingSet first)
     {
         firstOfLevel = first;
+        exceptionOnTruncate = firstOfLevel.exceptionOnTruncate;
     }
 
     public boolean getTranslateResultToParentRows()
@@ -317,6 +325,16 @@ public class QualifyingSet
     public void setTranslateResultToParentRows(boolean translateResultToParentRows)
     {
         this.translateResultToParentRows = translateResultToParentRows;
+    }
+
+    public boolean getExceptionOnTruncate()
+    {
+        return exceptionOnTruncate;
+    }
+
+    public void setExceptionOnTruncate(boolean exceptionOnTruncate)
+    {
+        this.exceptionOnTruncate = exceptionOnTruncate;
     }
 
     public ErrorSet getErrorSet()
@@ -391,6 +409,9 @@ public class QualifyingSet
         ensureCapacity(positionCount);
         System.arraycopy(other.positions, 0, positions, 0, positionCount);
         System.arraycopy(other.inputNumbers, 0, inputNumbers, 0, positionCount);
+        parent = other.parent;
+        firstOfLevel = other.firstOfLevel;
+        exceptionOnTruncate = other.exceptionOnTruncate;
     }
 
     public void compactPositionsAndErrors(int[] surviving, int numSurviving)
@@ -439,5 +460,12 @@ public class QualifyingSet
                 throw new IllegalArgumentException("QualifyingSet contains positions out of order");
             }
         }
+    }
+    // Multiplies capacity by 1.25. Used for sizing arrays of size
+    // proportional to set ofqualifying rows. Rounding up avoids
+    // copies on small increment of size.
+    public static int roundupCapacity(int capacity)
+    {
+        return capacity + (capacity / 4);
     }
 }

@@ -1625,7 +1625,8 @@ public class HiveMetadata
         }
 
         // TODO Synchronize this flag with engine's aria-enabled
-        boolean ariaScanEnabled = isAriaScanEnabled(session);
+        boolean ariaScanEnabled = //isAriaScanEnabled(session);
+            session.getProperty("__system__.aria_scan", Boolean.class);
 
         return ImmutableList.of(new ConnectorTableLayoutResult(
                 getTableLayout(
