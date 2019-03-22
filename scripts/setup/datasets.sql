@@ -324,3 +324,27 @@ FROM hive.tpch.lineitem_s
 WHERE
     orderkey < 100000;
 
+
+
+-- lineitem partitioned on region of supplier and region of customer, bucketed on orderkey
+create table hive.tpch.line_cust_supp(
+   l_orderkey bigint,
+     l_linenumber int,
+       l_partkey bigint,
+        l_suppkey bigint,
+         l_shipdate date,
+          l_custregionkey bigint,
+ l_suppregionkey bigint)
+with (partitioned_by = array['l_custregionkey', 'l_suppregionkey'],
+    bucket_count = 2,
+        bucketed_by = array['l_orderkey']);
+
+insert into hive.tpch.line_cust_supp 
+select  l.orderkey, linenumber, partkey, l.suppkey, shipdate, cn.regionkey, sn.regionkey
+from tpch.sf1.lineitem l, tpch.sf1.orders o, tpch.sf1.customer c, tpch.sf1.nation cn, tpch.sf1.supplier s, tpch.sf1.nation sn
+where l.orderkey = o.orderkey and c.custkey = o.custkey and cn.nationkey = c.nationkey and s.suppkey = l.suppkey and sn.nationkey = s.nationkey
+and l.orderkey < 10000;
+
+
+
+
