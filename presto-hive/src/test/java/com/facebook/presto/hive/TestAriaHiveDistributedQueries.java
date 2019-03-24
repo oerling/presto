@@ -21,6 +21,8 @@ import io.airlift.log.Logger;
 import java.util.Optional;
 import org.testng.annotations.Test;
 
+import java.util.Optional;
+
 import static com.facebook.presto.SystemSessionProperties.ARIA_FLAGS;
 import static com.facebook.presto.SystemSessionProperties.ARIA_REORDER;
 import static com.facebook.presto.SystemSessionProperties.ARIA_REUSE_PAGES;
@@ -47,8 +49,9 @@ public class TestAriaHiveDistributedQueries
 
         Session noAria = Session.builder(queryRunner.getDefaultSession())
                 .setSystemProperty(ARIA_SCAN, "false")
+                .setSystemProperty(ARIA_FLAGS, "0")
+                .setCatalogSessionProperty(HiveQueryRunner.HIVE_CATALOG, HiveSessionProperties.ARIA_SCAN_ENABLED, "false")
                 .build();
-
         copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, noAria, getTables());
 
         createTable(queryRunner, noAria, "lineitem_aria", "CREATE TABLE lineitem_aria AS\n" +
@@ -76,8 +79,13 @@ public class TestAriaHiveDistributedQueries
                 "FROM tpch.tiny.lineitem");
 
         createTable(queryRunner, noAria, "lineitem_aria_nulls", "CREATE TABLE lineitem_aria_nulls AS\n" +
-                "SELECT *,\n" + "   IF(have_complex_nulls, null,         if (returnflag = 'N', map(array[1, 2, 3], array[orderkey, partkey, suppkey]), map(array[1, 2, 3, 4], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)]))) as order_part_supp_map,\n" +
-                "   IF(have_complex_nulls, null, if (returnflag = 'N', array[orderkey, partkey, suppkey], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)])) as order_part_supp_array\n" +
+                "SELECT *,\n" +
+                "   IF(have_complex_nulls, null, if (returnflag = 'N', \n" +
+                "    map(array[1, 2, 3], array[orderkey, partkey, suppkey]),\n" +
+                "    map(array[1, 2, 3, 4], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)])))\n" +
+                "as order_part_supp_map,\n" +
+                "   IF(have_complex_nulls, null, if (returnflag = 'N', \n" +
+                "    array[orderkey, partkey, suppkey], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)])) as order_part_supp_array\n" +
                 "FROM (\n" +
                 "   SELECT \n" +
                 "       orderkey,\n" +
@@ -193,9 +201,10 @@ public class TestAriaHiveDistributedQueries
     private Session noAriaSession()
     {
         return Session.builder(getQueryRunner().getDefaultSession())
-            .setSystemProperty(ARIA_SCAN, "false")
-            .setSystemProperty(ARIA_FLAGS, "0")
-            .build();
+                .setSystemProperty(ARIA_SCAN, "false")
+                .setSystemProperty(ARIA_FLAGS, "0")
+                .setCatalogSessionProperty(HiveQueryRunner.HIVE_CATALOG, HiveSessionProperties.ARIA_SCAN_ENABLED, "false")
+                .build();
     }
 
     // filters1.sql
