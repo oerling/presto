@@ -1636,7 +1636,10 @@ public class HiveMetadata
 
         // TODO Synchronize this flag with engine's aria-enabled
         boolean ariaScanEnabled = isAriaScanEnabled(session);
-        // session.getProperty("__system__.aria_scan", Boolean.class);
+        try {
+            ariaScanEnabled = session.getProperty("__system__.aria_scan", Boolean.class);
+        } catch (Exception e) {
+        }
         if (ariaScanEnabled) {
             HiveStorageFormat hiveStorageFormat = getHiveStorageFormat(getTableMetadata(session, tableHandle).getProperties());
             if (hiveStorageFormat != HiveStorageFormat.ORC && hiveStorageFormat != HiveStorageFormat.DWRF) {

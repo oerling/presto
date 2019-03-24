@@ -138,7 +138,7 @@ public class TestOrcPageSourceMemoryTracking
     private final List<TestColumn> testColumns = ImmutableList.<TestColumn>builder()
             .add(new TestColumn("p_string", javaStringObjectInspector, () -> Long.toHexString(random.nextLong()), false))
             .add(new TestColumn("p_empty_string", javaStringObjectInspector, () -> "", true))
-        .build();
+            .build();
 
     private File tempFile;
     private TestPreparer testPreparer;

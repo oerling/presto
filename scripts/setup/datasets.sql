@@ -345,6 +345,7 @@ from tpch.sf1.lineitem l, tpch.sf1.orders o, tpch.sf1.customer c, tpch.sf1.natio
 where l.orderkey = o.orderkey and c.custkey = o.custkey and cn.nationkey = c.nationkey and s.suppkey = l.suppkey and sn.nationkey = s.nationkey
 and l.orderkey < 10000;
 
+CREATE TABLE nation_partitioned(nationkey BIGINT, name VARCHAR, comment VARCHAR, regionkey BIGINT) WITH (partitioned_by = ARRAY['regionkey']) ;
 
 
 
