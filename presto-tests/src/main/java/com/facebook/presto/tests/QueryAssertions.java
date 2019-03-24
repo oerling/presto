@@ -290,7 +290,7 @@ public final class QueryAssertions
         }
     }
 
-        public static void assertQuery(
+    public static void assertQuery(
                                     QueryRunner queryRunner,
                                     Session testSession,
                                     @Language("SQL") String testQuery,
