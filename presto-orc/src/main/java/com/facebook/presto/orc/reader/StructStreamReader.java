@@ -310,7 +310,7 @@ public class StructStreamReader
             }
 
             fieldTypes[i] = fieldType;
-            if (filter != null) {
+            if (filter != null && filter instanceof Filters.StructFilter) {
                 Filters.StructFilter structFilter = (Filters.StructFilter) filter;
                 Filter fieldFilter = structFilter.getMember(new SubfieldPath.PathElement(fieldName.get(), 0));
                 if (fieldFilter != null) {
@@ -500,6 +500,9 @@ public class StructStreamReader
                 innerQualifyingSet.setTranslateResultToParentRows(false);
             }
             reader.setQualifyingSets(innerQualifyingSet, outputQualifyingSet);
+            if (filter != null && filter instanceof Filters.IsNull) {
+                innerQualifyingSet.setPositionCount(0);
+            }
             if (innerQualifyingSet.getPositionCount() > 0) {
                 reader.advance();
                 int truncated = reader.getTruncationRow();
