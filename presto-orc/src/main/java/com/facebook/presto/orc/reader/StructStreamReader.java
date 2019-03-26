@@ -469,7 +469,7 @@ public class StructStreamReader
                 outputQualifyingSet = new QualifyingSet();
             }
             outputQualifyingSet.reset(0);
-            outputQualifyingSet.setEnd(inputQualifyingSet.end());
+            outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
             return;
         }
 

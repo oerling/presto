@@ -11,11 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.metadata;
+package com.facebook.presto.elasticsearch;
 
-public enum FunctionKind
+public enum SearchGuardCertificateFormat
 {
-    SCALAR,
-    AGGREGATE,
-    WINDOW
+    /**
+     * Use X.509 PEM certificates and PKCS #8 keys
+     */
+    PEM,
+    /**
+     * Use Keystore and Truststore files
+     */
+    JKS,
+    /**
+     * Default value
+     */
+    NONE
 }

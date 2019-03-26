@@ -36,6 +36,7 @@ import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SchemaTablePrefix;
 import com.facebook.presto.spi.SystemTable;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.connector.ConnectorCapabilities;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.connector.ConnectorPartitioningHandle;
@@ -219,23 +220,23 @@ public class MetadataManager
         Multimap<Type, OperatorType> missingOperators = HashMultimap.create();
         for (Type type : typeManager.getTypes()) {
             if (type.isComparable()) {
-                if (!functions.canResolveOperator(HASH_CODE, BIGINT, ImmutableList.of(type))) {
+                if (!canResolveOperator(HASH_CODE, BIGINT, ImmutableList.of(type))) {
                     missingOperators.put(type, HASH_CODE);
                 }
-                if (!functions.canResolveOperator(EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
+                if (!canResolveOperator(EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
                     missingOperators.put(type, EQUAL);
                 }
-                if (!functions.canResolveOperator(NOT_EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
+                if (!canResolveOperator(NOT_EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
                     missingOperators.put(type, NOT_EQUAL);
                 }
             }
             if (type.isOrderable()) {
                 for (OperatorType operator : ImmutableList.of(LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL)) {
-                    if (!functions.canResolveOperator(operator, BOOLEAN, ImmutableList.of(type, type))) {
+                    if (!canResolveOperator(operator, BOOLEAN, ImmutableList.of(type, type))) {
                         missingOperators.put(type, operator);
                     }
                 }
-                if (!functions.canResolveOperator(BETWEEN, BOOLEAN, ImmutableList.of(type, type, type))) {
+                if (!canResolveOperator(BETWEEN, BOOLEAN, ImmutableList.of(type, type, type))) {
                     missingOperators.put(type, BETWEEN);
                 }
             }
@@ -1135,6 +1136,12 @@ public class MetadataManager
         return analyzePropertyManager;
     }
 
+    @Override
+    public Set<ConnectorCapabilities> getConnectorCapabilities(Session session, ConnectorId connectorId)
+    {
+        return getCatalogMetadata(session, connectorId).getConnectorCapabilities();
+    }
+
     private ViewDefinition deserializeView(String data)
     {
         try {
@@ -1180,6 +1187,17 @@ public class MetadataManager
         ObjectMapperProvider provider = new ObjectMapperProvider();
         provider.setJsonDeserializers(ImmutableMap.of(Type.class, new TypeDeserializer(new TypeRegistry())));
         return new JsonCodecFactory(provider).jsonCodec(ViewDefinition.class);
+    }
+
+    private boolean canResolveOperator(OperatorType operatorType, Type returnType, List<? extends Type> argumentTypes)
+    {
+        try {
+            getFunctionManager().resolveOperator(operatorType, argumentTypes);
+            return true;
+        }
+        catch (OperatorNotFoundException e) {
+            return false;
+        }
     }
 
     @VisibleForTesting

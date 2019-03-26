@@ -14,6 +14,7 @@
 package com.facebook.presto.operator;
 
 import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.execution.Lifespan;
 import com.facebook.presto.execution.buffer.OutputBuffer;
 import com.facebook.presto.execution.buffer.PagesSerde;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
@@ -233,6 +234,7 @@ public class PartitionedOutputOperator
                 serdeFactory,
                 sourceTypes,
                 maxMemory,
+                operatorContext.getDriverContext().getLifespan(),
                 ariaFlags);
 
         operatorContext.setInfoSupplier(this::getInfo);
@@ -325,14 +327,16 @@ public class PartitionedOutputOperator
         Slice topLevelSlice;
         PagesSerde serde;
         ArrayPool<byte[]> pool;
+        Lifespan lifespan;
 
-        PartitionData(int partition, AtomicLong pagesAdded, AtomicLong rowsAdded, PagesSerde serde, ArrayPool<byte[]> pool)
+        PartitionData(int partition, AtomicLong pagesAdded, AtomicLong rowsAdded, PagesSerde serde, ArrayPool<byte[]> pool, Lifespan lifespan)
         {
             this.partition = partition;
             this.pagesAdded = pagesAdded;
             this.rowsAdded = rowsAdded;
             this.serde = serde;
             this.pool = pool;
+            this.lifespan = lifespan;
         }
 
         public long getRetainedSizeInBytes()
@@ -432,7 +436,7 @@ public class PartitionedOutputOperator
             }
             ArrayList<SerializedPage> list = new ArrayList();
             list.add(serialized);
-            outputBuffer.enqueue(partition, list);
+            outputBuffer.enqueue(lifespan, partition, list);
             pagesAdded.incrementAndGet();
             rowsAdded.addAndGet(bufferedRows);
             bufferedRows = 0;
@@ -482,6 +486,7 @@ public class PartitionedOutputOperator
         private final List<Integer> partitionChannels;
         private final List<Optional<Block>> partitionConstants;
         private final PagesSerde serde;
+        private final Lifespan lifespan;
         private final PageBuilder[] pageBuilders;
         private final boolean replicatesAnyRow;
         private final OptionalInt nullChannel; // when present, send the position to every partition if this channel is null.
@@ -511,7 +516,8 @@ public class PartitionedOutputOperator
                 PagesSerdeFactory serdeFactory,
                 List<Type> sourceTypes,
                 DataSize maxMemory,
-                               int ariaFlags)
+                Lifespan lifespan,
+                int ariaFlags)
         {
             this.partitionFunction = requireNonNull(partitionFunction, "partitionFunction is null");
             this.partitionChannels = requireNonNull(partitionChannels, "partitionChannels is null");
@@ -523,6 +529,8 @@ public class PartitionedOutputOperator
             this.outputBuffer = requireNonNull(outputBuffer, "outputBuffer is null");
             this.sourceTypes = requireNonNull(sourceTypes, "sourceTypes is null");
             this.serde = requireNonNull(serdeFactory, "serdeFactory is null").createPagesSerde();
+            this.lifespan = requireNonNull(lifespan, "lifespan is null");
+
             useAria = (ariaFlags & AriaFlags.repartition) != 0;
             recycleBuffers = (ariaFlags & AriaFlags.exchangeReuse) != 0;
             if (recycleBuffers) {
@@ -544,7 +552,7 @@ public class PartitionedOutputOperator
             if (useAria) {
                 partitionData = new PartitionData[partitionCount];
                 for (int i = 0; i < partitionCount; i++) {
-                    partitionData[i] = new PartitionData(i, pagesAdded, rowsAdded, serde, pool);
+                    partitionData[i] = new PartitionData(i, pagesAdded, rowsAdded, serde, pool, lifespan);
                 }
                 blockContents = new BlockDecoder[sourceTypes.size()];
                 intArrayAllocator = new IntArrayAllocator();
@@ -692,7 +700,7 @@ public class PartitionedOutputOperator
                             .map(serde::serialize)
                             .collect(toImmutableList());
 
-                    outputBuffer.enqueue(partition, serializedPages);
+                    outputBuffer.enqueue(lifespan, partition, serializedPages);
                     pagesAdded.incrementAndGet();
                     rowsAdded.addAndGet(pagePartition.getPositionCount());
                 }
