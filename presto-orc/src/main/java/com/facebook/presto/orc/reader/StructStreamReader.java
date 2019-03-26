@@ -292,6 +292,9 @@ public class StructStreamReader
 
     private void setupForScan()
     {
+        if (filter != null && (filter instanceof Filters.IsNull || filter instanceof Filters.AlwaysFalse)) {
+            return;
+        }
         RowType rowType = (RowType) type;
         int numFields = rowType.getFields().size();
         int[] fieldColumns = new int[numFields];
@@ -330,7 +333,12 @@ public class StructStreamReader
         if (!outputChannelSet) {
             // If the struct is not projected out, none of its members is either.
             Arrays.fill(fieldChannels, -1);
-        }
+            for (int i = 0; i < numFields; i++) {
+                if (filters.get(i) == null) {
+                    streamReaders[i] = null;
+                }
+            }
+            }
         reader = new ColumnGroupReader(streamReaders,
                                        null,
                                        channelColumns,
@@ -349,8 +357,10 @@ public class StructStreamReader
         if (reader == null) {
             setupForScan();
         }
-        reader.setResultSizeBudget(bytes);
-    }
+        if (reader != null) {
+            reader.setResultSizeBudget(bytes);
+        }
+        }
 
     @Override
     public void erase(int end)
@@ -454,6 +464,15 @@ public class StructStreamReader
         if (reader == null) {
             setupForScan();
         }
+        if (filter != null && filter instanceof Filters.AlwaysFalse) {
+            if (outputQualifyingSet == null) {
+                outputQualifyingSet = new QualifyingSet();
+            }
+            outputQualifyingSet.reset(0);
+            outputQualifyingSet.setEnd(inputQualifyingSet.end());
+            return;
+        }
+
         if (!rowGroupOpen) {
             openRowGroup();
         }
@@ -657,7 +676,9 @@ public class StructStreamReader
         if (numValues > 0 && (fieldBlockOffset[numValues] != innerFirstRows || fieldBlockSize != numValues)) {
             throw new IllegalArgumentException("Last fieldBlockOffset inconsistent");
         }
-        reader.getBlocks(innerFirstRows, true, false);
+        if (reader != null) {
+            reader.getBlocks(innerFirstRows, true, false);
+        }
     }
 
     void setcc(int cc, int stop)
