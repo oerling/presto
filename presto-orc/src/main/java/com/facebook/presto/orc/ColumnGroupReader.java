@@ -49,7 +49,6 @@ public class ColumnGroupReader
     private boolean reorderFilters;
     private Block[] reusedPageBlocks;
 
-    private int lastTruncatedStreamIdx = -1;
     private int maxOutputChannel = -1;
     private long targetResultBytes;
     // The number of leading elements in sortedStreamReaders that is subject to reordering.
@@ -287,8 +286,7 @@ public class ColumnGroupReader
         int bytesSoFar = 0;
         double selectivity = 1;
         int totalAsk = 0;
-        boolean exceptionOnTruncate = inputQualifyingSet.getExceptionOnTruncate();
-        if (!exceptionOnTruncate && (ariaFlags & AriaFlags.noReaderBudget) != 0) {
+        if ((ariaFlags & AriaFlags.noReaderBudget) != 0) {
             for (int i = firstStreamIdx; i < sortedStreamReaders.length; i++) {
                 StreamReader reader = sortedStreamReaders[i];
                 if (reader.getChannel() != -1) {
@@ -341,10 +339,10 @@ public class ColumnGroupReader
             StreamReader reader = sortedStreamReaders[i];
             if (reader.getChannel() != -1) {
                 int budget = (int) (readerBudget[i] * grantedFraction);
-                // Set 4x budget if doing exceptions. Only large
+                // Set hard limit to 4x budget. Only large
                 // overruns should trigger exceptions, smaller will be
                 // dealt with by scaling down the batch without retry.
-                reader.setResultSizeBudget(budget * (exceptionOnTruncate ? 4 : 1));
+                reader.setResultSizeBudget(budget * 4);
             }
         }
         return false;

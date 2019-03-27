@@ -28,9 +28,6 @@ public class QualifyingSet
     private int end;
     private int[] positions;
     private int positionCount;
-    // Index into positions for the first row after truncation. -1 if
-    // no truncation.
-    private int truncationPosition = -1;
 
     private int[] inputNumbers;
     private ErrorSet errorSet;
@@ -46,8 +43,6 @@ public class QualifyingSet
     // struct/list/map but the results should be expressed in row
     // numbers that include the nulls.
     boolean translateResultToParentRows;
-
-    boolean exceptionOnTruncate = false;
 
     static {
         wholeRowGroup = new int[10000];
@@ -183,14 +178,6 @@ public class QualifyingSet
 
     public int getEnd()
     {
-        if (truncationPosition != -1) {
-            return positions[truncationPosition];
-        }
-        return end;
-    }
-
-    public int getNonTruncatedEnd()
-    {
         return end;
     }
 
@@ -201,9 +188,6 @@ public class QualifyingSet
 
     public int getPositionCount()
     {
-        if (truncationPosition != -1) {
-            return truncationPosition;
-        }
         return positionCount;
     }
 
@@ -212,86 +196,9 @@ public class QualifyingSet
         return positionCount;
     }
 
-    public int getTruncationPosition()
-    {
-        return truncationPosition;
-    }
-
     public void setPositionCount(int positionCount)
     {
         this.positionCount = positionCount;
-    }
-
-    // Returns the first row number after the argument position where
-    // one can truncate a result column. For a top level column this
-    // is the row itself. For a nested column, this is the
-    // position corresponding to the first row of this column
-    // corresponding to the next top level qualifying row. If this row
-    // is already nested within the last top level row, the row is -1.
-    public int truncateAndReturnTruncationRow(int position)
-    {
-        if (exceptionOnTruncate) {
-            throw new BatchTooLargeException();
-        }
-        if (firstOfLevel == null || firstOfLevel.parent == null) {
-            truncationPosition = position;
-            return positions[position];
-        }
-        int thisTopLevelPos = getTopLevelPosition(position);
-        for (int pos = position + 1; pos < positionCount; pos++) {
-            int newTopLevelPos = getTopLevelPosition(pos);
-            if (newTopLevelPos != thisTopLevelPos) {
-                truncationPosition = pos;
-                return positions[pos];
-            }
-        }
-        // We are already under the last top level row.
-        return -1;
-    }
-
-    private int getTopLevelPosition(int position)
-    {
-        int row = positions[position];
-        if (firstOfLevel == null || firstOfLevel.parent == null) {
-            return position;
-        }
-        int posInFirstOfLevel = Arrays.binarySearch(firstOfLevel.positions, 0, firstOfLevel.positionCount, row);
-        if (posInFirstOfLevel < 0) {
-            throw new IllegalArgumentException("Row in qualifying set is not found in the first qualifying set of the level");
-        }
-        int parentPos = firstOfLevel.inputNumbers[posInFirstOfLevel];
-        return firstOfLevel.parent.getTopLevelPosition(parentPos);
-    }
-
-    public void setTruncationPosition(int position)
-    {
-        if (exceptionOnTruncate) {
-            throw new BatchTooLargeException();
-        }
-        if (position >= positionCount || position <= 0) {
-            throw new IllegalArgumentException();
-        }
-        truncationPosition = position;
-    }
-
-    public void clearTruncationPosition()
-    {
-        truncationPosition = -1;
-    }
-
-    public void setTruncationRow(int row)
-    {
-        if (row == -1) {
-            clearTruncationPosition();
-            return;
-        }
-        int pos = findPositionAtOrAbove(row);
-        if (pos == positionCount) {
-            clearTruncationPosition();
-        }
-        else {
-            setTruncationPosition(pos);
-        }
     }
 
     public int findPositionAtOrAbove(int row)
@@ -305,18 +212,6 @@ public class QualifyingSet
         return parent;
     }
 
-    public void setParent(QualifyingSet parent)
-    {
-        this.parent = parent;
-        this.exceptionOnTruncate = parent.exceptionOnTruncate;
-    }
-
-    public void setFirstOfLevel(QualifyingSet first)
-    {
-        firstOfLevel = first;
-        exceptionOnTruncate = firstOfLevel.exceptionOnTruncate;
-    }
-
     public boolean getTranslateResultToParentRows()
     {
         return translateResultToParentRows;
@@ -325,16 +220,6 @@ public class QualifyingSet
     public void setTranslateResultToParentRows(boolean translateResultToParentRows)
     {
         this.translateResultToParentRows = translateResultToParentRows;
-    }
-
-    public boolean getExceptionOnTruncate()
-    {
-        return exceptionOnTruncate;
-    }
-
-    public void setExceptionOnTruncate(boolean exceptionOnTruncate)
-    {
-        this.exceptionOnTruncate = exceptionOnTruncate;
     }
 
     public ErrorSet getErrorSet()
@@ -405,13 +290,11 @@ public class QualifyingSet
     {
         positionCount = other.positionCount;
         end = other.end;
-        truncationPosition = other.truncationPosition;
         ensureCapacity(positionCount);
         System.arraycopy(other.positions, 0, positions, 0, positionCount);
         System.arraycopy(other.inputNumbers, 0, inputNumbers, 0, positionCount);
         parent = other.parent;
         firstOfLevel = other.firstOfLevel;
-        exceptionOnTruncate = other.exceptionOnTruncate;
     }
 
     public void compactPositionsAndErrors(int[] surviving, int numSurviving)
