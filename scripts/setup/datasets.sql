@@ -349,3 +349,18 @@ CREATE TABLE nation_partitioned(nationkey BIGINT, name VARCHAR, comment VARCHAR,
 
 
 
+create table hive.tpch.variable_width as
+select l_orderkey, l_linenumber,
+case when l_orderkey % 100000 > 99500
+then l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment ||l_comment || l_comment || l_comment || l_comment || l_comment || l_comment ||l_comment || l_comment || l_comment ||l_comment || l_comment || l_comment ||l_comment || l_comment || l_comment ||l_comment || l_comment || l_comment
+when l_orderkey % 100000 between 55000 and 56000 then l_comment || l_comment || l_comment || l_comment || l_comment || l_comment
+when l_orderkey % 100000 between 20000 and 30000 then l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment || l_comment
+when l_orderkey % 100000 between 0 and 10000 then l_comment || l_comment || l_comment
+else substr (l_comment, 1, 10)
+end as l_comment
+from hive.tpch.lineitem1
+order by l_orderkey, l_linenumber;
+
+
+
+

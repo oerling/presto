@@ -341,7 +341,10 @@ public class ColumnGroupReader
             StreamReader reader = sortedStreamReaders[i];
             if (reader.getChannel() != -1) {
                 int budget = (int) (readerBudget[i] * grantedFraction);
-                reader.setResultSizeBudget(budget);
+                // Set 4x budget if doing exceptions. Only large
+                // overruns should trigger exceptions, smaller will be
+                // dealt with by scaling down the batch without retry.
+                reader.setResultSizeBudget(budget * (exceptionOnTruncate ? 4 : 1));
             }
         }
         return false;
