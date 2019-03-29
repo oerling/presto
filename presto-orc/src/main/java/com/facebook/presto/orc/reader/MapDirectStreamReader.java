@@ -536,9 +536,6 @@ public class MapDirectStreamReader
                 }
             }
             if (keyQualifyingSet.getPositionCount() > 0) {
-                if (keyQualifyingSet != innerQualifyingSet) {
-                    keyQualifyingSet.setParent(inputQualifyingSet);
-                }
                 valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
                 valueStreamReader.scan();
                 innerPosInRowGroup = innerQualifyingSet.getEnd();

@@ -178,12 +178,6 @@ public class MapStreamReader
     }
 
     @Override
-    public int getTruncationRow()
-    {
-        return currentReader.getTruncationRow();
-    }
-
-    @Override
     public int getResultSizeInBytes()
     {
         if (currentReader == null) {

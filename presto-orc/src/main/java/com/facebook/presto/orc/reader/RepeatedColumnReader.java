@@ -102,7 +102,6 @@ abstract class RepeatedColumnReader
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
         }
-        innerQualifyingSet.setParent(inputQualifyingSet);
         int[] inputRows = inputQualifyingSet.getPositions();
         int numActive = inputQualifyingSet.getPositionCount();
         if (elementLength == null || elementLength.length < numActive) {

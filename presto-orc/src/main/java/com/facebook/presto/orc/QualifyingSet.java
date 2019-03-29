@@ -212,6 +212,11 @@ public class QualifyingSet
         return parent;
     }
 
+    public void setParent(QualifyingSet parent)
+    {
+        this.parent = parent;
+    }
+
     public boolean getTranslateResultToParentRows()
     {
         return translateResultToParentRows;

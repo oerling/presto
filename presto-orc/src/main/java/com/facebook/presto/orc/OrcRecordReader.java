@@ -65,6 +65,7 @@ import static com.facebook.presto.orc.OrcReader.MAX_BATCH_SIZE;
 import static com.facebook.presto.orc.OrcRecordReader.LinearProbeRangeFinder.createTinyStripesRangeFinder;
 import static com.facebook.presto.orc.OrcWriteValidation.WriteChecksumBuilder.createWriteChecksumBuilder;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Verify.verify;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.multiplyExact;
@@ -132,8 +133,8 @@ public class OrcRecordReader
     private int ariaBatchRows = 1000;
     private long numAriaBytes = 0;
     private long numAriaRows = 0;
-    private final long UNLIMITED_BUDGET = 0x400000000000L;
-    private final int MIN_BATCH_ROWS = 4;
+    public static final long UNLIMITED_BUDGET = 0x400000000000L;
+    private static final int MIN_BATCH_ROWS = 4;
 
     public OrcRecordReader(
             Map<Integer, Type> includedColumns,
@@ -782,7 +783,7 @@ public class OrcRecordReader
         reader.newBatch(numResults);
         numResults = 0;
         for (; ; ) {
-            if (currentRowGroup == -1 || qualifyingSet == null || (qualifyingSet.isEmpty() && qualifyingSet.getEnd() == currentGroupRowCount && !reader.hasUnfetchedRows())) {
+            if (currentRowGroup == -1 || qualifyingSet == null || (qualifyingSet.isEmpty() && qualifyingSet.getEnd() == currentGroupRowCount)) {
                 if (currentPosition == totalRowCount) {
                     return null;
                 }
@@ -793,15 +794,9 @@ public class OrcRecordReader
                 }
                 if (qualifyingSet == null) {
                     qualifyingSet = new QualifyingSet();
-                    qualifyingSet.setExceptionOnTruncate(retryIfBatchTooLarge);
                 }
-                if (qualifyingSet.getExceptionOnTruncate()) {
-                    qualifyingSet.setRange(0, Math.min(ariaBatchRows, (int) currentGroupRowCount));
-                }
-                else {
-                    qualifyingSet.setRange(0, (int) currentGroupRowCount);
-                }
-                    reader.setQualifyingSets(qualifyingSet, null);
+                qualifyingSet.setRange(0, Math.min(ariaBatchRows, (int) currentGroupRowCount));
+                reader.setQualifyingSets(qualifyingSet, null);
                 if ((currentRowGroup & 0x3) == 0) {
                     // Decay row size stats every 4 groups.
                     numAriaRows /= 2;
@@ -812,7 +807,6 @@ public class OrcRecordReader
                     reader.maybeReorderFilters();
                 }
             }
-            qualifyingSet.clearTruncationPosition();
             if (qualifyingSet.isEmpty()) {
                 qualifyingSet.setRange(qualifyingSet.getEnd(), Math.min(qualifyingSet.getEnd() + ariaBatchRows, (int) currentGroupRowCount));
             }
@@ -824,10 +818,10 @@ public class OrcRecordReader
             catch (BatchTooLargeException e) {
                 // The reader ran out of budget. Retry with a smaller
                 // input qualifying set. First remove any values added
-                // by the last advance. The truncation rows are not
-                // set and the input qualifying set is unaltered when
-                // the reader throws this exception.
+                // by the last advance.  The input qualifying set is
+                // unaltered when the reader throws this exception.
                 reader.compactValues(new int[0], numResultsBeforeAdvance, 0);
+                verify(ariaBatchRows > MIN_BATCH_ROWS, "Running out of budget with minimum batch size");
                 ariaBatchRows = Math.max(MIN_BATCH_ROWS, ariaBatchRows / 8);
                 int[] rows = qualifyingSet.getPositions();
                 int numRows = Math.min(ariaBatchRows, qualifyingSet.getEnd() - rows[0]);
