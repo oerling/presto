@@ -728,6 +728,16 @@ public class ColumnGroupReader
         // getBlocks(numRowsInResult, true, false);
     }
 
+    public boolean mustExtractValues(boolean isNewStripe)
+    {
+        for (StreamReader reader : sortedStreamReaders) {
+            if (reader.mustExtractValues(isNewStripe)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public String toString()
     {
         StringBuilder builder = new StringBuilder("CGR: rows:")
