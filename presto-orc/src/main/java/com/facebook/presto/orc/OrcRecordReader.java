@@ -802,7 +802,10 @@ public class OrcRecordReader
                     qualifyingSet.setRange(0, (int) currentGroupRowCount);
                 }
                     reader.setQualifyingSets(qualifyingSet, null);
-                if ((currentRowGroup & 0x3) == 0) {
+                    if (numResults > 0 && reader.mustExtractValues(currentRowGroup == 0)) {
+                        return resultPage();
+                    }
+                    if ((currentRowGroup & 0x3) == 0) {
                     // Decay row size stats every 4 groups.
                     numAriaRows /= 2;
                     numAriaBytes /= 2;
