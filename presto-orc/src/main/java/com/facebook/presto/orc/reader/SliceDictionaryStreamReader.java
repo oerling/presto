@@ -293,9 +293,7 @@ public class SliceDictionaryStreamReader
             ByteArrayInputStream dictionaryDataStream = rowGroupDictionaryDataStreamSource.openStream();
             readDictionary(dictionaryDataStream, rowGroupDictionarySize, rowGroupDictionaryLength, stripeDictionarySize, rowGroupDictionaryData, rowGroupDictionaryOffsetVector, type);
             setDictionaryBlockData(rowGroupDictionaryData, rowGroupDictionaryOffsetVector, stripeDictionarySize + rowGroupDictionarySize + 1);
-            if (rowGroupDictionarySize > 0) {
-                anyRowGroupDictionaries = true;
-            }
+            anyRowGroupDictionaries = true;
         }
         else {
             // there is no row group dictionary so use the stripe dictionary
@@ -437,7 +435,9 @@ public class SliceDictionaryStreamReader
             if (inDictionaryFlags == null || inDictionaryFlags.length < numInput) {
                 inDictionaryFlags = new boolean[roundupSize(numInput)];
             }
-            inDictionaryStream.getSetBits(numInput, inDictionaryFlags);
+            int begin = hasNulls ? innerPosInRowGroup : posInRowGroup;
+            int end = input.getEnd();
+            inDictionaryStream.getSetBits(input.getPositions(), numInput, begin, end - begin, inDictionaryFlags);
         }
         if (filter != null) {
             outputQualifyingSet.reset(numInput);
@@ -507,7 +507,7 @@ public class SliceDictionaryStreamReader
         int adjustValue(long value, int offsetIndex)
         {
             if (inDictionaryStream != null) {
-                if (!inDictionaryFlags[offsets[offsetIndex]]) {
+                if (!inDictionaryFlags[offsetIndex]) {
                     value += stripeDictionarySize;
                 }
             }

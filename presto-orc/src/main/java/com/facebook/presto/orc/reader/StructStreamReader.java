@@ -407,7 +407,6 @@ public class StructStreamReader
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
         if (outputChannelSet) {
-            check();
             if (fieldSurviving == null || fieldSurviving.length < numSurviving) {
                 fieldSurviving = new int[numSurviving];
             }
@@ -432,7 +431,6 @@ public class StructStreamReader
             fieldBlockSize = base + numSurviving;
             reader.compactValues(fieldSurviving, initialFieldBase, numFieldSurviving);
             numValues = base + numSurviving;
-            check();
         }
         compactQualifyingSet(surviving, numSurviving);
     }
@@ -480,7 +478,6 @@ public class StructStreamReader
         if (stopCallCount != -1 && callCount >= stopCallCount) {
             System.out.println("break");
         }
-        check();
         beginScan(presentStream, null);
         int initialFieldResults = reader.getNumResults();
         int firstRow = inputQualifyingSet.getPositions()[0];
@@ -559,7 +556,6 @@ public class StructStreamReader
         }
         fieldBlockSize = numValues + numResults;
         endScan(presentStream);
-        check();
     }
 
     void addStructResult()

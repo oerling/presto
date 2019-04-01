@@ -34,7 +34,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.DATA;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
@@ -46,7 +45,7 @@ import static io.airlift.slice.SizeOf.sizeOf;
 import static java.util.Objects.requireNonNull;
 
 public class LongDirectStreamReader
-        extends NullWrappingColumnReader
+        extends AbstractLongStreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(LongDirectStreamReader.class).instanceSize();
 
@@ -63,12 +62,10 @@ public class LongDirectStreamReader
 
     private LocalMemoryContext systemMemoryContext;
 
-    private long[] values;
     private ResultsProcessor resultsProcessor = new ResultsProcessor();
 
     public LongDirectStreamReader(StreamDescriptor streamDescriptor, LocalMemoryContext systemMemoryContext)
     {
-        super(OptionalInt.of(SIZE_OF_LONG));
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.systemMemoryContext = requireNonNull(systemMemoryContext, "systemMemoryContext is null");
     }
@@ -165,32 +162,6 @@ public class LongDirectStreamReader
 
         rowGroupOpen = false;
     }
-
-    @Override
-    public void erase(int end)
-    {
-        if (values == null) {
-            return;
-        }
-        numValues -= end;
-        if (numValues > 0) {
-            System.arraycopy(values, end, values, 0, numValues);
-            if (valueIsNull != null) {
-                System.arraycopy(valueIsNull, end, valueIsNull, 0, numValues);
-            }
-        }
-    }
-
-    @Override
-    public void compactValues(int[] positions, int base, int numPositions)
-    {
-        if (outputChannelSet) {
-            StreamReaders.compactArrays(positions, base, numPositions, values, valueIsNull);
-            numValues = base + numPositions;
-        }
-        compactQualifyingSet(positions, numPositions);
-    }
-
     @Override
     public void scan()
             throws IOException
@@ -302,51 +273,6 @@ public class LongDirectStreamReader
                 values[numResults + numValues] = value;
             }
             ++numResults;
-        }
-    }
-
-    @Override
-    protected void shiftUp(int from, int to)
-    {
-        values[to] = values[from];
-    }
-
-    @Override
-    protected void writeNull(int i)
-    {
-        // No action. values[i] is undefined if valueIsNull[i] == true.
-    }
-
-    @Override
-    public Block getBlock(int numFirstRows, boolean mayReuse)
-    {
-        checkEnoughValues(numFirstRows);
-        if (mayReuse) {
-            return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
-        }
-        if (numFirstRows < numValues || values.length > (int) (numFirstRows * 1.2)) {
-            return new LongArrayBlock(numFirstRows,
-                                      valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)),
-                                      Arrays.copyOf(values, numFirstRows));
-        }
-        Block block = new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
-        values = null;
-        valueIsNull = null;
-        numValues = 0;
-        return block;
-    }
-
-    private void ensureValuesCapacity()
-    {
-        if (!outputChannelSet) {
-            return;
-        }
-        int capacity = numValues + inputQualifyingSet.getPositionCount();
-        if (values == null) {
-            values = new long[capacity];
-        }
-        else if (values.length < capacity) {
-            values = Arrays.copyOf(values, capacity);
         }
     }
 
