@@ -502,6 +502,7 @@ public class MapDirectStreamReader
         int numInput = inputQualifyingSet.getPositionCount();
         int lastElementOffset = numValues == 0 ? 0 : elementOffset[numValues];
         makeInnerQualifyingSet();
+        ensureValuesCapacity(inputQualifyingSet.getPositionCount());
         if (innerQualifyingSet.getPositionCount() > 0) {
             keyStreamReader.setInputQualifyingSet(innerQualifyingSet);
             keyStreamReader.scan();
@@ -546,7 +547,6 @@ public class MapDirectStreamReader
             else {
                 valueStreamReader.getOrCreateOutputQualifyingSet().reset(0);
             }
-            ensureValuesCapacity(inputQualifyingSet.getPositionCount());
             if (filter != null) {
                 QualifyingSet filterResult = valueStreamReader.getOutputQualifyingSet();
                 outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
