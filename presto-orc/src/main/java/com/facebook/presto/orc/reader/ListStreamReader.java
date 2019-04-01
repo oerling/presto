@@ -277,6 +277,9 @@ public class ListStreamReader
     @Override
     public void setResultSizeBudget(long bytes)
     {
+        if (!filterIsSetup) {
+            setupFilterAndChannel();
+        }
         elementStreamReader.setResultSizeBudget(bytes);
     }
 
