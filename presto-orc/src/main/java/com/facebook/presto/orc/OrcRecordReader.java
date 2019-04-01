@@ -135,6 +135,10 @@ public class OrcRecordReader
     private final long UNLIMITED_BUDGET = 0x400000000000L;
     private final int MIN_BATCH_ROWS = 4;
 
+    // Debug bounds for scoping scan to a particular split(s).
+    static private long splitMinOffset = 0;
+    static private long splitMaxOffset = Long.MAX_VALUE;
+
     public OrcRecordReader(
             Map<Integer, Type> includedColumns,
             Map<Integer, ColumnHandle> includedColumnHandles,
@@ -220,7 +224,7 @@ public class OrcRecordReader
             // select stripes that start within the specified split
             for (StripeInfo info : stripeInfos) {
                 StripeInformation stripe = info.getStripe();
-                if (splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
+                if (splitOffset >= splitMinOffset && splitOffset < splitMaxOffset && splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
                     stripes.add(stripe);
                     stripeFilePositions.add(fileRowCount);
                     totalRowCount += stripe.getNumberOfRows();
