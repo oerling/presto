@@ -26,7 +26,7 @@ abstract class AbstractLongStreamReader
             extends NullWrappingColumnReader
 {
     protected long[] values;
-    
+
     @Override
     public void erase(int end)
     {

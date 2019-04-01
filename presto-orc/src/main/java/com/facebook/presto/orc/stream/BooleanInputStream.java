@@ -173,7 +173,7 @@ public class BooleanInputStream
             getSetBits(numOffsets, vector);
             if (numBits > offsets[numOffsets - offsetBase - 1] + 1) {
                 skip(numBits - offsets[numOffsets - 1] - offsetBase - 1);
-        }
+            }
             return;
         }
         int position = 0;

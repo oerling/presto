@@ -14,7 +14,6 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.memory.context.LocalMemoryContext;
-import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.OrcCorruptionException;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
@@ -204,7 +203,7 @@ public class LongDictionaryStreamReader
                     Arrays.fill(filterResults, FILTER_NOT_EVALUATED);
                 }
             }
-        dictionaryOpen = true;
+            dictionaryOpen = true;
         }
         presentStream = presentStreamSource.openStream();
         inDictionaryStream = inDictionaryStreamSource.openStream();
@@ -357,7 +356,7 @@ public class LongDictionaryStreamReader
         {
             if (inDictionaryStream != null) {
                 return inDictionaryFlags[offsetIndex] ? dictionary[(int) value] : value;
-        }
+            }
             return dictionary[(int) value];
         }
 
