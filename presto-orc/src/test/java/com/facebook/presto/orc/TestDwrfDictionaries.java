@@ -19,7 +19,6 @@ import com.facebook.presto.spi.PageSourceOptions.FilterFunction;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.VarcharType;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.units.DataSize;
@@ -31,6 +30,8 @@ import java.io.IOException;
 import static com.facebook.presto.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
 import static com.facebook.presto.orc.OrcReader.MAX_BATCH_SIZE;
 import static com.facebook.presto.orc.OrcTester.HIVE_STORAGE_TIME_ZONE;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.io.Resources.getResource;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static org.testng.Assert.assertEquals;
@@ -41,9 +42,18 @@ public class TestDwrfDictionaries
     public void testSlice()
             throws Exception
     {
-        Block block1 = readFile("test_dictionaries/string-dictionary.orc", VarcharType.VARCHAR);
-        Block block2 = readFile("test_dictionaries/string-row-group-dictionary.dwrf", VarcharType.VARCHAR);
-        compare(VarcharType.VARCHAR, block1, block2);
+        Block block1 = readFile("test_dictionaries/string-dictionary.orc", VARCHAR);
+        Block block2 = readFile("test_dictionaries/string-row-group-dictionary.dwrf", VARCHAR);
+        compare(VARCHAR, block1, block2);
+    }
+
+    @Test
+    public void testLong()
+            throws Exception
+    {
+        Block block1 = readFile("test_dictionaries/long-direct.orc", BIGINT);
+        Block block2 = readFile("test_dictionaries/long-dictionary.dwrf", BIGINT);
+        compare(BIGINT, block1, block2);
     }
 
     private void compare(Type type, Block block1, Block block2)
