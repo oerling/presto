@@ -33,6 +33,8 @@ import static java.util.Objects.requireNonNull;
 abstract class ColumnReader
         implements StreamReader
 {
+    private static final int SIZE_ROUNDUP_PERCENT = 25;
+
     protected InputStreamSource<BooleanInputStream> presentStreamSource = missingStreamSource(BooleanInputStream.class);
 
     @Nullable
@@ -340,5 +342,10 @@ abstract class ColumnReader
         if (numValues < numFirstRows) {
             throw new IllegalArgumentException(format("Reader does not have enough rows: requested %s, available %s", numFirstRows, numValues));
         }
+    }
+
+    public static int roundupSize(int size)
+    {
+        return size + (size / (100 / SIZE_ROUNDUP_PERCENT));
     }
 }
