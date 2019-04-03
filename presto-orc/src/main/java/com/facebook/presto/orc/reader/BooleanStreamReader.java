@@ -235,6 +235,7 @@ public class BooleanStreamReader
                     // Non-null row in qualifying set.
                     if (toSkip > 0) {
                         dataStream.skip(toSkip);
+                        toSkip = 0;
                     }
                     boolean value = dataStream.nextBit();
                     if (filter != null) {
