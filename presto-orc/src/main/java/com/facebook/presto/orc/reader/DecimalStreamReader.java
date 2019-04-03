@@ -311,7 +311,6 @@ public class DecimalStreamReader
                     if (toSkip > 0) {
                         decimalStream.skip(toSkip);
                         scaleStream.skip(toSkip);
-                        toSkip = 0;
                     }
 
                     long sourceScale = scaleStream.next();

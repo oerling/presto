@@ -299,7 +299,6 @@ public class TimestampStreamReader
                     if (toSkip > 0) {
                         secondsStream.skip(toSkip);
                         nanosStream.skip(toSkip);
-                        toSkip = 0;
                     }
                     long value = decodeTimestamp(secondsStream.next(), nanosStream.next(), baseTimestampInSeconds);
                     if (filter != null) {
