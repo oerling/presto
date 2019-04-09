@@ -26,14 +26,13 @@ import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.orc.stream.LongInputStream;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
-import com.facebook.presto.spi.block.FixedWidthBlock;
+import com.facebook.presto.spi.block.Int128ArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.type.DecimalType;
 import com.facebook.presto.spi.type.Decimals;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic;
 import io.airlift.slice.Slice;
-import io.airlift.slice.Slices;
 import org.openjdk.jol.info.ClassLayout;
 
 import javax.annotation.Nullable;
@@ -454,26 +453,21 @@ public class DecimalStreamReader
         }
 
         if (mayReuse) {
-            return new FixedWidthBlock(
-                    fixedValueSize,
+            return new Int128ArrayBlock(
                     numFirstRows,
-                    Slices.wrappedLongArray(values),
-                    Optional.ofNullable(valueIsNull).map(Slices::wrappedBooleanArray));
+                    Optional.ofNullable(valueIsNull),
+                    values);
         }
         if (numFirstRows < numValues || values.length > (int) (numFirstRows * numLongsPerValue * 1.2)) {
-            return new FixedWidthBlock(
-                    fixedValueSize,
+            return new Int128ArrayBlock(
                     numFirstRows,
-                    Slices.wrappedLongArray(Arrays.copyOf(values, numFirstRows * numLongsPerValue)),
-                    Optional.ofNullable(valueIsNull)
-                            .map(buffer -> Arrays.copyOf(buffer, numFirstRows))
-                            .map(Slices::wrappedBooleanArray));
+                    Optional.ofNullable(valueIsNull).map(buffer -> Arrays.copyOf(buffer, numFirstRows)),
+                    Arrays.copyOf(values, numFirstRows * numLongsPerValue));
         }
-        Block block = new FixedWidthBlock(
-                fixedValueSize,
+        Block block = new Int128ArrayBlock(
                 numFirstRows,
-                Slices.wrappedLongArray(values),
-                Optional.ofNullable(valueIsNull).map(Slices::wrappedBooleanArray));
+                Optional.ofNullable(valueIsNull),
+                values);
         values = null;
         valueIsNull = null;
         numValues = 0;

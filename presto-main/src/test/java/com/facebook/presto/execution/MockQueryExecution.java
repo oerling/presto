@@ -118,7 +118,6 @@ public class MockQueryExecution
                         new Duration(8, NANOSECONDS),
 
                         new Duration(100, NANOSECONDS),
-                        new Duration(200, NANOSECONDS),
 
                         9,
                         10,
@@ -176,6 +175,7 @@ public class MockQueryExecution
                 ImmutableSet.of(),
                 Optional.empty(),
                 state.isDone(),
+                Optional.empty(),
                 Optional.empty());
     }
 

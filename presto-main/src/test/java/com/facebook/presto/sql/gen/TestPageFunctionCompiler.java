@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.sql.gen;
 
-import com.facebook.presto.metadata.InternalSignatureUtils;
 import com.facebook.presto.operator.DriverYieldSignal;
 import com.facebook.presto.operator.Work;
 import com.facebook.presto.operator.project.PageProjection;
@@ -22,8 +21,7 @@ import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
-import com.facebook.presto.sql.relational.CallExpression;
-import com.google.common.collect.ImmutableList;
+import com.facebook.presto.spi.relation.CallExpression;
 import org.testng.annotations.Test;
 
 import java.util.Optional;
@@ -33,6 +31,7 @@ import static com.facebook.presto.metadata.MetadataManager.createTestMetadataMan
 import static com.facebook.presto.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static com.facebook.presto.spi.function.OperatorType.ADD;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.sql.relational.Expressions.call;
 import static com.facebook.presto.sql.relational.Expressions.constant;
 import static com.facebook.presto.sql.relational.Expressions.field;
@@ -46,7 +45,7 @@ import static org.testng.Assert.fail;
 public class TestPageFunctionCompiler
 {
     private static final CallExpression ADD_10_EXPRESSION = call(
-            InternalSignatureUtils.internalOperator(ADD, BIGINT.getTypeSignature(), ImmutableList.of(BIGINT.getTypeSignature(), BIGINT.getTypeSignature())),
+            createTestMetadataManager().getFunctionManager().resolveOperator(ADD, fromTypes(BIGINT, BIGINT)),
             BIGINT,
             field(0, BIGINT),
             constant(10L, BIGINT));

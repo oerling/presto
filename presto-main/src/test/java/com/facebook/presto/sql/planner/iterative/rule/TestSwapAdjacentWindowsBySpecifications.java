@@ -21,14 +21,12 @@ import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.facebook.presto.sql.tree.Window;
-import com.facebook.presto.sql.tree.WindowFrame;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.testng.annotations.Test;
 
 import java.util.Optional;
 
-import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
@@ -37,8 +35,9 @@ import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.functi
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.specification;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.values;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.window;
-import static com.facebook.presto.sql.tree.FrameBound.Type.CURRENT_ROW;
-import static com.facebook.presto.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.CURRENT_ROW;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.UNBOUNDED_PRECEDING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.WindowType.RANGE;
 
 public class TestSwapAdjacentWindowsBySpecifications
         extends BaseRuleTest
@@ -49,7 +48,7 @@ public class TestSwapAdjacentWindowsBySpecifications
     public TestSwapAdjacentWindowsBySpecifications()
     {
         frame = new WindowNode.Frame(
-                WindowFrame.Type.RANGE,
+                RANGE,
                 UNBOUNDED_PRECEDING,
                 Optional.empty(),
                 CURRENT_ROW,
@@ -57,7 +56,7 @@ public class TestSwapAdjacentWindowsBySpecifications
                 Optional.empty(),
                 Optional.empty());
 
-        functionHandle = createTestMetadataManager().getFunctionManager().resolveFunction(TEST_SESSION, QualifiedName.of("avg"), fromTypes(BIGINT));
+        functionHandle = createTestMetadataManager().getFunctionManager().lookupFunction(QualifiedName.of("avg"), fromTypes(BIGINT));
     }
 
     @Test

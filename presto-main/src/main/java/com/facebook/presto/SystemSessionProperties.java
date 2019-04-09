@@ -14,6 +14,7 @@
 package com.facebook.presto;
 
 import com.facebook.presto.execution.QueryManagerConfig;
+import com.facebook.presto.execution.QueryManagerConfig.ExchangeMaterializationStrategy;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.memory.MemoryManagerConfig;
 import com.facebook.presto.spi.PrestoException;
@@ -59,6 +60,7 @@ public final class SystemSessionProperties
     public static final String DISTRIBUTED_INDEX_JOIN = "distributed_index_join";
     public static final String HASH_PARTITION_COUNT = "hash_partition_count";
     public static final String PARTITIONING_PROVIDER_CATALOG = "partitioning_provider_catalog";
+    public static final String EXCHANGE_MATERIALIZATION_STRATEGY = "exchange_materialization_strategy";
     public static final String GROUPED_EXECUTION_FOR_AGGREGATION = "grouped_execution_for_aggregation";
     public static final String DYNAMIC_SCHEDULE_FOR_GROUPED_EXECUTION = "dynamic_schedule_for_grouped_execution";
     public static final String PREFER_STREAMING_OPERATORS = "prefer_streaming_operators";
@@ -114,6 +116,7 @@ public final class SystemSessionProperties
     public static final String LEGACY_UNNEST = "legacy_unnest";
     public static final String STATISTICS_CPU_TIMER_ENABLED = "statistics_cpu_timer_enabled";
     public static final String ENABLE_STATS_CALCULATOR = "enable_stats_calculator";
+    public static final String PUSHDOWN_SUBFIELDS = "pushdown_subfields";
     public static final String ARIA_SCAN = "aria_scan";
     public static final String ARIA_REUSE_PAGES = "aria_reuse_pages";
     public static final String ARIA_REORDER = "aria_reorder";
@@ -190,6 +193,18 @@ public final class SystemSessionProperties
                         "Name of the catalog providing custom partitioning",
                         queryManagerConfig.getPartitioningProviderCatalog(),
                         false),
+                new PropertyMetadata<>(
+                        EXCHANGE_MATERIALIZATION_STRATEGY,
+                        format("The exchange materialization strategy to use. Options are %s",
+                                Stream.of(ExchangeMaterializationStrategy.values())
+                                        .map(ExchangeMaterializationStrategy::name)
+                                        .collect(joining(","))),
+                        VARCHAR,
+                        ExchangeMaterializationStrategy.class,
+                        queryManagerConfig.getExchangeMaterializationStrategy(),
+                        false,
+                        value -> ExchangeMaterializationStrategy.valueOf(((String) value).toUpperCase()),
+                        ExchangeMaterializationStrategy::name),
                 booleanProperty(
                         GROUPED_EXECUTION_FOR_AGGREGATION,
                         "Use grouped execution for aggregation when possible",
@@ -542,6 +557,11 @@ public final class SystemSessionProperties
                         "Maximum number of tasks for a non source distributed stage",
                         taskManagerConfig.getMaxTasksPerStage(),
                         false),
+                booleanProperty(
+                        PUSHDOWN_SUBFIELDS,
+                        "Pushdown subfield pruning into a projection on top of table scan",
+                        false,
+                        false),
                 booleanProperty(ARIA_SCAN,
                                 "Enable Aria Presto! scan operator",
                                 true,
@@ -631,6 +651,11 @@ public final class SystemSessionProperties
     public static String getPartitioningProviderCatalog(Session session)
     {
         return session.getSystemProperty(PARTITIONING_PROVIDER_CATALOG, String.class);
+    }
+
+    public static ExchangeMaterializationStrategy getExchangeMaterializationStrategy(Session session)
+    {
+        return session.getSystemProperty(EXCHANGE_MATERIALIZATION_STRATEGY, ExchangeMaterializationStrategy.class);
     }
 
     public static boolean isGroupedExecutionForAggregationEnabled(Session session)
@@ -962,6 +987,11 @@ public final class SystemSessionProperties
     public static boolean isEnableStatsCalculator(Session session)
     {
         return session.getSystemProperty(ENABLE_STATS_CALCULATOR, Boolean.class);
+    }
+
+    public static boolean isPushdownSubfields(Session session)
+    {
+        return session.getSystemProperty(PUSHDOWN_SUBFIELDS, Boolean.class);
     }
 
     public static boolean isAriaScanEnabled(Session session)

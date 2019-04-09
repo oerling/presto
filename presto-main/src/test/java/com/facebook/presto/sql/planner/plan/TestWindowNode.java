@@ -23,10 +23,8 @@ import com.facebook.presto.sql.planner.OrderingScheme;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.tree.Expression;
-import com.facebook.presto.sql.tree.FrameBound;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.QualifiedName;
-import com.facebook.presto.sql.tree.WindowFrame;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -41,10 +39,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.UNBOUNDED_FOLLOWING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.UNBOUNDED_PRECEDING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.WindowType.RANGE;
 import static org.testng.Assert.assertEquals;
 
 public class TestWindowNode
@@ -91,13 +91,13 @@ public class TestWindowNode
             throws Exception
     {
         Symbol windowSymbol = symbolAllocator.newSymbol("sum", BIGINT);
-        FunctionHandle functionHandle = createTestMetadataManager().getFunctionManager().resolveFunction(TEST_SESSION, QualifiedName.of("sum"), fromTypes(BIGINT));
+        FunctionHandle functionHandle = createTestMetadataManager().getFunctionManager().lookupFunction(QualifiedName.of("sum"), fromTypes(BIGINT));
         FunctionCall functionCall = new FunctionCall(QualifiedName.of("sum"), ImmutableList.of(columnC.toSymbolReference()));
         WindowNode.Frame frame = new WindowNode.Frame(
-                WindowFrame.Type.RANGE,
-                FrameBound.Type.UNBOUNDED_PRECEDING,
+                RANGE,
+                UNBOUNDED_PRECEDING,
                 Optional.empty(),
-                FrameBound.Type.UNBOUNDED_FOLLOWING,
+                UNBOUNDED_FOLLOWING,
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());

@@ -20,14 +20,15 @@ import com.facebook.presto.testing.QueryRunner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.intellij.lang.annotations.Language;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.util.List;
 import java.util.Set;
 
 import static com.facebook.presto.execution.TestQueryRunnerUtil.createQueryRunner;
+import static com.facebook.presto.spi.StandardWarningCode.PARSER_WARNING;
 import static com.facebook.presto.spi.StandardWarningCode.TOO_MANY_STAGES;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
@@ -38,14 +39,14 @@ public class TestWarnings
     private static final int STAGE_COUNT_WARNING_THRESHOLD = 20;
     private QueryRunner queryRunner;
 
-    @BeforeMethod
+    @BeforeClass
     public void setUp()
             throws Exception
     {
         queryRunner = createQueryRunner(ImmutableMap.of("query.stage-count-warning-threshold", String.valueOf(STAGE_COUNT_WARNING_THRESHOLD)));
     }
 
-    @AfterMethod(alwaysRun = true)
+    @AfterClass(alwaysRun = true)
     public void tearDown()
     {
         queryRunner.close();
@@ -69,6 +70,17 @@ public class TestWarnings
                 .build();
         assertWarnings(queryRunner, session, query, ImmutableList.of(TOO_MANY_STAGES.toWarningCode()));
         assertWarnings(queryRunner, session, noWarningsQuery, ImmutableList.of());
+    }
+
+    @Test
+    public void testNonReservedWordWarning()
+    {
+        String query = "SELECT CURRENT_ROLE, t.current_role FROM (VALUES (3)) t(current_role)";
+        Session session = testSessionBuilder()
+                .setCatalog("tpch")
+                .setSchema("tiny")
+                .build();
+        assertWarnings(queryRunner, session, query, ImmutableList.of(PARSER_WARNING.toWarningCode()));
     }
 
     private static void assertWarnings(QueryRunner queryRunner, Session session, @Language("SQL") String sql, List<WarningCode> expectedWarnings)

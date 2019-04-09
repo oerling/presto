@@ -20,27 +20,24 @@ import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.operator.scalar.ArraySubscriptOperator;
 import com.facebook.presto.operator.scalar.ScalarFunctionImplementation;
 import com.facebook.presto.spi.ConnectorSession;
-import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.RowBlockBuilder;
 import com.facebook.presto.spi.function.FunctionHandle;
 import com.facebook.presto.spi.function.OperatorType;
-import com.facebook.presto.spi.function.Signature;
 import com.facebook.presto.spi.type.ArrayType;
-import com.facebook.presto.spi.type.CharType;
+import com.facebook.presto.spi.type.FunctionType;
 import com.facebook.presto.spi.type.RowType;
 import com.facebook.presto.spi.type.RowType.Field;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
-import com.facebook.presto.spi.type.VarcharType;
 import com.facebook.presto.sql.InterpretedFunctionInvoker;
 import com.facebook.presto.sql.analyzer.ExpressionAnalyzer;
 import com.facebook.presto.sql.analyzer.Scope;
 import com.facebook.presto.sql.analyzer.SemanticErrorCode;
 import com.facebook.presto.sql.analyzer.SemanticException;
+import com.facebook.presto.sql.planner.Interpreters.LambdaSymbolResolver;
 import com.facebook.presto.sql.planner.iterative.rule.DesugarCurrentPath;
 import com.facebook.presto.sql.planner.iterative.rule.DesugarCurrentUser;
 import com.facebook.presto.sql.tree.ArithmeticBinaryExpression;
@@ -87,7 +84,6 @@ import com.facebook.presto.sql.tree.SubqueryExpression;
 import com.facebook.presto.sql.tree.SubscriptExpression;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.facebook.presto.sql.tree.WhenClause;
-import com.facebook.presto.type.FunctionType;
 import com.facebook.presto.type.LikeFunctions;
 import com.facebook.presto.util.Failures;
 import com.facebook.presto.util.FastutilSetHelper;
@@ -114,9 +110,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.facebook.presto.SystemSessionProperties.isLegacyRowFieldOrdinalAccessEnabled;
+import static com.facebook.presto.metadata.CastType.CAST;
 import static com.facebook.presto.operator.scalar.ScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
-import static com.facebook.presto.spi.function.OperatorType.CAST;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.spi.type.TypeUtils.writeNativeValue;
 import static com.facebook.presto.spi.type.VarcharType.createVarcharType;
@@ -125,6 +121,8 @@ import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.createConstant
 import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.sql.gen.VarArgsToMapAdapterGenerator.generateVarArgsToMapAdapter;
 import static com.facebook.presto.sql.planner.DeterminismEvaluator.isDeterministic;
+import static com.facebook.presto.sql.planner.Interpreters.interpretDereference;
+import static com.facebook.presto.sql.planner.Interpreters.interpretLikePredicate;
 import static com.facebook.presto.sql.planner.LiteralEncoder.isSupportedLiteralType;
 import static com.facebook.presto.sql.planner.iterative.rule.CanonicalizeExpressionRewriter.canonicalizeExpression;
 import static com.facebook.presto.type.LikeFunctions.isLikePattern;
@@ -140,12 +138,15 @@ import static com.google.common.collect.Iterables.getOnlyElement;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
+@Deprecated
 public class ExpressionInterpreter
 {
     private final Expression expression;
     private final Metadata metadata;
     private final LiteralEncoder literalEncoder;
-    private final ConnectorSession session;
+    private final Session session;
+    private final ConnectorSession connectorSession;
+    // if optimize flag is on, we will ways return evaluated result or throw.
     private final boolean optimize;
     private final Map<NodeRef<Expression>, Type> expressionTypes;
     private final InterpretedFunctionInvoker functionInvoker;
@@ -233,7 +234,8 @@ public class ExpressionInterpreter
         this.expression = requireNonNull(expression, "expression is null");
         this.metadata = requireNonNull(metadata, "metadata is null");
         this.literalEncoder = new LiteralEncoder(metadata.getBlockEncodingSerde());
-        this.session = requireNonNull(session, "session is null").toConnectorSession();
+        this.session = requireNonNull(session, "session is null");
+        this.connectorSession = session.toConnectorSession();
         this.expressionTypes = ImmutableMap.copyOf(requireNonNull(expressionTypes, "expressionTypes is null"));
         verify((expressionTypes.containsKey(NodeRef.of(expression))));
         this.optimize = optimize;
@@ -251,13 +253,13 @@ public class ExpressionInterpreter
     public Object evaluate()
     {
         checkState(!optimize, "evaluate() not allowed for optimizer");
-        return visitor.process(expression, new NoPagePositionContext());
+        return visitor.process(expression, null);
     }
 
-    public Object evaluate(int position, Page page)
+    public Object evaluate(SymbolResolver inputs)
     {
-        checkState(!optimize, "evaluate(int, Page) not allowed for optimizer");
-        return visitor.process(expression, new SinglePagePositionContext(position, page));
+        checkState(!optimize, "evaluate(SymbolResolver) not allowed for optimizer");
+        return visitor.process(expression, inputs);
     }
 
     public Object optimize(SymbolResolver inputs)
@@ -273,39 +275,7 @@ public class ExpressionInterpreter
         @Override
         public Object visitFieldReference(FieldReference node, Object context)
         {
-            Type type = type(node);
-
-            int channel = node.getFieldIndex();
-            if (context instanceof PagePositionContext) {
-                PagePositionContext pagePositionContext = (PagePositionContext) context;
-                int position = pagePositionContext.getPosition(channel);
-                Block block = pagePositionContext.getBlock(channel);
-
-                if (block.isNull(position)) {
-                    return null;
-                }
-
-                Class<?> javaType = type.getJavaType();
-                if (javaType == boolean.class) {
-                    return type.getBoolean(block, position);
-                }
-                else if (javaType == long.class) {
-                    return type.getLong(block, position);
-                }
-                else if (javaType == double.class) {
-                    return type.getDouble(block, position);
-                }
-                else if (javaType == Slice.class) {
-                    return type.getSlice(block, position);
-                }
-                else if (javaType == Block.class) {
-                    return type.getObject(block, position);
-                }
-                else {
-                    throw new UnsupportedOperationException("not yet implemented");
-                }
-            }
-            throw new UnsupportedOperationException("Inputs must be set");
+            throw new UnsupportedOperationException("Field references not supported in interpreter");
         }
 
         @Override
@@ -328,7 +298,6 @@ public class ExpressionInterpreter
             }
 
             RowType rowType = (RowType) type;
-            Block row = (Block) base;
             Type returnType = type(node);
             String fieldName = node.getField().getValue();
             List<Field> fields = rowType.getFields();
@@ -348,27 +317,7 @@ public class ExpressionInterpreter
                 }
             }
 
-            checkState(index >= 0, "could not find field name: %s", node.getField());
-            if (row.isNull(index)) {
-                return null;
-            }
-            Class<?> javaType = returnType.getJavaType();
-            if (javaType == long.class) {
-                return returnType.getLong(row, index);
-            }
-            else if (javaType == double.class) {
-                return returnType.getDouble(row, index);
-            }
-            else if (javaType == boolean.class) {
-                return returnType.getBoolean(row, index);
-            }
-            else if (javaType == Slice.class) {
-                return returnType.getSlice(row, index);
-            }
-            else if (!javaType.isPrimitive()) {
-                return returnType.getObject(row, index);
-            }
-            throw new UnsupportedOperationException("Dereference a unsupported primitive type: " + javaType.getName());
+            return interpretDereference(base, returnType, index);
         }
 
         @Override
@@ -396,7 +345,7 @@ public class ExpressionInterpreter
         @Override
         protected Object visitLiteral(Literal node, Object context)
         {
-            return LiteralInterpreter.evaluate(metadata, session, node);
+            return LiteralInterpreter.evaluate(metadata, connectorSession, node);
         }
 
         @Override
@@ -488,7 +437,7 @@ public class ExpressionInterpreter
             catch (RuntimeException e) {
                 // HACK
                 // Certain operations like 0 / 0 or likeExpression may throw exceptions.
-                // Wrap them a FunctionCall that will throw the exception if the expression is actually executed
+                // Wrap them in a FunctionCall that will throw the exception if the expression is actually executed
                 return createFailureFunction(e, type(expression));
             }
         }
@@ -709,7 +658,7 @@ public class ExpressionInterpreter
                 case PLUS:
                     return value;
                 case MINUS:
-                    FunctionHandle operatorHandle = metadata.getFunctionManager().resolveOperator(OperatorType.NEGATION, types(node.getValue()));
+                    FunctionHandle operatorHandle = metadata.getFunctionManager().resolveOperator(OperatorType.NEGATION, fromTypes(types(node.getValue())));
                     MethodHandle handle = metadata.getFunctionManager().getScalarFunctionImplementation(operatorHandle).getMethodHandle();
 
                     if (handle.type().parameterCount() > 0 && handle.type().parameterType(0) == ConnectorSession.class) {
@@ -832,8 +781,8 @@ public class ExpressionInterpreter
                     OperatorType.EQUAL,
                     ImmutableList.of(commonType, commonType),
                     ImmutableList.of(
-                            functionInvoker.invoke(firstCast, session, ImmutableList.of(first)),
-                            functionInvoker.invoke(secondCast, session, ImmutableList.of(second)))));
+                            functionInvoker.invoke(firstCast, connectorSession, ImmutableList.of(first)),
+                            functionInvoker.invoke(secondCast, connectorSession, ImmutableList.of(second)))));
 
             if (equal) {
                 return null;
@@ -927,8 +876,8 @@ public class ExpressionInterpreter
                 argumentValues.add(value);
                 argumentTypes.add(type);
             }
-            Signature functionSignature = metadata.getFunctionManager().resolveFunction(node.getName(), fromTypes(argumentTypes));
-            ScalarFunctionImplementation function = metadata.getFunctionManager().getScalarFunctionImplementation(functionSignature);
+            FunctionHandle functionHandle = metadata.getFunctionManager().resolveFunction(session, node.getName(), fromTypes(argumentTypes));
+            ScalarFunctionImplementation function = metadata.getFunctionManager().getScalarFunctionImplementation(functionHandle);
             for (int i = 0; i < argumentValues.size(); i++) {
                 Object value = argumentValues.get(i);
                 if (value == null && function.getArgumentProperty(i).getNullConvention() == RETURN_NULL_ON_NULL) {
@@ -940,7 +889,7 @@ public class ExpressionInterpreter
             if (optimize && (!function.isDeterministic() || hasUnresolvedValue(argumentValues) || node.getName().equals(QualifiedName.of("fail")))) {
                 return new FunctionCall(node.getName(), node.getWindow(), node.isDistinct(), toExpressions(argumentValues, argumentTypes));
             }
-            return functionInvoker.invoke(functionSignature, session, argumentValues);
+            return functionInvoker.invoke(functionHandle, connectorSession, argumentValues);
         }
 
         @Override
@@ -1005,7 +954,7 @@ public class ExpressionInterpreter
                     node.getPattern() instanceof StringLiteral &&
                     (!node.getEscape().isPresent() || node.getEscape().get() instanceof StringLiteral)) {
                 // fast path when we know the pattern and escape are constant
-                return evaluateLikePredicate(node, (Slice) value, getConstantPattern(node));
+                return interpretLikePredicate(type(node.getValue()), (Slice) value, getConstantPattern(node));
             }
 
             Object pattern = process(node.getPattern(), context);
@@ -1034,7 +983,7 @@ public class ExpressionInterpreter
                     regex = LikeFunctions.likePattern((Slice) pattern, (Slice) escape);
                 }
 
-                return evaluateLikePredicate(node, (Slice) value, regex);
+                return interpretLikePredicate(type(node.getValue()), (Slice) value, regex);
             }
 
             // if pattern is a constant without % or _ replace with a comparison
@@ -1068,17 +1017,6 @@ public class ExpressionInterpreter
                     optimizedEscape);
         }
 
-        private boolean evaluateLikePredicate(LikePredicate node, Slice value, Regex regex)
-        {
-            if (type(node.getValue()) instanceof VarcharType) {
-                return LikeFunctions.likeVarchar(value, regex);
-            }
-
-            Type type = type(node.getValue());
-            checkState(type instanceof CharType, "LIKE value is neither VARCHAR or CHAR");
-            return LikeFunctions.likeChar((long) ((CharType) type).getLength(), value, regex);
-        }
-
         private Regex getConstantPattern(LikePredicate node)
         {
             Regex result = likePatternCache.get(node);
@@ -1109,6 +1047,10 @@ public class ExpressionInterpreter
                 throw new IllegalArgumentException("Unsupported type: " + node.getType());
             }
 
+            if (value == null) {
+                return null;
+            }
+
             Type sourceType = type(node.getExpression());
             if (value instanceof Expression) {
                 if (targetType.equals(sourceType)) {
@@ -1128,14 +1070,10 @@ public class ExpressionInterpreter
                 return new Cast(toExpression(value, sourceType), node.getType(), node.isSafe(), node.isTypeOnly());
             }
 
-            if (value == null) {
-                return null;
-            }
-
             FunctionHandle operator = metadata.getFunctionManager().lookupCast(CAST, sourceType.getTypeSignature(), targetType.getTypeSignature());
 
             try {
-                return functionInvoker.invoke(operator, session, ImmutableList.of(value));
+                return functionInvoker.invoke(operator, connectorSession, ImmutableList.of(value));
             }
             catch (RuntimeException e) {
                 if (node.isSafe()) {
@@ -1263,8 +1201,8 @@ public class ExpressionInterpreter
 
         private Object invokeOperator(OperatorType operatorType, List<? extends Type> argumentTypes, List<Object> argumentValues)
         {
-            FunctionHandle operatorHandle = metadata.getFunctionManager().resolveOperator(operatorType, argumentTypes);
-            return functionInvoker.invoke(operatorHandle, session, argumentValues);
+            FunctionHandle operatorHandle = metadata.getFunctionManager().resolveOperator(operatorType, fromTypes(argumentTypes));
+            return functionInvoker.invoke(operatorHandle, connectorSession, argumentValues);
         }
 
         private Expression toExpression(Object base, Type type)
@@ -1275,54 +1213,6 @@ public class ExpressionInterpreter
         private List<Expression> toExpressions(List<Object> values, List<Type> types)
         {
             return literalEncoder.toExpressions(values, types);
-        }
-    }
-
-    private interface PagePositionContext
-    {
-        Block getBlock(int channel);
-
-        int getPosition(int channel);
-    }
-
-    private static class NoPagePositionContext
-            implements PagePositionContext
-    {
-        @Override
-        public Block getBlock(int channel)
-        {
-            throw new IllegalArgumentException("Context does not contain any blocks");
-        }
-
-        @Override
-        public int getPosition(int channel)
-        {
-            throw new IllegalArgumentException("Context does not have a position");
-        }
-    }
-
-    private static class SinglePagePositionContext
-            implements PagePositionContext
-    {
-        private final int position;
-        private final Page page;
-
-        private SinglePagePositionContext(int position, Page page)
-        {
-            this.position = position;
-            this.page = page;
-        }
-
-        @Override
-        public Block getBlock(int channel)
-        {
-            return page.getBlock(channel);
-        }
-
-        @Override
-        public int getPosition(int channel)
-        {
-            return position;
         }
     }
 
@@ -1340,23 +1230,5 @@ public class ExpressionInterpreter
     private static boolean isArray(Type type)
     {
         return type.getTypeSignature().getBase().equals(StandardTypes.ARRAY);
-    }
-
-    private static class LambdaSymbolResolver
-            implements SymbolResolver
-    {
-        private final Map<String, Object> values;
-
-        public LambdaSymbolResolver(Map<String, Object> values)
-        {
-            this.values = requireNonNull(values, "values is null");
-        }
-
-        @Override
-        public Object getValue(Symbol symbol)
-        {
-            checkState(values.containsKey(symbol.getName()), "values does not contain %s", symbol);
-            return values.get(symbol.getName());
-        }
     }
 }

@@ -26,6 +26,7 @@ import com.facebook.presto.execution.SqlStageExecution;
 import com.facebook.presto.execution.StageId;
 import com.facebook.presto.execution.StageInfo;
 import com.facebook.presto.execution.StageState;
+import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskStatus;
 import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
@@ -37,7 +38,8 @@ import com.facebook.presto.split.SplitSource;
 import com.facebook.presto.sql.planner.NodePartitionMap;
 import com.facebook.presto.sql.planner.NodePartitioningManager;
 import com.facebook.presto.sql.planner.PartitioningHandle;
-import com.facebook.presto.sql.planner.StageExecutionPlan;
+import com.facebook.presto.sql.planner.SplitSourceFactory;
+import com.facebook.presto.sql.planner.SubPlan;
 import com.facebook.presto.sql.planner.plan.PlanFragmentId;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
 import com.google.common.collect.ImmutableList;
@@ -125,10 +127,11 @@ public class SqlQueryScheduler
     public static SqlQueryScheduler createSqlQueryScheduler(
             QueryStateMachine queryStateMachine,
             LocationFactory locationFactory,
-            StageExecutionPlan plan,
+            SubPlan plan,
             NodePartitioningManager nodePartitioningManager,
             NodeScheduler nodeScheduler,
             RemoteTaskFactory remoteTaskFactory,
+            SplitSourceFactory splitSourceFactory,
             Session session,
             boolean summarizeTaskInfo,
             int splitBatchSize,
@@ -147,6 +150,7 @@ public class SqlQueryScheduler
                 nodePartitioningManager,
                 nodeScheduler,
                 remoteTaskFactory,
+                splitSourceFactory,
                 session,
                 summarizeTaskInfo,
                 splitBatchSize,
@@ -164,10 +168,11 @@ public class SqlQueryScheduler
     private SqlQueryScheduler(
             QueryStateMachine queryStateMachine,
             LocationFactory locationFactory,
-            StageExecutionPlan plan,
+            SubPlan plan,
             NodePartitioningManager nodePartitioningManager,
             NodeScheduler nodeScheduler,
             RemoteTaskFactory remoteTaskFactory,
+            SplitSourceFactory splitSourceFactory,
             Session session,
             boolean summarizeTaskInfo,
             int splitBatchSize,
@@ -199,6 +204,7 @@ public class SqlQueryScheduler
                 plan.withBucketToPartition(Optional.of(new int[1])),
                 nodeScheduler,
                 remoteTaskFactory,
+                splitSourceFactory,
                 session,
                 splitBatchSize,
                 partitioningHandle -> partitioningCache.computeIfAbsent(partitioningHandle, handle -> nodePartitioningManager.getNodePartitioningMap(session, handle)),
@@ -271,20 +277,27 @@ public class SqlQueryScheduler
 
     private static void updateQueryOutputLocations(QueryStateMachine queryStateMachine, OutputBufferId rootBufferId, Set<RemoteTask> tasks, boolean noMoreExchangeLocations)
     {
-        Set<URI> bufferLocations = tasks.stream()
-                .map(task -> task.getTaskStatus().getSelf())
-                .map(location -> uriBuilderFrom(location).appendPath("results").appendPath(rootBufferId.toString()).build())
-                .collect(toImmutableSet());
+        Map<URI, TaskId> bufferLocations = tasks.stream()
+                .collect(toImmutableMap(
+                        task -> getBufferLocation(task, rootBufferId),
+                        RemoteTask::getTaskId));
         queryStateMachine.updateOutputLocations(bufferLocations, noMoreExchangeLocations);
+    }
+
+    private static URI getBufferLocation(RemoteTask remoteTask, OutputBufferId rootBufferId)
+    {
+        URI location = remoteTask.getTaskStatus().getSelf();
+        return uriBuilderFrom(location).appendPath("results").appendPath(rootBufferId.toString()).build();
     }
 
     private List<SqlStageExecution> createStages(
             ExchangeLocationsConsumer parent,
             AtomicInteger nextStageId,
             LocationFactory locationFactory,
-            StageExecutionPlan plan,
+            SubPlan plan,
             NodeScheduler nodeScheduler,
             RemoteTaskFactory remoteTaskFactory,
+            SplitSourceFactory splitSourceFactory,
             Session session,
             int splitBatchSize,
             Function<PartitioningHandle, NodePartitionMap> partitioningCache,
@@ -316,8 +329,10 @@ public class SqlQueryScheduler
         Optional<int[]> bucketToPartition;
         PartitioningHandle partitioningHandle = plan.getFragment().getPartitioning();
         if (partitioningHandle.equals(SOURCE_DISTRIBUTION)) {
+            // TODO: defer opening split sources when stage scheduling starts
+            Map<PlanNodeId, SplitSource> splitSources = splitSourceFactory.createSplitSources(plan.getFragment(), session);
             // nodes are selected dynamically based on the constraints of the splits and the system load
-            Entry<PlanNodeId, SplitSource> entry = Iterables.getOnlyElement(plan.getSplitSources().entrySet());
+            Entry<PlanNodeId, SplitSource> entry = Iterables.getOnlyElement(splitSources.entrySet());
             PlanNodeId planNodeId = entry.getKey();
             SplitSource splitSource = entry.getValue();
             ConnectorId connectorId = splitSource.getConnectorId();
@@ -335,7 +350,8 @@ public class SqlQueryScheduler
             bucketToPartition = Optional.of(new int[1]);
         }
         else {
-            Map<PlanNodeId, SplitSource> splitSources = plan.getSplitSources();
+            // TODO: defer opening split sources when stage scheduling starts
+            Map<PlanNodeId, SplitSource> splitSources = splitSourceFactory.createSplitSources(plan.getFragment(), session);
             if (!splitSources.isEmpty()) {
                 // contains local source
                 List<PlanNodeId> schedulingOrder = plan.getFragment().getPartitionedSources();
@@ -353,7 +369,7 @@ public class SqlQueryScheduler
                 BucketNodeMap bucketNodeMap;
                 List<Node> stageNodeList;
                 if (plan.getFragment().getRemoteSourceNodes().stream().allMatch(node -> node.getExchangeType() == REPLICATE)) {
-                    // no remote source
+                    // no non-replicated remote source
                     boolean dynamicLifespanSchedule = plan.getFragment().getStageExecutionDescriptor().isDynamicLifespanSchedule();
                     bucketNodeMap = nodePartitioningManager.getBucketNodeMap(session, partitioningHandle, dynamicLifespanSchedule);
 
@@ -402,7 +418,7 @@ public class SqlQueryScheduler
         }
 
         ImmutableSet.Builder<SqlStageExecution> childStagesBuilder = ImmutableSet.builder();
-        for (StageExecutionPlan subStagePlan : plan.getSubStages()) {
+        for (SubPlan subStagePlan : plan.getChildren()) {
             List<SqlStageExecution> subTree = createStages(
                     stage::addExchangeLocations,
                     nextStageId,
@@ -410,6 +426,7 @@ public class SqlQueryScheduler
                     subStagePlan.withBucketToPartition(bucketToPartition),
                     nodeScheduler,
                     remoteTaskFactory,
+                    splitSourceFactory,
                     session,
                     splitBatchSize,
                     partitioningCache,

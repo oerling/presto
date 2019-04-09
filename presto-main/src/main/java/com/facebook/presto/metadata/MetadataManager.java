@@ -34,12 +34,14 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SchemaTablePrefix;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.SystemTable;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.connector.ConnectorCapabilities;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.connector.ConnectorPartitioningHandle;
+import com.facebook.presto.spi.connector.ConnectorPartitioningMetadata;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.function.OperatorType;
 import com.facebook.presto.spi.predicate.TupleDomain;
@@ -54,6 +56,7 @@ import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.analyzer.FeaturesConfig;
+import com.facebook.presto.sql.analyzer.TypeSignatureProvider;
 import com.facebook.presto.sql.planner.PartitioningHandle;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.transaction.TransactionManager;
@@ -103,8 +106,7 @@ import static com.facebook.presto.spi.function.OperatorType.HASH_CODE;
 import static com.facebook.presto.spi.function.OperatorType.LESS_THAN;
 import static com.facebook.presto.spi.function.OperatorType.LESS_THAN_OR_EQUAL;
 import static com.facebook.presto.spi.function.OperatorType.NOT_EQUAL;
-import static com.facebook.presto.spi.type.BigintType.BIGINT;
-import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.transaction.InMemoryTransactionManager.createTestTransactionManager;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -220,23 +222,23 @@ public class MetadataManager
         Multimap<Type, OperatorType> missingOperators = HashMultimap.create();
         for (Type type : typeManager.getTypes()) {
             if (type.isComparable()) {
-                if (!canResolveOperator(HASH_CODE, BIGINT, ImmutableList.of(type))) {
+                if (!canResolveOperator(HASH_CODE, fromTypes(type))) {
                     missingOperators.put(type, HASH_CODE);
                 }
-                if (!canResolveOperator(EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
+                if (!canResolveOperator(EQUAL, fromTypes(type, type))) {
                     missingOperators.put(type, EQUAL);
                 }
-                if (!canResolveOperator(NOT_EQUAL, BOOLEAN, ImmutableList.of(type, type))) {
+                if (!canResolveOperator(NOT_EQUAL, fromTypes(type, type))) {
                     missingOperators.put(type, NOT_EQUAL);
                 }
             }
             if (type.isOrderable()) {
                 for (OperatorType operator : ImmutableList.of(LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL)) {
-                    if (!canResolveOperator(operator, BOOLEAN, ImmutableList.of(type, type))) {
+                    if (!canResolveOperator(operator, fromTypes(type, type))) {
                         missingOperators.put(type, operator);
                     }
                 }
-                if (!canResolveOperator(BETWEEN, BOOLEAN, ImmutableList.of(type, type, type))) {
+                if (!canResolveOperator(BETWEEN, fromTypes(type, type, type))) {
                     missingOperators.put(type, BETWEEN);
                 }
             }
@@ -371,6 +373,18 @@ public class MetadataManager
             return metadata.getSystemTable(session.toConnectorSession(connectorId), tableName.asSchemaTableName());
         }
         return Optional.empty();
+    }
+
+    @Override
+    public Map<ColumnHandle, ColumnHandle> pushdownSubfieldPruning(Session session, TableHandle tableHandle, Map<ColumnHandle, List<SubfieldPath>> desiredSubfields)
+    {
+        ConnectorId connectorId = tableHandle.getConnectorId();
+        ConnectorTableHandle connectorTable = tableHandle.getConnectorHandle();
+
+        CatalogMetadata catalogMetadata = getCatalogMetadata(session, connectorId);
+        ConnectorMetadata metadata = catalogMetadata.getMetadataFor(connectorId);
+        ConnectorSession connectorSession = session.toConnectorSession(connectorId);
+        return metadata.pushdownSubfieldPruning(connectorSession, connectorTable, desiredSubfields);
     }
 
     @Override
@@ -600,6 +614,31 @@ public class MetadataManager
         ConnectorId connectorId = catalogMetadata.getConnectorId();
         ConnectorMetadata metadata = catalogMetadata.getMetadata();
         metadata.createTable(session.toConnectorSession(connectorId), tableMetadata, ignoreExisting);
+    }
+
+    @Override
+    public TableHandle createTemporaryTable(Session session, String catalogName, List<ColumnMetadata> columns, Optional<PartitioningMetadata> partitioningMetadata)
+    {
+        CatalogMetadata catalogMetadata = getCatalogMetadataForWrite(session, catalogName);
+        ConnectorId connectorId = catalogMetadata.getConnectorId();
+        ConnectorMetadata metadata = catalogMetadata.getMetadata();
+        ConnectorTableHandle connectorTableHandle = metadata.createTemporaryTable(
+                session.toConnectorSession(connectorId),
+                columns,
+                partitioningMetadata.map(partitioning -> createConnectorPartitioningMetadata(connectorId, partitioning)));
+        return new TableHandle(connectorId, connectorTableHandle);
+    }
+
+    private static ConnectorPartitioningMetadata createConnectorPartitioningMetadata(ConnectorId connectorId, PartitioningMetadata partitioningMetadata)
+    {
+        ConnectorId partitioningConnectorId = partitioningMetadata.getPartitioningHandle().getConnectorId()
+                .orElseThrow(() -> new IllegalArgumentException("connectorId is expected to be present in the connector partitioning handle"));
+        checkArgument(
+                connectorId.equals(partitioningConnectorId),
+                "Unexpected partitioning handle connector: %s. Expected: %s.",
+                partitioningConnectorId,
+                connectorId);
+        return new ConnectorPartitioningMetadata(partitioningMetadata.getPartitioningHandle().getConnectorHandle(), partitioningMetadata.getPartitionColumns());
     }
 
     @Override
@@ -1189,7 +1228,7 @@ public class MetadataManager
         return new JsonCodecFactory(provider).jsonCodec(ViewDefinition.class);
     }
 
-    private boolean canResolveOperator(OperatorType operatorType, Type returnType, List<? extends Type> argumentTypes)
+    private boolean canResolveOperator(OperatorType operatorType, List<TypeSignatureProvider> argumentTypes)
     {
         try {
             getFunctionManager().resolveOperator(operatorType, argumentTypes);

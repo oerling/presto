@@ -196,7 +196,7 @@ public class ConnectorManager
 
         MaterializedConnector informationSchemaConnector = new MaterializedConnector(
                 createInformationSchemaConnectorId(connectorId),
-                new InformationSchemaConnector(catalogName, nodeManager, metadataManager, accessControlManager));
+                new InformationSchemaConnector(catalogName, nodeManager, metadataManager, accessControlManager, connector.getSessionProperties()));
 
         ConnectorId systemId = createSystemTablesConnectorId(connectorId);
         SystemTablesProvider systemTablesProvider;
@@ -214,7 +214,8 @@ public class ConnectorManager
                 systemId,
                 nodeManager,
                 systemTablesProvider,
-                transactionId -> transactionManager.getConnectorTransaction(transactionId, connectorId)));
+                transactionId -> transactionManager.getConnectorTransaction(transactionId, connectorId),
+                connector.getSessionProperties()));
 
         Catalog catalog = new Catalog(
                 catalogName,
@@ -295,6 +296,7 @@ public class ConnectorManager
         metadataManager.getTablePropertyManager().removeProperties(connectorId);
         metadataManager.getColumnPropertyManager().removeProperties(connectorId);
         metadataManager.getSchemaPropertyManager().removeProperties(connectorId);
+        metadataManager.getAnalyzePropertyManager().removeProperties(connectorId);
         metadataManager.getSessionPropertyManager().removeConnectorSessionProperties(connectorId);
 
         MaterializedConnector materializedConnector = connectors.remove(connectorId);

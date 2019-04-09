@@ -13,14 +13,14 @@
  */
 package com.facebook.presto.operator;
 
-import com.facebook.presto.metadata.InternalSignatureUtils;
+import com.facebook.presto.metadata.FunctionManager;
 import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.operator.project.PageProcessor;
 import com.facebook.presto.spi.Page;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.sql.gen.ExpressionCompiler;
 import com.facebook.presto.sql.gen.PageFunctionCompiler;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
-import com.facebook.presto.sql.relational.RowExpression;
 import com.facebook.presto.testing.MaterializedResult;
 import com.google.common.collect.ImmutableList;
 import io.airlift.units.DataSize;
@@ -44,6 +44,7 @@ import static com.facebook.presto.spi.function.OperatorType.EQUAL;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.sql.relational.Expressions.call;
 import static com.facebook.presto.sql.relational.Expressions.constant;
 import static com.facebook.presto.sql.relational.Expressions.field;
@@ -86,8 +87,10 @@ public class TestFilterAndProjectOperator
                 .addSequencePage(100, 0, 0)
                 .build();
 
+        MetadataManager metadata = createTestMetadataManager();
+        FunctionManager functionManager = metadata.getFunctionManager();
         RowExpression filter = call(
-                InternalSignatureUtils.internalOperator(BETWEEN, BOOLEAN.getTypeSignature(), ImmutableList.of(BIGINT.getTypeSignature(), BIGINT.getTypeSignature(), BIGINT.getTypeSignature())),
+                functionManager.resolveOperator(BETWEEN, fromTypes(BIGINT, BIGINT, BIGINT)),
                 BOOLEAN,
                 field(1, BIGINT),
                 constant(10L, BIGINT),
@@ -95,12 +98,11 @@ public class TestFilterAndProjectOperator
 
         RowExpression field0 = field(0, VARCHAR);
         RowExpression add5 = call(
-                InternalSignatureUtils.internalOperator(ADD, BIGINT.getTypeSignature(), ImmutableList.of(BIGINT.getTypeSignature(), BIGINT.getTypeSignature())),
+                functionManager.resolveOperator(ADD, fromTypes(BIGINT, BIGINT)),
                 BIGINT,
                 field(1, BIGINT),
                 constant(5L, BIGINT));
 
-        MetadataManager metadata = createTestMetadataManager();
         ExpressionCompiler compiler = new ExpressionCompiler(metadata, new PageFunctionCompiler(metadata, 0));
         Supplier<PageProcessor> processor = compiler.compilePageProcessor(Optional.of(filter), ImmutableList.of(field0, add5));
 
@@ -137,14 +139,14 @@ public class TestFilterAndProjectOperator
                 .addSequencePage(100, 0, 0)
                 .addSequencePage(100, 0, 0)
                 .build();
+        MetadataManager metadata = createTestMetadataManager();
 
         RowExpression filter = call(
-                InternalSignatureUtils.internalOperator(EQUAL, BOOLEAN.getTypeSignature(), ImmutableList.of(BIGINT.getTypeSignature(), BIGINT.getTypeSignature())),
+                metadata.getFunctionManager().resolveOperator(EQUAL, fromTypes(BIGINT, BIGINT)),
                 BOOLEAN,
                 field(1, BIGINT),
                 constant(10L, BIGINT));
 
-        MetadataManager metadata = createTestMetadataManager();
         ExpressionCompiler compiler = new ExpressionCompiler(metadata, new PageFunctionCompiler(metadata, 0));
         Supplier<PageProcessor> processor = compiler.compilePageProcessor(Optional.of(filter), ImmutableList.of(field(1, BIGINT)));
 

@@ -63,7 +63,9 @@ import com.facebook.presto.execution.resourceGroups.NoOpResourceGroupManager;
 import com.facebook.presto.execution.scheduler.LegacyNetworkTopology;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
+import com.facebook.presto.execution.warnings.DefaultWarningCollector;
 import com.facebook.presto.execution.warnings.WarningCollector;
+import com.facebook.presto.execution.warnings.WarningCollectorConfig;
 import com.facebook.presto.index.IndexManager;
 import com.facebook.presto.memory.MemoryManagerConfig;
 import com.facebook.presto.metadata.AnalyzePropertyManager;
@@ -91,6 +93,7 @@ import com.facebook.presto.operator.OutputFactory;
 import com.facebook.presto.operator.PagesIndex;
 import com.facebook.presto.operator.StageExecutionDescriptor;
 import com.facebook.presto.operator.TaskContext;
+import com.facebook.presto.operator.TaskExchangeClientManager;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.server.PluginManager;
 import com.facebook.presto.server.PluginManagerConfig;
@@ -506,6 +509,11 @@ public class LocalQueryRunner
         return accessControl;
     }
 
+    public BlockEncodingManager getBlockEncodingManager()
+    {
+        return blockEncodingManager;
+    }
+
     public ExecutorService getExecutor()
     {
         return notificationExecutor;
@@ -593,13 +601,13 @@ public class LocalQueryRunner
     @Override
     public MaterializedResult execute(Session session, @Language("SQL") String sql)
     {
-        return executeWithPlan(session, sql, WarningCollector.NOOP).getMaterializedResult();
+        return executeWithPlan(session, sql, new DefaultWarningCollector(new WarningCollectorConfig())).getMaterializedResult();
     }
 
     @Override
     public MaterializedResultWithPlan executeWithPlan(Session session, String sql, WarningCollector warningCollector)
     {
-        return inTransaction(session, transactionSession -> executeInternal(transactionSession, sql));
+        return inTransaction(session, transactionSession -> executeInternal(transactionSession, sql, warningCollector));
     }
 
     public <T> T inTransaction(Function<Session, T> transactionSessionConsumer)
@@ -614,7 +622,7 @@ public class LocalQueryRunner
                 .execute(session, transactionSessionConsumer);
     }
 
-    private MaterializedResultWithPlan executeInternal(Session session, @Language("SQL") String sql)
+    private MaterializedResultWithPlan executeInternal(Session session, @Language("SQL") String sql, WarningCollector warningCollector)
     {
         lock.readLock().lock();
         try (Closer closer = Closer.create()) {
@@ -629,7 +637,7 @@ public class LocalQueryRunner
                     .setQueryMaxSpillSize(nodeSpillConfig.getQueryMaxSpillPerNode())
                     .build();
 
-            Plan plan = createPlan(session, sql, WarningCollector.NOOP);
+            Plan plan = createPlan(session, sql, warningCollector);
             List<Driver> drivers = createDrivers(session, plan, outputFactory, taskContext);
             drivers.forEach(closer::register);
 
@@ -685,7 +693,19 @@ public class LocalQueryRunner
             System.out.println(PlanPrinter.textLogicalPlan(plan.getRoot(), plan.getTypes(), metadata.getFunctionManager(), plan.getStatsAndCosts(), session, 0, false));
         }
 
-        SubPlan subplan = planFragmenter.createSubPlans(session, plan, true, WarningCollector.NOOP);
+        SubPlan subplan = planFragmenter.createSubPlans(
+                session,
+                plan,
+                true,
+                new PlanNodeIdAllocator()
+                {
+                    @Override
+                    public PlanNodeId getNextId()
+                    {
+                        throw new UnsupportedOperationException();
+                    }
+                },
+                WarningCollector.NOOP);
         if (!subplan.getChildren().isEmpty()) {
             throw new AssertionError("Expected subplan to have no children");
         }
@@ -698,7 +718,6 @@ public class LocalQueryRunner
                 indexManager,
                 nodePartitioningManager,
                 pageSinkManager,
-                null,
                 expressionCompiler,
                 pageFunctionCompiler,
                 joinFilterFunctionCompiler,
@@ -722,7 +741,10 @@ public class LocalQueryRunner
                 subplan.getFragment().getPartitioningScheme().getOutputLayout(),
                 plan.getTypes(),
                 subplan.getFragment().getPartitionedSources(),
-                outputFactory);
+                outputFactory,
+                new TaskExchangeClientManager(ignored -> {
+                    throw new UnsupportedOperationException();
+                }));
 
         // generate sources
         List<TaskSource> sources = new ArrayList<>();
@@ -795,7 +817,7 @@ public class LocalQueryRunner
 
     public Plan createPlan(Session session, @Language("SQL") String sql, LogicalPlanner.Stage stage, boolean forceSingleNode, WarningCollector warningCollector)
     {
-        PreparedQuery preparedQuery = new QueryPreparer(sqlParser).prepareQuery(session, sql);
+        PreparedQuery preparedQuery = new QueryPreparer(sqlParser).prepareQuery(session, sql, warningCollector);
 
         assertFormattedSql(sqlParser, createParsingOptions(session), preparedQuery.getStatement());
 
@@ -829,8 +851,8 @@ public class LocalQueryRunner
 
     public Plan createPlan(Session session, @Language("SQL") String sql, List<PlanOptimizer> optimizers, LogicalPlanner.Stage stage, WarningCollector warningCollector)
     {
-        Statement wrappedStatement = sqlParser.createStatement(sql, createParsingOptions(session));
-        PreparedQuery preparedQuery = new QueryPreparer(sqlParser).prepareQuery(session, wrappedStatement);
+        Statement wrappedStatement = sqlParser.createStatement(sql, createParsingOptions(session, warningCollector));
+        PreparedQuery preparedQuery = new QueryPreparer(sqlParser).prepareQuery(session, wrappedStatement, warningCollector);
 
         assertFormattedSql(sqlParser, createParsingOptions(session), preparedQuery.getStatement());
 

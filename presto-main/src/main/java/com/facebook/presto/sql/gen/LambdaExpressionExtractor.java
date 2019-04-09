@@ -13,13 +13,14 @@
  */
 package com.facebook.presto.sql.gen;
 
-import com.facebook.presto.sql.relational.CallExpression;
-import com.facebook.presto.sql.relational.ConstantExpression;
-import com.facebook.presto.sql.relational.InputReferenceExpression;
-import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
-import com.facebook.presto.sql.relational.RowExpression;
-import com.facebook.presto.sql.relational.RowExpressionVisitor;
-import com.facebook.presto.sql.relational.VariableReferenceExpression;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.ConstantExpression;
+import com.facebook.presto.spi.relation.InputReferenceExpression;
+import com.facebook.presto.spi.relation.LambdaDefinitionExpression;
+import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.RowExpressionVisitor;
+import com.facebook.presto.spi.relation.SpecialFormExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.google.common.collect.ImmutableList;
 
 import java.util.List;
@@ -76,6 +77,15 @@ public class LambdaExpressionExtractor
         @Override
         public Void visitVariableReference(VariableReferenceExpression reference, Context context)
         {
+            return null;
+        }
+
+        @Override
+        public Void visitSpecialForm(SpecialFormExpression specialForm, Context context)
+        {
+            for (RowExpression rowExpression : specialForm.getArguments()) {
+                rowExpression.accept(this, context);
+            }
             return null;
         }
 

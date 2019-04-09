@@ -14,8 +14,18 @@
 package com.facebook.presto.sql.relational;
 
 import com.facebook.presto.metadata.FunctionManager;
-import com.facebook.presto.spi.function.Signature;
+import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.function.FunctionHandle;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.ConstantExpression;
+import com.facebook.presto.spi.relation.InputReferenceExpression;
+import com.facebook.presto.spi.relation.LambdaDefinitionExpression;
+import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.RowExpressionVisitor;
+import com.facebook.presto.spi.relation.SpecialFormExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 
+import static com.facebook.presto.spi.StandardErrorCode.FUNCTION_IMPLEMENTATION_MISSING;
 import static java.util.Objects.requireNonNull;
 
 public class DeterminismEvaluator
@@ -57,9 +67,16 @@ public class DeterminismEvaluator
         @Override
         public Boolean visitCall(CallExpression call, Void context)
         {
-            Signature signature = call.getSignature();
-            if (functionManager.isRegistered(signature) && !functionManager.getScalarFunctionImplementation(signature).isDeterministic()) {
-                return false;
+            FunctionHandle functionHandle = call.getFunctionHandle();
+            try {
+                if (!functionManager.getScalarFunctionImplementation(functionHandle).isDeterministic()) {
+                    return false;
+                }
+            }
+            catch (PrestoException e) {
+                if (e.getErrorCode().getCode() != FUNCTION_IMPLEMENTATION_MISSING.toErrorCode().getCode()) {
+                    throw e;
+                }
             }
 
             return call.getArguments().stream()
@@ -76,6 +93,13 @@ public class DeterminismEvaluator
         public Boolean visitVariableReference(VariableReferenceExpression reference, Void context)
         {
             return true;
+        }
+
+        @Override
+        public Boolean visitSpecialForm(SpecialFormExpression specialForm, Void context)
+        {
+            return specialForm.getArguments().stream()
+                    .allMatch(expression -> expression.accept(this, context));
         }
     }
 }

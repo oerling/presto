@@ -98,7 +98,7 @@ public class HivePageSourceProvider
                 configuration,
                 session,
                 path,
-                hiveSplit.getBucketNumber(),
+                hiveSplit.getTableBucketNumber(),
                 hiveSplit.getStart(),
                 hiveSplit.getLength(),
                 hiveSplit.getFileSize(),
@@ -123,7 +123,7 @@ public class HivePageSourceProvider
             Configuration configuration,
             ConnectorSession session,
             Path path,
-            OptionalInt bucketNumber,
+            OptionalInt tableBucketNumber,
             long start,
             long length,
             long fileSize,
@@ -149,7 +149,7 @@ public class HivePageSourceProvider
                 requiredInterimColumns.build(),
                 columnCoercions,
                 path,
-                bucketNumber);
+                tableBucketNumber);
         List<ColumnMapping> regularAndInterimColumnMappings = ColumnMapping.extractRegularAndInterimColumnMappings(columnMappings);
 
         Optional<BucketAdaptation> bucketAdaptation = bucketConversion.map(conversion -> {
@@ -160,7 +160,7 @@ public class HivePageSourceProvider
             List<HiveType> bucketColumnHiveTypes = conversion.getBucketColumnHandles().stream()
                     .map(columnHandle -> hiveIndexToBlockIndex.get(columnHandle.getHiveColumnIndex()).getHiveColumnHandle().getHiveType())
                     .collect(toImmutableList());
-            return new BucketAdaptation(bucketColumnIndices, bucketColumnHiveTypes, conversion.getTableBucketCount(), conversion.getPartitionBucketCount(), bucketNumber.getAsInt());
+            return new BucketAdaptation(bucketColumnIndices, bucketColumnHiveTypes, conversion.getTableBucketCount(), conversion.getPartitionBucketCount(), tableBucketNumber.getAsInt());
         });
 
         for (HivePageSourceFactory pageSourceFactory : pageSourceFactories) {

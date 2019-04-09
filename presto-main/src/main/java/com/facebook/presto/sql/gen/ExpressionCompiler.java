@@ -19,10 +19,10 @@ import com.facebook.presto.operator.project.PageFilter;
 import com.facebook.presto.operator.project.PageProcessor;
 import com.facebook.presto.operator.project.PageProjection;
 import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.sql.relational.CallExpression;
-import com.facebook.presto.sql.relational.InputReferenceExpression;
-import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
-import com.facebook.presto.sql.relational.RowExpression;
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.InputReferenceExpression;
+import com.facebook.presto.spi.relation.LambdaDefinitionExpression;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -246,7 +246,7 @@ public class ExpressionCompiler
 
     private void collectConjuncts(RowExpression expression, ImmutableList.Builder<RowExpression> conjuncts)
     {
-        if (expression instanceof CallExpression && ((CallExpression) expression).getSignature().getName().equals("AND")) {
+        if (expression instanceof CallExpression && ((CallExpression) expression).getFunctionHandle().getSignature().getName().equals("AND")) {
             for (RowExpression argument : ((CallExpression) expression).getArguments()) {
                 collectConjuncts(argument, conjuncts);
             }
@@ -301,7 +301,7 @@ public class ExpressionCompiler
         for (List<RowExpression> conjuncts : inputsToConjuncts.values()) {
             RowExpression firstConjunct = conjuncts.get(0);
             for (int i = 1; i < conjuncts.size(); i++) {
-                firstConjunct = new CallExpression(topAnd.getSignature(), topAnd.getType(), ImmutableList.of(firstConjunct, conjuncts.get(i)));
+                firstConjunct = new CallExpression(topAnd.getFunctionHandle(), topAnd.getType(), ImmutableList.of(firstConjunct, conjuncts.get(i)));
             }
             result.add(pageFunctionCompiler.compileFilter(firstConjunct, classNameSuffix));
         }

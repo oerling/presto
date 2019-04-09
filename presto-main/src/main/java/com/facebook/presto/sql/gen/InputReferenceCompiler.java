@@ -13,13 +13,14 @@
  */
 package com.facebook.presto.sql.gen;
 
+import com.facebook.presto.spi.relation.CallExpression;
+import com.facebook.presto.spi.relation.ConstantExpression;
+import com.facebook.presto.spi.relation.InputReferenceExpression;
+import com.facebook.presto.spi.relation.LambdaDefinitionExpression;
+import com.facebook.presto.spi.relation.RowExpressionVisitor;
+import com.facebook.presto.spi.relation.SpecialFormExpression;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.sql.relational.CallExpression;
-import com.facebook.presto.sql.relational.ConstantExpression;
-import com.facebook.presto.sql.relational.InputReferenceExpression;
-import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
-import com.facebook.presto.sql.relational.RowExpressionVisitor;
-import com.facebook.presto.sql.relational.VariableReferenceExpression;
 import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Primitives;
 import io.airlift.bytecode.BytecodeBlock;
@@ -93,6 +94,12 @@ class InputReferenceCompiler
 
     @Override
     public BytecodeNode visitVariableReference(VariableReferenceExpression reference, Scope context)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public BytecodeNode visitSpecialForm(SpecialFormExpression specialForm, Scope context)
     {
         throw new UnsupportedOperationException();
     }

@@ -24,7 +24,6 @@ import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.facebook.presto.sql.tree.Window;
-import com.facebook.presto.sql.tree.WindowFrame;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.testng.annotations.Test;
@@ -33,7 +32,6 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
@@ -44,14 +42,15 @@ import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.strict
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.values;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.window;
 import static com.facebook.presto.sql.planner.iterative.rule.test.PlanBuilder.expression;
-import static com.facebook.presto.sql.tree.FrameBound.Type.CURRENT_ROW;
-import static com.facebook.presto.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.CURRENT_ROW;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.BoundType.UNBOUNDED_PRECEDING;
+import static com.facebook.presto.sql.planner.plan.WindowNode.Frame.WindowType.RANGE;
 
 public class TestMergeAdjacentWindows
         extends BaseRuleTest
 {
     private static final WindowNode.Frame frame = new WindowNode.Frame(
-            WindowFrame.Type.RANGE,
+            RANGE,
             UNBOUNDED_PRECEDING,
             Optional.empty(),
             CURRENT_ROW,
@@ -59,7 +58,7 @@ public class TestMergeAdjacentWindows
             Optional.empty(),
             Optional.empty());
 
-    private static final FunctionHandle FUNCTION_HANDLE = createTestMetadataManager().getFunctionManager().resolveFunction(TEST_SESSION, QualifiedName.of("avg"), fromTypes(DOUBLE));
+    private static final FunctionHandle FUNCTION_HANDLE = createTestMetadataManager().getFunctionManager().lookupFunction(QualifiedName.of("avg"), fromTypes(DOUBLE));
     private static final String columnAAlias = "ALIAS_A";
     private static final ExpectedValueProvider<WindowNode.Specification> specificationA =
             specification(ImmutableList.of(columnAAlias), ImmutableList.of(), ImmutableMap.of());

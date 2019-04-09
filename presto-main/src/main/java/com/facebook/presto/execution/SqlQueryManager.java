@@ -22,6 +22,7 @@ import com.facebook.presto.execution.QueryPreparer.PreparedQuery;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.resourceGroups.ResourceGroupManager;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
+import com.facebook.presto.execution.warnings.WarningCollector;
 import com.facebook.presto.execution.warnings.WarningCollectorFactory;
 import com.facebook.presto.memory.ClusterMemoryManager;
 import com.facebook.presto.metadata.SessionPropertyManager;
@@ -32,6 +33,7 @@ import com.facebook.presto.server.SessionPropertyDefaults;
 import com.facebook.presto.server.SessionSupplier;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spi.resourceGroups.QueryType;
 import com.facebook.presto.spi.resourceGroups.SelectionContext;
 import com.facebook.presto.spi.resourceGroups.SelectionCriteria;
 import com.facebook.presto.sql.SqlEnvironmentConfig;
@@ -322,6 +324,7 @@ public class SqlQueryManager
         SelectionContext<C> selectionContext = null;
         QueryExecution queryExecution;
         PreparedQuery preparedQuery;
+        Optional<QueryType> queryType = Optional.empty();
         try {
             clusterSizeMonitor.verifyInitialMinimumWorkersRequirement();
 
@@ -334,21 +337,23 @@ public class SqlQueryManager
             // decode session
             session = sessionSupplier.createSession(queryId, sessionContext);
 
+            WarningCollector warningCollector = warningCollectorFactory.create();
+
             // prepare query
-            preparedQuery = queryPreparer.prepareQuery(session, query);
+            preparedQuery = queryPreparer.prepareQuery(session, query, warningCollector);
 
             // select resource group
-            Optional<String> queryType = getQueryType(preparedQuery.getStatement().getClass()).map(Enum::name);
+            queryType = getQueryType(preparedQuery.getStatement().getClass());
             selectionContext = resourceGroupManager.selectGroup(new SelectionCriteria(
                     sessionContext.getIdentity().getPrincipal().isPresent(),
                     sessionContext.getIdentity().getUser(),
                     Optional.ofNullable(sessionContext.getSource()),
                     sessionContext.getClientTags(),
                     sessionContext.getResourceEstimates(),
-                    queryType));
+                    queryType.map(Enum::name)));
 
             // apply system defaults for query
-            session = sessionPropertyDefaults.newSessionWithDefaultProperties(session, queryType, selectionContext.getResourceGroupId());
+            session = sessionPropertyDefaults.newSessionWithDefaultProperties(session, queryType.map(Enum::name), selectionContext.getResourceGroupId());
 
             // mark existing transaction as active
             transactionManager.activateTransaction(session, isTransactionControlStatement(preparedQuery.getStatement()), accessControl);
@@ -363,7 +368,8 @@ public class SqlQueryManager
                     session,
                     preparedQuery,
                     selectionContext.getResourceGroupId(),
-                    warningCollectorFactory.create());
+                    warningCollector,
+                    queryType);
         }
         catch (RuntimeException e) {
             // This is intentionally not a method, since after the state change listener is registered
@@ -387,6 +393,7 @@ public class SqlQueryManager
                     query,
                     locationFactory.createQueryLocation(queryId),
                     Optional.ofNullable(selectionContext).map(SelectionContext::getResourceGroupId),
+                    queryType,
                     queryExecutor,
                     e);
 

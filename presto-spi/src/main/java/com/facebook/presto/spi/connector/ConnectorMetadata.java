@@ -30,6 +30,7 @@ import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SchemaTablePrefix;
+import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.SystemTable;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.security.GrantInfo;
@@ -43,6 +44,7 @@ import com.facebook.presto.spi.type.Type;
 import io.airlift.slice.Slice;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -95,6 +97,17 @@ public interface ConnectorMetadata
     default Optional<SystemTable> getSystemTable(ConnectorSession session, SchemaTableName tableName)
     {
         return Optional.empty();
+    }
+
+    /**
+     * Experimental: returns new column handles for a subset of columns where pushdown was successful.
+     */
+    default Map<ColumnHandle, ColumnHandle> pushdownSubfieldPruning(
+            ConnectorSession session,
+            ConnectorTableHandle table,
+            Map<ColumnHandle, List<SubfieldPath>> desiredSubfields)
+    {
+        return Collections.emptyMap();
     }
 
     /**
@@ -238,6 +251,18 @@ public interface ConnectorMetadata
     default void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, boolean ignoreExisting)
     {
         throw new PrestoException(NOT_SUPPORTED, "This connector does not support creating tables");
+    }
+
+    /**
+     * Creates a temporary table with optional partitioning requirements.
+     * Temporary table might have different default storage format, compression scheme, replication factor, etc,
+     * and gets automatically dropped when the transaction ends.
+     *
+     * This SPI is unstable and subject to change in the future.
+     */
+    default ConnectorTableHandle createTemporaryTable(ConnectorSession session, List<ColumnMetadata> columns, Optional<ConnectorPartitioningMetadata> partitioningMetadata)
+    {
+        throw new PrestoException(NOT_SUPPORTED, "This connector does not support creating temporary tables");
     }
 
     /**

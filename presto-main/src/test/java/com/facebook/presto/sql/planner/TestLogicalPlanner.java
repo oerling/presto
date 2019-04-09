@@ -14,7 +14,14 @@
 package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.execution.warnings.WarningCollector;
+import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.operator.scalar.FunctionAssertions;
+import com.facebook.presto.spi.SubfieldPath;
+import com.facebook.presto.spi.type.ArrayType;
+import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.analyzer.FeaturesConfig.JoinDistributionType;
+import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.assertions.BasePlanTest;
 import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
 import com.facebook.presto.sql.planner.optimizations.AddLocalExchanges;
@@ -34,14 +41,19 @@ import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
 import com.facebook.presto.sql.planner.plan.ValuesNode;
+import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.LongLiteral;
+import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.tests.QueryTemplate;
+import com.facebook.presto.tpch.TpchColumnHandle;
+import com.facebook.presto.tpch.TpchTableHandle;
 import com.facebook.presto.util.MorePredicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.testng.annotations.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -50,10 +62,13 @@ import static com.facebook.presto.SystemSessionProperties.DISTRIBUTED_SORT;
 import static com.facebook.presto.SystemSessionProperties.FORCE_SINGLE_NODE_OUTPUT;
 import static com.facebook.presto.SystemSessionProperties.JOIN_DISTRIBUTION_TYPE;
 import static com.facebook.presto.SystemSessionProperties.OPTIMIZE_HASH_GENERATION;
+import static com.facebook.presto.SystemSessionProperties.PUSHDOWN_SUBFIELDS;
 import static com.facebook.presto.spi.StandardErrorCode.SUBQUERY_MULTIPLE_ROWS;
 import static com.facebook.presto.spi.block.SortOrder.ASC_NULLS_LAST;
 import static com.facebook.presto.spi.predicate.Domain.singleValue;
 import static com.facebook.presto.spi.type.VarcharType.createVarcharType;
+import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypes;
+import static com.facebook.presto.sql.planner.ExpressionInterpreter.expressionOptimizer;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.aggregation;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.any;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.anyNot;
@@ -77,6 +92,7 @@ import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.semiJo
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.singleGroupingSet;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.sort;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.specification;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.strictProject;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.strictTableScan;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.topNRowNumber;
@@ -87,7 +103,7 @@ import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.FINAL;
 import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.PARTIAL;
 import static com.facebook.presto.sql.planner.plan.AggregationNode.Step.SINGLE;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.LOCAL;
-import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE_STREAMING;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.GATHER;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.REPARTITION;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Type.REPLICATE;
@@ -99,8 +115,10 @@ import static com.facebook.presto.sql.tree.SortItem.NullOrdering.LAST;
 import static com.facebook.presto.sql.tree.SortItem.Ordering.DESCENDING;
 import static com.facebook.presto.tests.QueryTemplate.queryTemplate;
 import static com.facebook.presto.util.MorePredicates.isInstanceOfAny;
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static io.airlift.slice.Slices.utf8Slice;
 import static java.lang.String.format;
+import static java.util.Collections.emptyList;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 
@@ -116,10 +134,10 @@ public class TestLogicalPlanner
                 anyTree(
                         node(StatisticsWriterNode.class,
                                 anyTree(
-                                        exchange(REMOTE, GATHER,
+                                        exchange(REMOTE_STREAMING, GATHER,
                                                 node(AggregationNode.class,
                                                         anyTree(
-                                                                exchange(REMOTE, GATHER,
+                                                                exchange(REMOTE_STREAMING, GATHER,
                                                                         node(AggregationNode.class,
                                                                                 tableScan("orders", ImmutableMap.of()))))))))));
     }
@@ -134,7 +152,7 @@ public class TestLogicalPlanner
                                 ImmutableMap.of("final_sum", functionCall("sum", ImmutableList.of("partial_sum"))),
                                 FINAL,
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 aggregation(
                                                         ImmutableMap.of("partial_sum", functionCall("sum", ImmutableList.of("totalprice"))),
                                                         PARTIAL,
@@ -147,7 +165,7 @@ public class TestLogicalPlanner
                                 ImmutableMap.of("final_sum", functionCall("sum", ImmutableList.of("partial_sum"))),
                                 FINAL,
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 aggregation(
                                                         ImmutableMap.of("partial_sum", functionCall("sum", ImmutableList.of("totalprice"))),
                                                         PARTIAL,
@@ -187,7 +205,7 @@ public class TestLogicalPlanner
                                         .specification(specification(ImmutableList.of("orderstatus"), ImmutableList.of(), ImmutableMap.of()))
                                         .addFunction(functionCall("rank", Optional.empty(), ImmutableList.of())),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 project(tableScan("orders", ImmutableMap.of("orderstatus", "orderstatus"))))))));
 
         assertDistributedPlan("SELECT row_number() OVER (PARTITION BY orderstatus) FROM orders",
@@ -195,7 +213,7 @@ public class TestLogicalPlanner
                         rowNumber(rowNumberMatcherBuilder -> rowNumberMatcherBuilder
                                         .partitionBy(ImmutableList.of("orderstatus")),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 project(tableScan("orders", ImmutableMap.of("orderstatus", "orderstatus"))))))));
 
         assertDistributedPlan("SELECT orderstatus FROM (SELECT orderstatus, row_number() OVER (PARTITION BY orderstatus ORDER BY custkey) n FROM orders) WHERE n = 1",
@@ -207,7 +225,7 @@ public class TestLogicalPlanner
                                                 ImmutableMap.of("custkey", ASC_NULLS_LAST))
                                         .partial(false),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 topNRowNumber(topNRowNumber -> topNRowNumber
                                                                 .specification(
                                                                         ImmutableList.of("orderstatus"),
@@ -229,10 +247,10 @@ public class TestLogicalPlanner
                                 exchange(LOCAL, GATHER,
                                         project(
                                                 join(INNER, ImmutableList.of(equiJoinClause("orderstatus", "linestatus")), Optional.empty(), Optional.of(PARTITIONED),
-                                                        exchange(REMOTE, REPARTITION,
+                                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                                 anyTree(tableScan("orders", ImmutableMap.of("orderstatus", "orderstatus", "orderkey", "orderkey")))),
                                                         exchange(LOCAL, GATHER,
-                                                                exchange(REMOTE, REPARTITION,
+                                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                                         anyTree(tableScan("lineitem", ImmutableMap.of("linestatus", "linestatus")))))))))));
 
         // Window partition key is not a super set of join key.
@@ -242,12 +260,12 @@ public class TestLogicalPlanner
                                         .specification(specification(ImmutableList.of("orderkey"), ImmutableList.of(), ImmutableMap.of()))
                                         .addFunction(functionCall("rank", Optional.empty(), ImmutableList.of())),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 anyTree(join(INNER, ImmutableList.of(equiJoinClause("orderstatus", "linestatus")), Optional.empty(), Optional.of(PARTITIONED),
-                                                        exchange(REMOTE, REPARTITION,
+                                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                                 anyTree(tableScan("orders", ImmutableMap.of("orderstatus", "orderstatus", "orderkey", "orderkey")))),
                                                         exchange(LOCAL, GATHER,
-                                                                exchange(REMOTE, REPARTITION,
+                                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                                         anyTree(tableScan("lineitem", ImmutableMap.of("linestatus", "linestatus"))))))))))));
 
         // Test broadcast join
@@ -262,12 +280,12 @@ public class TestLogicalPlanner
                                         .specification(specification(ImmutableList.of("custkey"), ImmutableList.of(), ImmutableMap.of()))
                                         .addFunction(functionCall("rank", Optional.empty(), ImmutableList.of())),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 project(
                                                         join(INNER, ImmutableList.of(equiJoinClause("orderstatus", "linestatus")), Optional.empty(), Optional.of(REPLICATED),
                                                                 anyTree(tableScan("orders", ImmutableMap.of("orderstatus", "orderstatus", "custkey", "custkey"))),
                                                                 exchange(LOCAL, GATHER,
-                                                                        exchange(REMOTE, REPLICATE,
+                                                                        exchange(REMOTE_STREAMING, REPLICATE,
                                                                                 anyTree(tableScan("lineitem", ImmutableMap.of("linestatus", "linestatus"))))))))))));
     }
 
@@ -282,7 +300,7 @@ public class TestLogicalPlanner
                                         .addFunction(functionCall("rank", Optional.empty(), ImmutableList.of())),
                                 project(aggregation(singleGroupingSet("custkey"), ImmutableMap.of(), ImmutableMap.of(), Optional.empty(), FINAL,
                                         exchange(LOCAL, GATHER,
-                                                project(exchange(REMOTE, REPARTITION,
+                                                project(exchange(REMOTE_STREAMING, REPARTITION,
                                                         anyTree(tableScan("orders", ImmutableMap.of("custkey", "custkey")))))))))));
 
         // Window partition key is not a super set of group by key.
@@ -292,10 +310,10 @@ public class TestLogicalPlanner
                                         .specification(specification(ImmutableList.of("custkey"), ImmutableList.of(), ImmutableMap.of()))
                                         .addFunction(functionCall("rank", Optional.empty(), ImmutableList.of())),
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 project(aggregation(singleGroupingSet("shippriority", "custkey"), ImmutableMap.of(), ImmutableMap.of(), Optional.empty(), FINAL,
                                                         exchange(LOCAL, GATHER,
-                                                                exchange(REMOTE, REPARTITION,
+                                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                                         anyTree(tableScan("orders", ImmutableMap.of("custkey", "custkey", "shippriority", "shippriority"))))))))))));
     }
 
@@ -592,7 +610,7 @@ public class TestLogicalPlanner
                                 markDistinct("is_distinct", ImmutableList.of("unique"),
                                         join(LEFT, ImmutableList.of(equiJoinClause("n_regionkey", "r_regionkey")),
                                                 assignUniqueId("unique",
-                                                        exchange(REMOTE, REPARTITION,
+                                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                                 anyTree(tableScan("nation", ImmutableMap.of("n_regionkey", "regionkey"))))),
                                                 anyTree(
                                                         tableScan("region", ImmutableMap.of("r_regionkey", "regionkey"))))))));
@@ -614,7 +632,7 @@ public class TestLogicalPlanner
                                 SINGLE,
                                 node(JoinNode.class,
                                         assignUniqueId("unique",
-                                                exchange(REMOTE, REPARTITION,
+                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                         anyTree(
                                                                 tableScan("nation", ImmutableMap.of("n_name", "name", "n_regionkey", "regionkey"))))),
                                         anyTree(
@@ -830,7 +848,7 @@ public class TestLogicalPlanner
                                 anyTree(
                                         node(TableScanNode.class)),
                                 anyTree(
-                                        exchange(REMOTE, ExchangeNode.Type.REPLICATE,
+                                        exchange(REMOTE_STREAMING, ExchangeNode.Type.REPLICATE,
                                                 anyTree(
                                                         node(TableScanNode.class))))));
 
@@ -838,7 +856,7 @@ public class TestLogicalPlanner
         Consumer<Plan> validateSingleRemoteExchange = plan -> assertEquals(
                 countOfMatchingNodes(
                         plan,
-                        node -> node instanceof ExchangeNode && ((ExchangeNode) node).getScope() == REMOTE),
+                        node -> node instanceof ExchangeNode && ((ExchangeNode) node).getScope().isRemote()),
                 1);
 
         Consumer<Plan> validateSingleStreamingAggregation = plan -> assertEquals(
@@ -887,17 +905,17 @@ public class TestLogicalPlanner
                                 // the only remote exchange in probe side should be below aggregation
                                 aggregation(ImmutableMap.of(),
                                         anyTree(
-                                                exchange(REMOTE, REPARTITION,
+                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                         anyTree(
                                                                 tableScan("region", ImmutableMap.of("LEFT_REGIONKEY", "regionkey")))))),
                                 anyTree(
-                                        exchange(REMOTE, REPARTITION,
+                                        exchange(REMOTE_STREAMING, REPARTITION,
                                                 tableScan("region", ImmutableMap.of("RIGHT_REGIONKEY", "regionkey")))))),
                 plan -> // make sure there are only two remote exchanges (one in probe and one in build side)
                         assertEquals(
                                 countOfMatchingNodes(
                                         plan,
-                                        node -> node instanceof ExchangeNode && ((ExchangeNode) node).getScope() == REMOTE),
+                                        node -> node instanceof ExchangeNode && ((ExchangeNode) node).getScope().isRemote()),
                                 2));
 
         // replicated join is preserved if probe side is single node
@@ -910,7 +928,7 @@ public class TestLogicalPlanner
                                 anyTree(
                                         node(ValuesNode.class)),
                                 anyTree(
-                                        exchange(REMOTE, GATHER,
+                                        exchange(REMOTE_STREAMING, GATHER,
                                                 node(TableScanNode.class))))));
 
         // replicated join is preserved if there are no equality criteria
@@ -923,7 +941,7 @@ public class TestLogicalPlanner
                                 anyTree(
                                         node(TableScanNode.class)),
                                 anyTree(
-                                        exchange(REMOTE, REPLICATE,
+                                        exchange(REMOTE_STREAMING, REPLICATE,
                                                 node(TableScanNode.class))))));
     }
 
@@ -934,10 +952,10 @@ public class TestLogicalPlanner
         assertDistributedPlan(
                 "SELECT orderkey FROM orders ORDER BY orderkey DESC",
                 output(
-                        exchange(REMOTE, GATHER, orderBy,
+                        exchange(REMOTE_STREAMING, GATHER, orderBy,
                                 exchange(LOCAL, GATHER, orderBy,
                                         sort(orderBy,
-                                                exchange(REMOTE, REPARTITION,
+                                                exchange(REMOTE_STREAMING, REPARTITION,
                                                         tableScan("orders", ImmutableMap.of(
                                                                 "ORDERKEY", "orderkey"))))))));
 
@@ -949,8 +967,189 @@ public class TestLogicalPlanner
                 output(
                         sort(orderBy,
                                 exchange(LOCAL, GATHER,
-                                        exchange(REMOTE, GATHER,
+                                        exchange(REMOTE_STREAMING, GATHER,
                                                 tableScan("orders", ImmutableMap.of(
                                                         "ORDERKEY", "orderkey")))))));
+    }
+
+    @Test
+    public void testPushdownSubfields()
+    {
+        Session pushdownSubfields = Session.builder(this.getQueryRunner().getDefaultSession())
+                .setSystemProperty(PUSHDOWN_SUBFIELDS, "true")
+                .setCatalogSessionProperty("local", PUSHDOWN_SUBFIELDS, "false")
+                .build();
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM lineitem_ext",
+                pushdownSubfields, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_filtered", expression(format("filter_by_subscript_paths(ints, %s)[bigint '2']", optimizeExpression("array['ints[2]']", new ArrayType(createVarcharType(7)))))),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] + 10 FROM lineitem_ext",
+                pushdownSubfields, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_filtered", expression(format("filter_by_subscript_paths(ints, %s)[bigint '2'] + bigint '10'", optimizeExpression("array['ints[2]']", new ArrayType(createVarcharType(7)))))),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))));
+
+        assertPlanWithSession(
+                "SELECT power(ints[2], 2) FROM lineitem_ext",
+                pushdownSubfields, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_filtered", expression(format("power(cast(filter_by_subscript_paths(ints, %s)[bigint '2'] as double), 2e0)", optimizeExpression("array['ints[2]']", new ArrayType(createVarcharType(7)))))),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM lineitem_ext WHERE ints[4] > 0",
+                pushdownSubfields, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_filtered", expression(format("filter_by_subscript_paths(ints, %s)[bigint '2']", optimizeExpression("array['ints[2]', 'ints[4]']", new ArrayType(createVarcharType(7)))))),
+                                filter(format("filter_by_subscript_paths(ints, %s)[bigint '4'] > bigint '0'", optimizeExpression("array['ints[2]', 'ints[4]']", new ArrayType(createVarcharType(7)))),
+                                        tableScan("lineitem_ext", ImmutableMap.of("ints", "ints"))))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM orders o, lineitem_ext l " +
+                        "WHERE o.orderkey = l.orderkey",
+                pushdownSubfields, true,
+                anyTree(
+                        join(INNER, ImmutableList.of(equiJoinClause("o_orderkey", "l_orderkey")),
+                                anyTree(
+                                        tableScan("orders", ImmutableMap.of("o_orderkey", "orderkey"))),
+                                anyTree(
+                                        project(
+                                                ImmutableMap.of("ints_filtered", expression(format("filter_by_subscript_paths(ints, %s)", optimizeExpression("array['ints[2]']", new ArrayType(createVarcharType(7)))))),
+                                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints", "l_orderkey", "orderkey")))))));
+
+        assertPlanWithSession(
+                "SELECT shipinfo.shipdate FROM orders o, lineitem_ext l " +
+                        "WHERE o.orderkey = l.orderkey",
+                pushdownSubfields, true,
+                anyTree(
+                        join(INNER, ImmutableList.of(equiJoinClause("o_orderkey", "l_orderkey")),
+                                anyTree(
+                                        tableScan("orders", ImmutableMap.of("o_orderkey", "orderkey"))),
+                                anyTree(
+                                        project(
+                                                ImmutableMap.of("shipdate_filtered", expression(format("filter_by_subscript_paths(shipinfo, %s)", optimizeExpression("array['shipinfo.shipdate']", new ArrayType(createVarcharType(17)))))),
+                                                tableScan("lineitem_ext", ImmutableMap.of("shipinfo", "shipinfo", "l_orderkey", "orderkey")))))));
+
+        assertPlanWithSession(
+                "SELECT t.ints[2] FROM lineitem_ext CROSS JOIN UNNEST (nested_ints) AS t(ints)",
+                pushdownSubfields, true,
+                anyTree(
+                        project(
+                                ImmutableMap.of("nested_ints_filtered", expression(format("filter_by_subscript_paths(nested_ints, %s)", optimizeExpression("array['nested_ints[*][2]']", new ArrayType(createVarcharType(17)))))),
+                                tableScan("lineitem_ext", ImmutableMap.of("nested_ints", "nested_ints")))));
+
+        // No pushdown
+        assertPlanWithSession(
+                "SELECT cardinality(ints), ints[2] FROM lineitem_ext",
+                pushdownSubfields, false,
+                anyTree(
+                        strictProject(
+                                ImmutableMap.of("int_2", expression("ints[bigint '2']"), "cardinality", expression("cardinality(ints)")),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))));
+    }
+
+    @Test
+    public void testPushdownSubfieldsIntoConnector()
+    {
+        Session pushdownSubfieldsIntoConnector = Session.builder(this.getQueryRunner().getDefaultSession())
+                .setSystemProperty(PUSHDOWN_SUBFIELDS, "true")
+                .setCatalogSessionProperty("local", PUSHDOWN_SUBFIELDS, "true")
+                .build();
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM lineitem_ext",
+                pushdownSubfieldsIntoConnector, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_2", expression("ints[bigint '2']")),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("ints", ImmutableList.of(new SubfieldPath("ints[2]")))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] + 10 FROM lineitem_ext",
+                pushdownSubfieldsIntoConnector, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_2", expression("ints[bigint '2'] + bigint '10'")),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("ints", ImmutableList.of(new SubfieldPath("ints[2]")))));
+
+        assertPlanWithSession(
+                "SELECT power(ints[2], 2) FROM lineitem_ext",
+                pushdownSubfieldsIntoConnector, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("power", expression("power(cast(ints[bigint '2'] as double), 2e0)")),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints")))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("ints", ImmutableList.of(new SubfieldPath("ints[2]")))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM lineitem_ext WHERE ints[4] > 0",
+                pushdownSubfieldsIntoConnector, false,
+                anyTree(
+                        project(
+                                ImmutableMap.of("ints_2", expression("ints[bigint '2']")),
+                                filter(
+                                        "ints[bigint '4'] > bigint '0'",
+                                        tableScan("lineitem_ext", ImmutableMap.of("ints", "ints"))))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("ints", ImmutableList.of(new SubfieldPath("ints[2]"), new SubfieldPath("ints[4]")))));
+
+        assertPlanWithSession(
+                "SELECT ints[2] FROM orders o, lineitem_ext l " +
+                        "WHERE o.orderkey = l.orderkey",
+                pushdownSubfieldsIntoConnector, true,
+                anyTree(
+                        join(INNER, ImmutableList.of(equiJoinClause("o_orderkey", "l_orderkey")),
+                                anyTree(
+                                        tableScan("orders", ImmutableMap.of("o_orderkey", "orderkey"))),
+                                anyTree(
+                                        project(
+                                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints", "l_orderkey", "orderkey")))))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("ints", ImmutableList.of(new SubfieldPath("ints[2]")))));
+
+        assertPlanWithSession(
+                "SELECT t.ints[2] FROM lineitem_ext CROSS JOIN UNNEST (nested_ints) AS t(ints)",
+                pushdownSubfieldsIntoConnector, true,
+                anyTree(
+                        tableScan("lineitem_ext", ImmutableMap.of("nested_ints", "nested_ints"))),
+                plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("nested_ints", ImmutableList.of(new SubfieldPath("nested_ints[*][2]")))));
+    }
+
+    private void assertSubfieldPaths(Plan plan, String tableName, Map<String, List<SubfieldPath>> expectedSubfieldPathsPerColumn)
+    {
+        TableScanNode tableScan = searchFrom(plan.getRoot())
+                .where(node -> node instanceof TableScanNode && ((TpchTableHandle) ((TableScanNode) node).getTable().getConnectorHandle()).getTableName().equals(tableName))
+                .findOnlyElement();
+
+        Map<String, List<SubfieldPath>> actual = tableScan.getAssignments().values().stream()
+                .map(TpchColumnHandle.class::cast)
+                .filter(column -> expectedSubfieldPathsPerColumn.containsKey(column.getColumnName()))
+                .collect(toImmutableMap(TpchColumnHandle::getColumnName, TpchColumnHandle::getSubfieldPaths));
+        assertEquals(actual, expectedSubfieldPathsPerColumn);
+    }
+
+    private Expression optimizeExpression(String sql, Type expectedType)
+    {
+        Metadata metadata = getQueryRunner().getMetadata();
+        SqlParser sqlParser = getQueryRunner().getSqlParser();
+        Session session = getQueryRunner().getDefaultSession();
+
+        Expression parsedExpression = FunctionAssertions.createExpression(sql, metadata, TypeProvider.empty());
+        Map<NodeRef<Expression>, Type> expressionTypes = getExpressionTypes(session, metadata, sqlParser, TypeProvider.empty(), parsedExpression, emptyList(), WarningCollector.NOOP);
+        ExpressionInterpreter interpreter = expressionOptimizer(parsedExpression, metadata, session, expressionTypes);
+
+        Object expression = interpreter.evaluateConstantExpression(parsedExpression, expectedType, metadata, session, ImmutableList.of());
+
+        LiteralEncoder literalEncoder = new LiteralEncoder(getQueryRunner().getBlockEncodingManager());
+        return literalEncoder.toExpression(expression, expectedType);
     }
 }

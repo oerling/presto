@@ -32,8 +32,7 @@ import com.facebook.presto.spi.predicate.Marker;
 import com.facebook.presto.spi.predicate.NullableValue;
 import com.facebook.presto.spi.predicate.Range;
 import com.facebook.presto.spi.predicate.TupleDomain;
-import com.facebook.presto.spi.statistics.ColumnStatisticMetadata;
-import com.facebook.presto.spi.statistics.TableStatisticType;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.InterpretedFunctionInvoker;
 import com.facebook.presto.sql.planner.OrderingScheme;
@@ -53,7 +52,6 @@ import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExceptNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
-import com.facebook.presto.sql.planner.plan.ExchangeNode.Scope;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
@@ -78,7 +76,6 @@ import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.SpatialJoinNode;
 import com.facebook.presto.sql.planner.plan.StatisticAggregations;
-import com.facebook.presto.sql.planner.plan.StatisticAggregationsDescriptor;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
 import com.facebook.presto.sql.planner.plan.TableFinishNode;
 import com.facebook.presto.sql.planner.plan.TableScanNode;
@@ -116,7 +113,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.facebook.presto.execution.StageInfo.getAllStages;
-import static com.facebook.presto.spi.function.OperatorType.CAST;
+import static com.facebook.presto.metadata.CastType.CAST;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
 import static com.facebook.presto.sql.planner.planPrinter.PlanNodeStatsSummarizer.aggregateStageStats;
@@ -126,20 +123,19 @@ import static com.facebook.presto.sql.planner.planPrinter.TextRenderer.indentStr
 import static com.google.common.base.CaseFormat.UPPER_UNDERSCORE;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.lang.String.format;
 import static java.util.Arrays.stream;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
 
 public class PlanPrinter
 {
     private final PlanRepresentation representation;
     private final FunctionManager functionManager;
+    private final RowExpressionFormatter formatter;
 
     private PlanPrinter(
             PlanNode planRoot,
@@ -167,6 +163,7 @@ public class PlanPrinter
                 .sum(), MILLISECONDS));
 
         this.representation = new PlanRepresentation(planRoot, types, totalCpuTime, totalScheduledTime);
+        this.formatter = new RowExpressionFormatter(session.toConnectorSession());
 
         Visitor visitor = new Visitor(stageExecutionStrategy, types, estimatedStatsAndCosts, session, stats);
         planRoot.accept(visitor, null);
@@ -286,7 +283,7 @@ public class PlanPrinter
                         String printableValue = castToVarchar(constant.getType(), constant.getValue(), functionManager, session);
                         return constant.getType().getDisplayName() + "(" + printableValue + ")";
                     }
-                    return argument.getSymbol().toString();
+                    return argument.getColumn().toString();
                 })
                 .collect(toImmutableList());
         builder.append(indentString(1));
@@ -647,8 +644,8 @@ public class PlanPrinter
         public Void visitValues(ValuesNode node, Void context)
         {
             NodeRepresentation nodeOutput = addNode(node, "Values");
-            for (List<Expression> row : node.getRows()) {
-                nodeOutput.appendDetailsLine("(" + Joiner.on(", ").join(row) + ")");
+            for (List<RowExpression> row : node.getRows()) {
+                nodeOutput.appendDetailsLine("(" + Joiner.on(", ").join(formatter.formatRowExpressions(row)) + ")");
             }
             return null;
         }
@@ -894,10 +891,11 @@ public class PlanPrinter
                 nodeOutput.appendDetailsLine("%s := %s", name, symbol);
             }
 
-            if (node.getStatisticsAggregation().isPresent()) {
-                verify(node.getStatisticsAggregationDescriptor().isPresent(), "statisticsAggregationDescriptor is not present");
-                printStatisticAggregations(nodeOutput, node.getStatisticsAggregation().get(), node.getStatisticsAggregationDescriptor().get());
-            }
+            int statisticsCollected = node.getStatisticsAggregation()
+                    .map(StatisticAggregations::getAggregations)
+                    .map(Map::size)
+                    .orElse(0);
+            nodeOutput.appendDetailsLine("Statistics collected: %s", statisticsCollected);
 
             return processChildren(node, context);
         }
@@ -912,52 +910,8 @@ public class PlanPrinter
         @Override
         public Void visitTableFinish(TableFinishNode node, Void context)
         {
-            NodeRepresentation nodeOutput = addNode(node, "TableCommit", format("[%s]", node.getTarget()));
-
-            if (node.getStatisticsAggregation().isPresent()) {
-                verify(node.getStatisticsAggregationDescriptor().isPresent(), "statisticsAggregationDescriptor is not present");
-                printStatisticAggregations(nodeOutput, node.getStatisticsAggregation().get(), node.getStatisticsAggregationDescriptor().get());
-            }
-
+            addNode(node, "TableCommit", format("[%s]", node.getTarget()));
             return processChildren(node, context);
-        }
-
-        private void printStatisticAggregations(NodeRepresentation nodeOutput, StatisticAggregations aggregations, StatisticAggregationsDescriptor<Symbol> descriptor)
-        {
-            nodeOutput.appendDetailsLine("Collected statistics:");
-            printStatisticAggregationsInfo(nodeOutput, descriptor.getTableStatistics(), descriptor.getColumnStatistics(), aggregations.getAggregations());
-            nodeOutput.appendDetailsLine(indentString(1) + "grouped by => [%s]", getStatisticGroupingSetsInfo(descriptor.getGrouping()));
-        }
-
-        private String getStatisticGroupingSetsInfo(Map<String, Symbol> columnMappings)
-        {
-            return columnMappings.entrySet().stream()
-                    .map(entry -> format("%s := %s", entry.getValue(), entry.getKey()))
-                    .collect(joining(", "));
-        }
-
-        private void printStatisticAggregationsInfo(
-                NodeRepresentation nodeOutput,
-                Map<TableStatisticType, Symbol> tableStatistics,
-                Map<ColumnStatisticMetadata, Symbol> columnStatistics,
-                Map<Symbol, AggregationNode.Aggregation> aggregations)
-        {
-            nodeOutput.appendDetailsLine("aggregations =>");
-            for (Map.Entry<TableStatisticType, Symbol> tableStatistic : tableStatistics.entrySet()) {
-                nodeOutput.appendDetailsLine(indentString(1) + "%s => [%s := %s]",
-                        tableStatistic.getValue(),
-                        tableStatistic.getKey(),
-                        aggregations.get(tableStatistic.getValue()).getCall());
-            }
-
-            for (Map.Entry<ColumnStatisticMetadata, Symbol> columnStatistic : columnStatistics.entrySet()) {
-                nodeOutput.appendDetailsLine(
-                        indentString(1) + "%s[%s] => [%s := %s]",
-                        columnStatistic.getKey().getStatisticType(),
-                        columnStatistic.getKey().getColumnName(),
-                        columnStatistic.getValue(),
-                        aggregations.get(columnStatistic.getValue()).getCall());
-            }
         }
 
         @Override
@@ -982,7 +936,7 @@ public class PlanPrinter
                         format("%sMerge", UPPER_UNDERSCORE.to(CaseFormat.UPPER_CAMEL, node.getScope().toString())),
                         format("[%s]", Joiner.on(", ").join(orderBy)));
             }
-            else if (node.getScope() == Scope.LOCAL) {
+            else if (node.getScope().isLocal()) {
                 addNode(node,
                         "LocalExchange",
                         format("[%s%s]%s (%s)",

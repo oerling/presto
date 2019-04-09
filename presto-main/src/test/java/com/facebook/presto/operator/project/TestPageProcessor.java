@@ -15,6 +15,7 @@ package com.facebook.presto.operator.project;
 
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.memory.context.LocalMemoryContext;
+import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.operator.CompletedWork;
 import com.facebook.presto.operator.DriverYieldSignal;
 import com.facebook.presto.operator.Work;
@@ -23,10 +24,10 @@ import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.LazyBlock;
 import com.facebook.presto.spi.block.VariableWidthBlock;
+import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.gen.ExpressionProfiler;
 import com.facebook.presto.sql.gen.PageFunctionCompiler;
-import com.facebook.presto.sql.relational.CallExpression;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
@@ -49,7 +50,6 @@ import static com.facebook.presto.block.BlockAssertions.createSlicesBlock;
 import static com.facebook.presto.block.BlockAssertions.createStringsBlock;
 import static com.facebook.presto.execution.executor.PrioritizedSplitRunner.SPLIT_RUN_QUANTA;
 import static com.facebook.presto.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
-import static com.facebook.presto.metadata.InternalSignatureUtils.internalOperator;
 import static com.facebook.presto.metadata.MetadataManager.createTestMetadataManager;
 import static com.facebook.presto.operator.PageAssertions.assertPageEquals;
 import static com.facebook.presto.operator.project.PageProcessor.MAX_BATCH_SIZE;
@@ -59,6 +59,7 @@ import static com.facebook.presto.operator.project.SelectedPositions.positionsRa
 import static com.facebook.presto.spi.function.OperatorType.ADD;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.sql.relational.Expressions.call;
 import static com.facebook.presto.sql.relational.Expressions.constant;
 import static com.facebook.presto.sql.relational.Expressions.field;
@@ -383,14 +384,15 @@ public class TestPageProcessor
     @Test
     public void testExpressionProfiler()
     {
+        MetadataManager metadata = createTestMetadataManager();
         CallExpression add10Expression = call(
-                internalOperator(ADD, BIGINT.getTypeSignature(), ImmutableList.of(BIGINT.getTypeSignature(), BIGINT.getTypeSignature())),
+                metadata.getFunctionManager().resolveOperator(ADD, fromTypes(BIGINT, BIGINT)),
                 BIGINT,
                 field(0, BIGINT),
                 constant(10L, BIGINT));
 
         TestingTicker testingTicker = new TestingTicker();
-        PageFunctionCompiler functionCompiler = new PageFunctionCompiler(createTestMetadataManager(), 0);
+        PageFunctionCompiler functionCompiler = new PageFunctionCompiler(metadata, 0);
         Supplier<PageProjection> projectionSupplier = functionCompiler.compileProjection(add10Expression, Optional.empty());
         PageProjection projection = projectionSupplier.get();
         Page page = new Page(createLongSequenceBlock(1, 11));

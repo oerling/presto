@@ -13,12 +13,12 @@
  */
 package com.facebook.presto.sql.gen;
 
+import com.facebook.presto.metadata.CastType;
 import com.facebook.presto.operator.scalar.ScalarFunctionImplementation;
 import com.facebook.presto.spi.function.FunctionHandle;
-import com.facebook.presto.spi.function.Signature;
+import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeSignature;
-import com.facebook.presto.sql.relational.RowExpression;
 import com.google.common.collect.ImmutableList;
 import io.airlift.bytecode.BytecodeBlock;
 import io.airlift.bytecode.BytecodeNode;
@@ -32,15 +32,16 @@ import java.util.Optional;
 
 import static com.facebook.presto.spi.function.OperatorType.CAST;
 import static com.facebook.presto.spi.function.OperatorType.EQUAL;
-import static com.facebook.presto.sql.gen.BytecodeGenerator.generateWrite;
+import static com.facebook.presto.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static com.facebook.presto.sql.gen.BytecodeUtils.ifWasNullPopAndGoto;
+import static com.facebook.presto.sql.gen.SpecialFormBytecodeGenerator.generateWrite;
 import static io.airlift.bytecode.expression.BytecodeExpressions.constantTrue;
 
 public class NullIfCodeGenerator
-        implements BytecodeGenerator
+        implements SpecialFormBytecodeGenerator
 {
     @Override
-    public BytecodeNode generateExpression(Signature signature, BytecodeGeneratorContext generatorContext, Type returnType, List<RowExpression> arguments, Optional<Variable> outputBlockVariable)
+    public BytecodeNode generateExpression(BytecodeGeneratorContext generatorContext, Type returnType, List<RowExpression> arguments, Optional<Variable> outputBlockVariable)
     {
         Scope scope = generatorContext.getScope();
 
@@ -62,7 +63,7 @@ public class NullIfCodeGenerator
         Type secondType = second.getType();
 
         // if (equal(cast(first as <common type>), cast(second as <common type>))
-        FunctionHandle equalFunction = generatorContext.getFunctionManager().resolveOperator(EQUAL, ImmutableList.of(firstType, secondType));
+        FunctionHandle equalFunction = generatorContext.getFunctionManager().resolveOperator(EQUAL, fromTypes(firstType, secondType));
         ScalarFunctionImplementation equalsFunction = generatorContext.getFunctionManager().getScalarFunctionImplementation(equalFunction);
         BytecodeNode equalsCall = generatorContext.generateCall(
                 EQUAL.name(),
@@ -103,7 +104,7 @@ public class NullIfCodeGenerator
 
         FunctionHandle functionHandle = generatorContext
                 .getFunctionManager()
-                .lookupCast(CAST, actualType.getTypeSignature(), requiredType);
+                .lookupCast(CastType.CAST, actualType.getTypeSignature(), requiredType);
 
         // TODO: do we need a full function call? (nullability checks, etc)
         return generatorContext.generateCall(CAST.name(), generatorContext.getFunctionManager().getScalarFunctionImplementation(functionHandle), ImmutableList.of(argument));

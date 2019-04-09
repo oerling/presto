@@ -18,7 +18,6 @@ import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
-import com.facebook.presto.spi.type.ArrayType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.google.common.collect.ImmutableList;
@@ -45,7 +44,6 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
@@ -105,9 +103,9 @@ public class BenchmarkArrayAggregation
                 default:
                     throw new UnsupportedOperationException();
             }
-            ArrayType arrayType = new ArrayType(elementType);
+
             InternalAggregationFunction function = functionManager.getAggregateFunctionImplementation(
-                    functionManager.resolveFunction(TEST_SESSION, QualifiedName.of(name), fromTypes(elementType)));
+                    functionManager.lookupFunction(QualifiedName.of(name), fromTypes(elementType)));
             accumulator = function.bind(ImmutableList.of(0), Optional.empty()).createAccumulator();
 
             block = createChannel(ARRAY_SIZE, elementType);

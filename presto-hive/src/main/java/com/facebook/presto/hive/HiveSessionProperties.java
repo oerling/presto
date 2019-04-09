@@ -40,6 +40,7 @@ import static java.util.Locale.ENGLISH;
 
 public final class HiveSessionProperties
 {
+    private static final String IGNORE_TABLE_BUCKETING = "ignore_table_bucketing";
     private static final String BUCKET_EXECUTION_ENABLED = "bucket_execution_enabled";
     private static final String FORCE_LOCAL_SCHEDULING = "force_local_scheduling";
     private static final String INSERT_EXISTING_PARTITIONS_BEHAVIOR = "insert_existing_partitions_behavior";
@@ -80,7 +81,9 @@ public final class HiveSessionProperties
     private static final String TEMPORARY_STAGING_DIRECTORY_PATH = "temporary_staging_directory_path";
     private static final String PRELOAD_SPLITS_FOR_GROUPED_EXECUTION = "preload_splits_for_grouped_execution";
     public static final String WRITING_STAGING_FILES_ENABLED = "writing_staging_files_enabled";
-    private static final String ARIA_SCAN_ENABLED = "aria_scan_enabled";
+    private static final String TEMPORARY_TABLE_SCHEMA = "temporary_table_schema";
+    private static final String TEMPORARY_TABLE_STORAGE_FORMAT = "temporary_table_storage_format";
+    public static final String ARIA_SCAN_ENABLED = "aria_scan_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -106,6 +109,11 @@ public final class HiveSessionProperties
     public HiveSessionProperties(HiveClientConfig hiveClientConfig, OrcFileWriterConfig orcFileWriterConfig, ParquetFileWriterConfig parquetFileWriterConfig)
     {
         sessionProperties = ImmutableList.of(
+                booleanProperty(
+                        IGNORE_TABLE_BUCKETING,
+                        "Ignore table bucketing to enable reading from unbucketed partitions",
+                        hiveClientConfig.isIgnoreTableBucketing(),
+                        false),
                 booleanProperty(
                         BUCKET_EXECUTION_ENABLED,
                         "Enable bucket-aware execution: only use a single worker per bucket",
@@ -322,6 +330,20 @@ public final class HiveSessionProperties
                         "Experimental: Write table to staging files and rename to target files when commit",
                         hiveClientConfig.isWritingStagingFilesEnabled(),
                         false),
+                stringProperty(
+                        TEMPORARY_TABLE_SCHEMA,
+                        "Schema where to create temporary tables",
+                        hiveClientConfig.getTemporaryTableSchema(),
+                        false),
+                new PropertyMetadata<>(
+                        TEMPORARY_TABLE_STORAGE_FORMAT,
+                        "Storage format used to store data in temporary tables",
+                        VARCHAR,
+                        HiveStorageFormat.class,
+                        hiveClientConfig.getTemporaryTableStorageFormat(),
+                        false,
+                        value -> HiveStorageFormat.valueOf(((String) value).toUpperCase()),
+                        HiveStorageFormat::name),
                 booleanProperty(
                         ARIA_SCAN_ENABLED,
                         "Aria scan enabled",
@@ -337,6 +359,11 @@ public final class HiveSessionProperties
     public static boolean isBucketExecutionEnabled(ConnectorSession session)
     {
         return session.getProperty(BUCKET_EXECUTION_ENABLED, Boolean.class);
+    }
+
+    public static boolean shouldIgnoreTableBucketing(ConnectorSession session)
+    {
+        return session.getProperty(IGNORE_TABLE_BUCKETING, Boolean.class);
     }
 
     public static boolean isForceLocalScheduling(ConnectorSession session)
@@ -543,6 +570,16 @@ public final class HiveSessionProperties
     public static boolean isWritingStagingFilesEnabled(ConnectorSession session)
     {
         return session.getProperty(WRITING_STAGING_FILES_ENABLED, Boolean.class);
+    }
+
+    public static String getTemporaryTableSchema(ConnectorSession session)
+    {
+        return session.getProperty(TEMPORARY_TABLE_SCHEMA, String.class);
+    }
+
+    public static HiveStorageFormat getTemporaryTableStorageFormat(ConnectorSession session)
+    {
+        return session.getProperty(TEMPORARY_TABLE_STORAGE_FORMAT, HiveStorageFormat.class);
     }
 
     public static boolean isAriaScanEnabled(ConnectorSession session)

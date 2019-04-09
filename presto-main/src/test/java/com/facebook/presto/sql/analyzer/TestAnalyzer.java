@@ -1202,6 +1202,8 @@ public class TestAnalyzer
     {
         // it should be possible to qualify the column reference with the view name
         analyze("SELECT v1.a FROM v1");
+        analyze("SELECT s1.v1.a FROM s1.v1");
+        analyze("SELECT tpch.s1.v1.a FROM tpch.s1.v1");
     }
 
     @Test
@@ -1785,7 +1787,7 @@ public class TestAnalyzer
                 connectorId,
                 connector,
                 createInformationSchemaConnectorId(connectorId),
-                new InformationSchemaConnector(catalogName, nodeManager, metadata, accessControl),
+                new InformationSchemaConnector(catalogName, nodeManager, metadata, accessControl, ImmutableList.of()),
                 systemId,
                 new SystemConnector(
                         systemId,

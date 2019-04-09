@@ -20,8 +20,6 @@ import com.facebook.presto.operator.window.WindowFunctionSupplier;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.function.FunctionHandle;
 import com.facebook.presto.spi.function.OperatorType;
-import com.facebook.presto.spi.function.Signature;
-import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.analyzer.FeaturesConfig;
@@ -36,13 +34,12 @@ import java.util.List;
 @ThreadSafe
 public class FunctionManager
 {
-    private final FunctionNamespace globalFunctionNamespace;
+    private final StaticFunctionNamespace staticFunctionNamespace;
     private final FunctionInvokerProvider functionInvokerProvider;
 
     public FunctionManager(TypeManager typeManager, BlockEncodingSerde blockEncodingSerde, FeaturesConfig featuresConfig)
     {
-        FunctionRegistry functionRegistry = new FunctionRegistry(typeManager, blockEncodingSerde, featuresConfig, this);
-        this.globalFunctionNamespace = new FunctionNamespace(functionRegistry);
+        this.staticFunctionNamespace = new StaticFunctionNamespace(typeManager, blockEncodingSerde, featuresConfig, this);
         this.functionInvokerProvider = new FunctionInvokerProvider(this);
         if (typeManager instanceof TypeRegistry) {
             ((TypeRegistry) typeManager).setFunctionManager(this);
@@ -56,14 +53,29 @@ public class FunctionManager
 
     public void addFunctions(List<? extends SqlFunction> functions)
     {
-        globalFunctionNamespace.addFunctions(functions);
+        staticFunctionNamespace.addFunctions(functions);
     }
 
     public List<SqlFunction> listFunctions()
     {
-        return globalFunctionNamespace.listFunctions();
+        return staticFunctionNamespace.listFunctions();
     }
 
+    /**
+     * Lookup up a function with a fully qualified name and fully bound types.
+     *
+     * @throws PrestoException if function could not be found
+     */
+    public FunctionHandle lookupFunction(QualifiedName name, List<TypeSignatureProvider> parameterTypes)
+    {
+        return staticFunctionNamespace.lookupFunction(name, parameterTypes);
+    }
+
+    /**
+     * Resolves a function using the SQL path, and implicit type coercions.
+     *
+     * @throws PrestoException if there are no matches or multiple matches
+     */
     public FunctionHandle resolveFunction(Session session, QualifiedName name, List<TypeSignatureProvider> parameterTypes)
     {
         // TODO Actually use session
@@ -71,51 +83,36 @@ public class FunctionManager
         // This is likely to be in terms of SQL path. Currently we still don't have support multiple function namespaces, nor
         // SQL path. As a result, session is not used here. We still add this to distinguish the two versions of resolveFunction
         // while the refactoring is on-going.
-        return globalFunctionNamespace.resolveFunction(name, parameterTypes);
-    }
-
-    public Signature resolveFunction(QualifiedName name, List<TypeSignatureProvider> parameterTypes)
-    {
-        return globalFunctionNamespace.resolveFunction(name, parameterTypes).getSignature();
+        return staticFunctionNamespace.resolveFunction(name, parameterTypes);
     }
 
     public WindowFunctionSupplier getWindowFunctionImplementation(FunctionHandle functionHandle)
     {
-        return globalFunctionNamespace.getWindowFunctionImplementation(functionHandle);
+        return staticFunctionNamespace.getWindowFunctionImplementation(functionHandle);
     }
 
     public InternalAggregationFunction getAggregateFunctionImplementation(FunctionHandle functionHandle)
     {
-        return globalFunctionNamespace.getAggregateFunctionImplementation(functionHandle);
+        return staticFunctionNamespace.getAggregateFunctionImplementation(functionHandle);
     }
 
     public ScalarFunctionImplementation getScalarFunctionImplementation(FunctionHandle functionHandle)
     {
-        return globalFunctionNamespace.getScalarFunctionImplementation(functionHandle.getSignature());
-    }
-
-    public ScalarFunctionImplementation getScalarFunctionImplementation(Signature signature)
-    {
-        return globalFunctionNamespace.getScalarFunctionImplementation(signature);
+        return staticFunctionNamespace.getScalarFunctionImplementation(functionHandle);
     }
 
     public boolean isAggregationFunction(QualifiedName name)
     {
-        return globalFunctionNamespace.isAggregationFunction(name);
+        return staticFunctionNamespace.isAggregationFunction(name);
     }
 
-    public FunctionHandle resolveOperator(OperatorType operatorType, List<? extends Type> argumentTypes)
+    public FunctionHandle resolveOperator(OperatorType operatorType, List<TypeSignatureProvider> argumentTypes)
     {
-        return globalFunctionNamespace.resolveOperator(operatorType, argumentTypes);
+        return staticFunctionNamespace.resolveOperator(operatorType, argumentTypes);
     }
 
-    public boolean isRegistered(Signature signature)
+    public FunctionHandle lookupCast(CastType castType, TypeSignature fromType, TypeSignature toType)
     {
-        return globalFunctionNamespace.isRegistered(signature);
-    }
-
-    public FunctionHandle lookupCast(OperatorType castType, TypeSignature fromType, TypeSignature toType)
-    {
-        return globalFunctionNamespace.lookupCast(castType, fromType, toType);
+        return staticFunctionNamespace.lookupCast(castType, fromType, toType);
     }
 }

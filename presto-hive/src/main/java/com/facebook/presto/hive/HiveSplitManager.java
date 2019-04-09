@@ -178,13 +178,20 @@ public class HiveSplitManager
             return new FixedSplitSource(ImmutableList.of());
         }
 
-        // get buckets from first partition (arbitrary)
         Optional<HiveBucketFilter> bucketFilter = layout.getBucketFilter();
 
         // validate bucket bucketed execution
         Optional<HiveBucketHandle> bucketHandle = layout.getBucketHandle();
         if ((splitSchedulingStrategy == GROUPED_SCHEDULING) && !bucketHandle.isPresent()) {
             throw new PrestoException(GENERIC_INTERNAL_ERROR, "SchedulingPolicy is bucketed, but BucketHandle is not present");
+        }
+
+        if (bucketHandle.isPresent()) {
+            if (bucketHandle.get().getReadBucketCount() > bucketHandle.get().getTableBucketCount()) {
+                throw new PrestoException(
+                        GENERIC_INTERNAL_ERROR,
+                        "readBucketCount (%s) is greater than the tableBucketCount (%s) which generally points to an issue in plan generation");
+            }
         }
 
         // sort partitions

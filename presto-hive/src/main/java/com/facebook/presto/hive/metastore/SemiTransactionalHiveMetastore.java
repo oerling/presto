@@ -76,6 +76,9 @@ import static com.facebook.presto.hive.metastore.HivePrivilegeInfo.HivePrivilege
 import static com.facebook.presto.hive.metastore.MetastoreUtil.getFileSystem;
 import static com.facebook.presto.hive.metastore.MetastoreUtil.renameFile;
 import static com.facebook.presto.hive.metastore.MetastoreUtil.waitForListenableFutures;
+import static com.facebook.presto.hive.metastore.PrestoTableType.MANAGED_TABLE;
+import static com.facebook.presto.hive.metastore.PrestoTableType.TEMPORARY_TABLE;
+import static com.facebook.presto.hive.metastore.PrestoTableType.VIRTUAL_VIEW;
 import static com.facebook.presto.hive.util.Statistics.ReduceOperator.SUBTRACT;
 import static com.facebook.presto.hive.util.Statistics.merge;
 import static com.facebook.presto.hive.util.Statistics.reduce;
@@ -91,7 +94,6 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static org.apache.hadoop.hive.common.FileUtils.makePartName;
-import static org.apache.hadoop.hive.metastore.TableType.MANAGED_TABLE;
 
 public class SemiTransactionalHiveMetastore
 {
@@ -162,7 +164,7 @@ public class SemiTransactionalHiveMetastore
             case ADD:
             case ALTER:
             case INSERT_EXISTING:
-                return Optional.of(tableAction.getData().getTable());
+                return Optional.of(tableAction.getData().getAugmentedTableForInTransactionRead());
             case DROP:
                 return Optional.empty();
             default:
@@ -446,8 +448,8 @@ public class SemiTransactionalHiveMetastore
         setShared();
         SchemaTableName schemaTableName = new SchemaTableName(databaseName, tableName);
         Action<TableAndMore> oldTableAction = tableActions.get(schemaTableName);
-        if (oldTableAction == null) {
-            Table table = delegate.getTable(databaseName, tableName)
+        if (oldTableAction == null || oldTableAction.getData().getTable().getTableType().equals(TEMPORARY_TABLE)) {
+            Table table = getTable(databaseName, tableName)
                     .orElseThrow(() -> new TableNotFoundException(schemaTableName));
             PartitionStatistics currentStatistics = getTableStatistics(databaseName, tableName);
             HdfsContext context = new HdfsContext(session, databaseName, tableName);
@@ -487,7 +489,7 @@ public class SemiTransactionalHiveMetastore
         if (!table.isPresent()) {
             throw new TableNotFoundException(schemaTableName);
         }
-        if (!table.get().getTableType().equals(MANAGED_TABLE.toString())) {
+        if (!table.get().getTableType().equals(MANAGED_TABLE)) {
             throw new PrestoException(NOT_SUPPORTED, "Cannot delete from non-managed Hive table");
         }
         if (!table.get().getPartitionColumns().isEmpty()) {
@@ -1086,7 +1088,13 @@ public class SemiTransactionalHiveMetastore
             deleteOnly = false;
 
             Table table = tableAndMore.getTable();
-            if (table.getTableType().equals(MANAGED_TABLE.name())) {
+
+            if (table.getTableType().equals(TEMPORARY_TABLE)) {
+                prepareDropTemporaryTable(context, tableAndMore);
+                return;
+            }
+
+            if (table.getTableType().equals(MANAGED_TABLE)) {
                 String targetLocation = table.getStorage().getLocation();
                 checkArgument(!targetLocation.isEmpty(), "target location is empty");
                 Optional<Path> currentPath = tableAndMore.getCurrentLocation();
@@ -1142,6 +1150,12 @@ public class SemiTransactionalHiveMetastore
             deleteOnly = false;
 
             Table table = tableAndMore.getTable();
+
+            if (table.getTableType().equals(TEMPORARY_TABLE)) {
+                prepareDropTemporaryTable(context, tableAndMore);
+                return;
+            }
+
             Path targetPath = new Path(table.getStorage().getLocation());
             Path currentPath = tableAndMore.getCurrentLocation().get();
             cleanUpTasksForAbort.add(new DirectoryCleanUpTask(context, targetPath, false));
@@ -1295,6 +1309,11 @@ public class SemiTransactionalHiveMetastore
                     Optional.of(getPartitionName(partition.getDatabaseName(), partition.getTableName(), partition.getValues())),
                     partitionAndMore.getStatisticsUpdate(),
                     true));
+        }
+
+        private void prepareDropTemporaryTable(HdfsContext context, TableAndMore tableAndMore)
+        {
+            tableAndMore.getCurrentLocation().ifPresent(currentLocation -> deletionTasksForFinish.add(new DirectoryDeletionTask(context, currentLocation)));
         }
 
         private void executeCleanupTasksForAbort(List<String> filePrefixes)
@@ -1985,7 +2004,7 @@ public class SemiTransactionalHiveMetastore
             this.statistics = requireNonNull(statistics, "statistics is null");
             this.statisticsUpdate = requireNonNull(statisticsUpdate, "statisticsUpdate is null");
 
-            checkArgument(!table.getStorage().getLocation().isEmpty() || !currentLocation.isPresent(), "currentLocation can not be supplied for table without location");
+            checkArgument(!table.getTableType().equals(VIRTUAL_VIEW) || !currentLocation.isPresent(), "currentLocation can not be supplied for view");
             checkArgument(!fileNames.isPresent() || currentLocation.isPresent(), "fileNames can be supplied only when currentLocation is supplied");
         }
 
@@ -2023,6 +2042,32 @@ public class SemiTransactionalHiveMetastore
         public PartitionStatistics getStatisticsUpdate()
         {
             return statisticsUpdate;
+        }
+
+        public Table getAugmentedTableForInTransactionRead()
+        {
+            // Don't augment the location for partitioned tables,
+            // as data is never read directly from the partitioned table location
+            if (!table.getPartitionColumns().isEmpty()) {
+                return table;
+            }
+
+            // view don't have currentLocation
+            if (!currentLocation.isPresent()) {
+                return table;
+            }
+
+            // For unpartitioned table, this method augments the location field of the table
+            // to the staging location.
+            // This way, if the table is accessed in an ongoing transaction, staged data
+            // can be found and accessed.
+            String currentLocation = this.currentLocation.get().toString();
+            if (!currentLocation.equals(table.getStorage().getLocation())) {
+                return Table.builder(table)
+                        .withStorage(storage -> storage.setLocation(currentLocation))
+                        .build();
+            }
+            return table;
         }
 
         @Override
@@ -2088,10 +2133,9 @@ public class SemiTransactionalHiveMetastore
             // This method augments the location field of the partition to the staging location.
             // This way, if the partition is accessed in an ongoing transaction, staged data
             // can be found and accessed.
-            Partition partition = this.partition;
             String currentLocation = this.currentLocation.toString();
             if (!currentLocation.equals(partition.getStorage().getLocation())) {
-                partition = Partition.builder(partition)
+                return Partition.builder(partition)
                         .withStorage(storage -> storage.setLocation(currentLocation))
                         .build();
             }
