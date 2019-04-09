@@ -279,4 +279,9 @@ public class SliceStreamReader
     {
         return currentReader.mustExtractValues(isNewStripe);
     }
+
+    StreamReader getCurrentReader()
+    {
+        return currentReader;
+    }
 }

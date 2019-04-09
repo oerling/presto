@@ -16,6 +16,7 @@ package com.facebook.presto.orc.reader;
 import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.Filters;
+import com.facebook.presto.orc.Filters.StructFilter;
 import com.facebook.presto.orc.OrcCorruptionException;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
@@ -28,12 +29,16 @@ import com.facebook.presto.spi.PageSourceOptions.ErrorSet;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.SubfieldPath.PathElement;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.DictionaryBlock;
+import com.facebook.presto.spi.block.LongArrayBlock;
+import com.facebook.presto.spi.block.VariableWidthBlock;
 import com.facebook.presto.spi.type.MapType;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.io.Closer;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.joda.time.DateTimeZone;
 import org.openjdk.jol.info.ClassLayout;
 
@@ -85,7 +90,7 @@ public class MapDirectStreamReader
     private Type valueType;
     private HashSet<Long> longSubscripts;
     private HashSet<Slice> sliceSubscripts;
-    private HashMap<Object, Filter> subscriptToFilter;
+    private Map<Object, Filter> subscriptToFilter;
     private boolean mayPruneKey;
     private boolean filterIsSetup = false;
     private Filters.PositionalFilter positionalFilter;
@@ -98,6 +103,18 @@ public class MapDirectStreamReader
     // Qualifying rows after filter on key. If no filter on key, this is innerQualifyingSet.
     private QualifyingSet keyQualifyingSet;
 
+    // Maps from slice or long key to the filter to apply to the
+    // value.  If this has a positional filter, these arrays are
+    // indexed on the ordinal of the StructFilter that corresponds to
+    // the current element. Otherwise these have one element at index
+    // 0. If the key is a string and the keyBlock is a
+    // DictionaryBlock, then longKeyToFilter is used with dictionary
+    // ids. This will update the mappings as needed as dictionaries
+    // changee between stripes and row groups.
+    Long2ObjectOpenHashMap<Filter>[] longKeyToFilter;
+    HashMap<Slice, Filter>[] sliceKeyToFilter;
+    VariableWidthBlock previousKeyDictionary;
+    
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
         super();
@@ -384,18 +401,37 @@ public class MapDirectStreamReader
     private void setupFilterAndChannel()
     {
         Filter elementFilter = null;
-        if (filter != null) {
-            Filters.StructFilter listFilter = (Filters.StructFilter) filter;
-            HashMap<PathElement, Filter> filters = listFilter.getFilters();
+        if (filter == Filters.isNull()) {
+            return;
+        }
+        int numFilters = Filters.getNumDistinctPositionFilters(filter) + 1;
+        longKeyToFilter = new Long2ObjectOpenHashMap[numFilters];
+        for (Filter  mapFilter : Filters.getDistinctPositionFilters(filter)) {
+            if (mapFilter == Filters.isNotNull()) {
+                continue;
+            }
+            StructFilter structFilter = (StructFilter) mapFilter;
+            int ordinal = structFilter.getOrdinal();
+            Map<PathElement, Filter> filters = structFilter.getFilters();
             for (Map.Entry<PathElement, Filter> entry : filters.entrySet()) {
                 String field = entry.getKey().getField();
                 long subscript = entry.getKey().getSubscript();
-                if (subscriptToFilter == null) {
-                        subscriptToFilter = new HashMap();
-                        positionalFilter = new Filters.PositionalFilter();
+                if (longKeyToFilter[ordinal] == null) {
+                    longKeyToFilter[ordinal] = new Long2ObjectOpenHashMap();
+                    if (field != null) {
+                        sliceKeyToFilter[ordinal] = new HashMap();
+                    }
+                    if (positionalFilter == null) {
+                        positionalFilter = new Filters.PositionalFilter(structFilter);
                         elementFilter = positionalFilter;
+                    }
                 }
-                subscriptToFilter.put(field != null ? field : new Long(subscript - 1), entry.getValue());
+                if (field != null) {
+                    sliceKeyToFilter[ordinal].put(Slices.copiedBuffer(field, UTF_8), filter);
+                }
+                else {
+                    longKeyToFilter[ordinal].put(subscript, filter);
+                }
                 if (field != null && mayPruneKey) {
                     sliceSubscripts.add(Slices.copiedBuffer(field, UTF_8));
                 }
@@ -430,12 +466,6 @@ public class MapDirectStreamReader
         filterIsSetup = true;
     }
 
-    private Filter valueFilterAt(Filters.StructFilter mapFilter, int keyPosition)
-    {
-        long subscript = keyBlock.getLong(keyPosition, 0);
-        return mapFilter.getMember(subscript);
-    }
-
     private void setupPositionalFilter(int[] keyInputNumbers)
     {
         if (numElementFilters == null || numElementFilters.length < inputQualifyingSet.getPositionCount()) {
@@ -443,35 +473,100 @@ public class MapDirectStreamReader
         }
         Arrays.fill(numElementFilters, 0, inputQualifyingSet.getPositionCount(), 0);
         if (elementFilters == null || elementFilters.length < keyQualifyingSet.getPositionCount()) {
-            elementFilters = new Filter[roundupCapacity(keyQualifyingSet.getPositionCount())];
+            elementFilters = new Filter[roundupSize(keyQualifyingSet.getPositionCount())];
         }
         else {
             Arrays.fill(elementFilters, 0, keyQualifyingSet.getPositionCount(), null);
         }
+        boolean useDict = setupKeyIdToFilter();
+        boolean longKeys = keyBlock instanceof LongArrayBlock;
         int numInput = inputQualifyingSet.getPositionCount();
         int numKeys = keyQualifyingSet.getPositionCount();
-        int keyIdx = 0;
+        int keyIndex = 0;
         for (int i = 0; i < numInput; i++) {
-            Filters.StructFilter mapFilter = (Filters.StructFilter) filter.nextFilter();
+            Filter thisFilter = filter.nextFilter();
+            if (thisFilter == Filters.isNotNull()) {
+                continue;
+            }
+            StructFilter mapFilter = (StructFilter) thisFilter;
             int length = 0;
-            int startKeyIdx = keyIdx;
-            for (; keyIdx < numKeys; keyIdx++) {
-                if (keyInputNumbers[keyIdx] != i) {
+            int startKeyIndex = keyIndex;
+            for (; keyIndex < numKeys; keyIndex++) {
+                if (keyInputNumbers[keyIndex] != i) {
                     break;
                 }
                 length++;
             }
+            int ordinal = mapFilter.getOrdinal();
             int filterCount = 0;
-            for (int key = startKeyIdx; key < keyIdx; key++) {
-                Filter filter = valueFilterAt(mapFilter, key);
+            if (longKeys) {
+                Long2ObjectOpenHashMap<Filter> keyToFilter = longKeyToFilter[ordinal];
+                for (int key = startKeyIndex; key < keyIndex; key++) {
+                    Filter filter = keyToFilter.get(keyBlock.getLong(key + initialNumElements, 0));
                 if (filter != null) {
                     filterCount++;
                     elementFilters[key] = filter;
+                }
+                }
+            }
+            else if (useDict) {
+                Long2ObjectOpenHashMap<Filter> keyToFilter = longKeyToFilter[ordinal];
+                DictionaryBlock keyIds = (DictionaryBlock) keyBlock;
+                for (int key = startKeyIndex; key < keyIndex; key++) {
+                    Filter filter = keyToFilter.get(keyIds.getId(key + initialNumElements));
+                    if (filter != null) {
+                        filterCount++;
+                        elementFilters[key] = filter;
+                    }
+                }
+            }
+            else {
+                HashMap<Slice, Filter> keyToFilter = sliceKeyToFilter[ordinal];
+                for (int key = startKeyIndex; key < keyIndex; key++) {
+                    Filter filter = keyToFilter.get(keyBlock.getSlice(key + initialNumElements, 0, keyBlock.getSliceLength(key + initialNumElements)));
+                    if (filter != null) {
+                        filterCount++;
+                        elementFilters[key] = filter;
+                    }
                 }
             }
             numElementFilters[i] = filterCount;
         }
         positionalFilter.setFilters(keyQualifyingSet, elementFilters);
+    }
+
+    private boolean setupKeyIdToFilter()
+    {
+        if (!(keyBlock instanceof DictionaryBlock)) {
+            previousKeyDictionary = null;
+            return false;
+        }
+        DictionaryBlock keys = (DictionaryBlock) keyBlock;
+        VariableWidthBlock newDictionary = (VariableWidthBlock)keys.getDictionary();
+        if (previousKeyDictionary == newDictionary) {
+            return true;
+        }
+        previousKeyDictionary = newDictionary;
+        // We have a new dictionary. We need to re-establish the
+        // mappings from dictionary keys to value filters.
+        SliceStreamReader sliceReader = (SliceStreamReader) keyStreamReader;
+        SliceDictionaryStreamReader dictionaryReader = (SliceDictionaryStreamReader) sliceReader.getCurrentReader();
+        for (Filter filter : Filters.getDistinctPositionFilters(filter)) {
+            if (filter == Filters.isNotNull()) {
+                continue;
+            }
+            StructFilter structFilter = (StructFilter) filter;
+            int ordinal = structFilter.getOrdinal();
+            Long2ObjectOpenHashMap<Filter> map = longKeyToFilter[ordinal];
+            map.clear();
+            Map<PathElement, Filter> filters = structFilter.getFilters();
+            for (Map.Entry<PathElement, Filter> entry : filters.entrySet()) {
+                String field = entry.getKey().getField();
+                int id = dictionaryReader.getIdForValue(Slices.copiedBuffer(field, UTF_8));
+                map.put(id, entry.getValue());
+            }
+        }
+        return true;
     }
 
     private void adjustElementLengths()
@@ -557,10 +652,10 @@ public class MapDirectStreamReader
                     innerSurviving = new int[roundupCapacity(numValueResults)];
                 }
                 numInnerSurviving = 0;
-                int outputIdx = 0;
+                int outputIndex = 0;
                 numInnerResults = 0;
                 for (int i = 0; i < numInput; i++) {
-                    outputIdx = processFilterHits(i, outputIdx, resultRows, resultInputNumbers, numValueResults);
+                    outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numValueResults);
                 }
                 keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
                 valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
@@ -572,13 +667,13 @@ public class MapDirectStreamReader
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (filter == null) {
             // The lengths are unchanged by reading the values.
-            int valueIdx = numValues;
+            int valueIndex = numValues;
             for (int i = 0; i < numInput; i++) {
-                elementOffset[valueIdx] = lastElementOffset;
+                elementOffset[valueIndex] = lastElementOffset;
                 lastElementOffset += elementLength[i];
-                valueIdx++;
+                valueIndex++;
             }
-            elementOffset[valueIdx] = lastElementOffset;
+            elementOffset[valueIndex] = lastElementOffset;
         }
         else {
             if (numNullsToAdd > 0 && outputChannel != -1) {
@@ -596,7 +691,7 @@ public class MapDirectStreamReader
                     }
                 }
             }
-            }
+        }
         endScan(presentStream);
     }
 
@@ -605,37 +700,37 @@ public class MapDirectStreamReader
     // hit but not all subscripts existed. Else the map did not
     // pass. Returns the index to the first element of the next value
     // in the keyQualifyingSet.
-    int processFilterHits(int inputIdx, int outputIdx, int[] resultRows, int[] resultInputNumbers, int numValueResults)
+    int processFilterHits(int inputIndex, int outputIndex, int[] resultRows, int[] resultInputNumbers, int numValueResults)
     {
         int filterHits = 0;
         int count = 0;
-        int initialOutputIdx = outputIdx;
-        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIdx]]) {
-            return outputIdx;
+        int initialOutputIndex = outputIndex;
+        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex]]) {
+            return outputIndex;
         }
         int[] inputNumbers = keyQualifyingSet.getInputNumbers();
-        // Count rows and filter hits from the map corresponding to inputIdx.
-        while (outputIdx < numValueResults && inputNumbers[resultInputNumbers[outputIdx]] == inputIdx) {
+        // Count rows and filter hits from the map corresponding to inputIndex.
+        while (outputIndex < numValueResults && inputNumbers[resultInputNumbers[outputIndex]] == inputIndex) {
             count++;
-            if (elementFilters[resultInputNumbers[outputIdx]] != null) {
+            if (elementFilters[resultInputNumbers[outputIndex]] != null) {
                 filterHits++;
             }
-            outputIdx++;
+            outputIndex++;
         }
-        if (filterHits < numElementFilters[inputIdx]) {
+        if (filterHits < numElementFilters[inputIndex]) {
             // Some filter did not hit.
-            return outputIdx;
+            return outputIndex;
         }
-        outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIdx], inputIdx);
-        addArrayToResult(inputIdx, initialOutputIdx, outputIdx);
-        if (numElementFilters[inputIdx] < subscriptToFilter.size()) {
+        outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIndex], inputIndex);
+        addMapToResult(inputIndex, initialOutputIndex, outputIndex);
+        if (numElementFilters[inputIndex] < subscriptToFilter.size()) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
             errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("Map subscript not found"));
         }
-        return outputIdx;
+        return outputIndex;
     }
 
-    private void addArrayToResult(int inputIdx, int beginResult, int endResult)
+    private void addMapToResult(int inputIndex, int beginResult, int endResult)
     {
         if (outputChannel == -1) {
             return;
@@ -711,4 +806,11 @@ public class MapDirectStreamReader
     {
         return INSTANCE_SIZE + keyStreamReader.getRetainedSizeInBytes() + valueStreamReader.getRetainedSizeInBytes();
     }
+
+    @Override
+    public boolean mustExtractValues(boolean isNewStripe)
+    {
+        return keyStreamReader.mustExtractValues(isNewStripe) || valueStreamReader.mustExtractValues(isNewStripe);
+    }
+
 }

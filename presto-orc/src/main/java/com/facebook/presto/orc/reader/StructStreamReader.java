@@ -292,7 +292,7 @@ public class StructStreamReader
 
     private void setupForScan()
     {
-        if (filter != null && (filter instanceof Filters.IsNull || filter instanceof Filters.AlwaysFalse)) {
+        if (filter != null && (filter == Filters.isNull() || filter == Filters.alwaysFalse())) {
             return;
         }
         RowType rowType = (RowType) type;
@@ -366,7 +366,7 @@ public class StructStreamReader
     public void erase(int end)
     {
         // Without a reader there is nothing to erase, even if the struct is all nulls.
-        if (reader == null || !outputChannelSet) {
+        if (numValues == 0 || reader == null || !outputChannelSet) {
             return;
         }
         int fieldEnd;
@@ -462,7 +462,7 @@ public class StructStreamReader
         if (reader == null) {
             setupForScan();
         }
-        if (filter != null && filter instanceof Filters.AlwaysFalse) {
+        if (filter == Filters.alwaysFalse()) {
             if (outputQualifyingSet == null) {
                 outputQualifyingSet = new QualifyingSet();
             }
@@ -516,7 +516,7 @@ public class StructStreamReader
                 innerQualifyingSet.setTranslateResultToParentRows(false);
             }
             reader.setQualifyingSets(innerQualifyingSet, outputQualifyingSet);
-            if (filter != null && filter instanceof Filters.IsNull) {
+            if (filter == Filters.isNull()) {
                 innerQualifyingSet.setPositionCount(0);
             }
             if (innerQualifyingSet.getPositionCount() > 0) {

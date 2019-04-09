@@ -453,16 +453,16 @@ public class TupleDomainOrcPredicate<C>
         for (int i = 1; i < depth; i++) {
             Filter memberFilter = structFilter.getMember(subfield.getPath().get(i));
             if (i == depth - 1) {
-                if (memberFilter != null && memberFilter instanceof Filters.AlwaysFalse) {
+                if (memberFilter == Filters.alwaysFalse()) {
                     return;
                 }
                 if (memberFilter != null && memberFilter instanceof Filters.StructFilter) {
-                    if (filter instanceof Filters.IsNotNull) {
+                    if (filter == Filters.isNotNull()) {
                         return;
                     }
-                    if (filter instanceof Filters.IsNull) {
+                    if (filter == Filters.isNull()) {
                         if (!((Filters.StructFilter) memberFilter).isOnlyIsNulls()) {
-                            filter = new Filters.AlwaysFalse();
+                            filter = Filters.alwaysFalse();
                         }
                     }
                 }
@@ -499,16 +499,16 @@ public class TupleDomainOrcPredicate<C>
         if (structFilter == null) {
             return new Filters.StructFilter();
         }
-        if (structFilter instanceof Filters.AlwaysFalse) {
+        if (structFilter == Filters.alwaysFalse()) {
             return structFilter;
         }
-        if (structFilter instanceof Filters.IsNull) {
-            if (memberFilter instanceof Filters.IsNull) {
+        if (structFilter == Filters.isNull()) {
+            if (memberFilter == Filters.isNull()) {
                 return structFilter;
             }
-            return new Filters.AlwaysFalse();
+            return Filters.alwaysFalse();
         }
-        if (structFilter instanceof Filters.IsNotNull) {
+        if (structFilter == Filters.isNotNull()) {
             return new Filters.StructFilter();
         }
         return structFilter;

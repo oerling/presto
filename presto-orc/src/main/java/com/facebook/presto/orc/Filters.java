@@ -15,6 +15,8 @@ package com.facebook.presto.orc;
 
 import com.facebook.presto.spi.SubfieldPath;
 
+import com.google.common.collect.ImmutableList;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -23,10 +25,13 @@ import java.util.Objects;
 
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
 import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
+
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 public class Filters
 {
@@ -36,7 +41,7 @@ public class Filters
 
     private Filters() {}
 
-    public static class AlwaysFalse
+    private static class AlwaysFalse
             extends Filter
     {
         public AlwaysFalse()
@@ -51,7 +56,7 @@ public class Filters
         }
     }
 
-    public static class IsNull
+    private static class IsNull
             extends Filter
     {
         public IsNull()
@@ -66,7 +71,7 @@ public class Filters
         }
     }
 
-    public static class IsNotNull
+    private static class IsNotNull
             extends Filter
     {
         public IsNotNull()
@@ -496,7 +501,8 @@ public class Filters
             extends Filter
     {
         private final HashMap<SubfieldPath.PathElement, Filter> filters = new HashMap();
-        private HashMap<Long, Filter> longToFilter;
+        private Long2ObjectOpenHashMap<Filter> longToFilter;
+        private int ordinal;
 
         StructFilter()
         {
@@ -508,22 +514,21 @@ public class Filters
             return filters.get(member);
         }
 
-        public Filter getMember(long subscript)
-        {
-            return longToFilter.get(subscript);
-        }
-
         public void addMember(SubfieldPath.PathElement member, Filter filter)
         {
             filters.put(member, filter);
-            if (member.getField() == null) {
-                if (longToFilter == null) {
-                    longToFilter = new HashMap();
-                }
-                longToFilter.put(Long.valueOf(member.getSubscript()), filter);
+            if (filter instanceof StructFilter) {
+                // If nested struct filters, give each child a
+                // distinct ordinal number, starting at 1 for
+                // first. This is useful with positional filters where
+                // different filters apply to different structs
+                // depending on their position in a list/map.
+                StructFilter childFilter = (StructFilter) filter;
+                childFilter.ordinal = filters.size();
             }
         }
-        public HashMap<SubfieldPath.PathElement, Filter> getFilters()
+
+            public Map<SubfieldPath.PathElement, Filter> getFilters()
         {
             return filters;
         }
@@ -539,6 +544,11 @@ public class Filters
                 }
             }
             return true;
+        }
+
+        public int getOrdinal()
+        {
+            return ordinal;
         }
     }
 
@@ -772,10 +782,13 @@ public class Filters
         // disqualifuied, so the failing filter on the first element
         // would set this to 3.
         int failNext;
-
-        public PositionalFilter()
+        // The StructFilter from which the positional filters are derived.
+        StructFilter parent;
+        
+        public PositionalFilter(StructFilter parent)
         {
             super(false);
+            this.parent = parent;
         }
 
         // Sets the filters to apply. filters corresponds pairwise to the rows in qualifyingSet.
@@ -975,5 +988,26 @@ public class Filters
             }
             return result;
         }
+
+        public StructFilter getParent()
+        {
+            return parent;
+        }
+    }
+
+    public static int getNumDistinctPositionFilters(Filter filter)
+    {
+        if (filter instanceof PositionalFilter) {
+            return ((PositionalFilter) filter).getParent().getFilters().size();
+        }
+        return 1;
+    }
+
+    public static List<Filter> getDistinctPositionFilters(Filter filter)
+    {
+        if (filter instanceof PositionalFilter) {
+            return ((PositionalFilter) filter).getParent().getFilters().entrySet().stream().map(c -> c.getValue()).collect(toList());
+        }
+        return ImmutableList.of(filter);
     }
 }
