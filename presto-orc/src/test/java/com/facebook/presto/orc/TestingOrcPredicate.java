@@ -121,6 +121,22 @@ public final class TestingOrcPredicate
         throw new IllegalArgumentException("Unsupported type " + type);
     }
 
+    public static class EmptyOrcPredicate
+            implements OrcPredicate
+    {
+        @Override
+        public boolean matches(long numberOfRows, Map<Integer, ColumnStatistics> statisticsByColumnIndex)
+        {
+            return true;
+        }
+
+        @Override
+        public Map<Integer, Filter> getFilters()
+        {
+            return ImmutableMap.of();
+        }
+    }
+
     public static class BasicOrcPredicate<T>
             implements OrcPredicate
     {
