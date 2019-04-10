@@ -83,10 +83,16 @@ public class ListStreamReader
     Filters.PositionalFilter positionalFilter;
     boolean filterIsSetup;
     Filter[] elementFilters;
+    int filterOffset;
     // For each array in the inputQualifyingSet, the number of element filters that fit.
     int[] numElementFilters;
-    // For each array, the number of filters intended for it.
-    int[] totalNumFilters;
+    // For each array, the number of filters intended for it. This is
+    // used only if the filter on the array stream is positional,
+    // i.e. different arrays have different filters.
+    int[] localNumFilters;
+    // Number of filters on the arrays if all arrays have the same filters.
+    int globalNumFilters;
+    boolean hasPositionalFilter;
     // Count of elements at the beginning of current call to scan().
     int initialNumElements;
     Long2ObjectOpenHashMap<Filter>[] subscriptToFilter;
@@ -294,6 +300,7 @@ public class ListStreamReader
             if (filter == Filters.isNull()) {
                 return;
             }
+            hasPositionalFilter = filter instanceof Filters.PositionalFilter;
             int numFilters = Filters.getNumDistinctPositionFilters(filter) + 1;
             subscriptToFilter = new Long2ObjectOpenHashMap[numFilters];
             setupFilters:
@@ -324,6 +331,9 @@ public class ListStreamReader
                     }
                 }
             }
+            if (!hasPositionalFilter) {
+                globalNumFilters = subscriptToFilter[0].size();
+            }
         }
             elementStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(0));
         filterIsSetup = true;
@@ -331,18 +341,27 @@ public class ListStreamReader
 
     private void setupPositionalFilter()
     {
-        if (numElementFilters == null || numElementFilters.length < inputQualifyingSet.getPositionCount()) {
-            numElementFilters = new int[inputQualifyingSet.getPositionCount()];
+        int numInput = inputQualifyingSet.getPositionCount();
+        if (numElementFilters == null || numElementFilters.length < numInput) {
+            numElementFilters = new int[roundupSize(numInput)];
         }
-        Arrays.fill(numElementFilters, 0, inputQualifyingSet.getPositionCount(), 0);
-        if (elementFilters == null || elementFilters.length < innerQualifyingSet.getPositionCount()) {
-            elementFilters = new Filter[innerQualifyingSet.getPositionCount()];
+        Arrays.fill(numElementFilters, 0, numInput, 0);
+        int numInner = innerQualifyingSet.getPositionCount();
+        if (elementFilters == null || elementFilters.length < numInner) {
+            elementFilters = new Filter[roundupSize(numInner)];
         }
         else {
-            Arrays.fill(elementFilters, 0, innerQualifyingSet.getPositionCount(), null);
+            Arrays.fill(elementFilters, 0, numInner, null);
+        }
+        if (hasPositionalFilter) {
+            if (localNumFilters == null || localNumFilters.length < numInput) {
+                localNumFilters = new int[roundupSize(numInput)];
+            }
+            else {
+                Arrays.fill(localNumFilters, 0, numInput, 0);
+            }
         }
         int innerStart = 0;
-        int numInput = inputQualifyingSet.getPositionCount();
         for (int i = 0; i < numInput; i++) {
             int length = elementLength[i];
             int filterCount = 0;
@@ -358,8 +377,8 @@ public class ListStreamReader
                     filterCount++;
                 }
                 numElementFilters[i] = filterCount;
-                if (totalNumFilters != null) {
-                    totalNumFilters[i] = subscriptToFilter[ordinal].size();
+                if (hasPositionalFilter) {
+                    localNumFilters[i] = subscriptToFilter[ordinal].size();
                 }
             }
             innerStart += length;
@@ -406,6 +425,7 @@ public class ListStreamReader
             numInnerSurviving = 0;
             int outputIndex = 0;
             numInnerResults = 0;
+            filterOffset = 0;
             for (int i = 0; i < numInput; i++) {
                 outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numElementResults);
             }
@@ -460,21 +480,23 @@ public class ListStreamReader
         }
         int[] inputNumbers = innerQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the array corresponding to inputIndex.
+        int startOfArray = elementStart[inputIndex];
         while (outputIndex < numElementResults && inputNumbers[resultInputNumbers[outputIndex]] == inputIndex) {
             count++;
-            int posInArray = resultRows[outputIndex];
-            if (elementFilters[posInArray] != null) {
+            int posInArray = resultRows[outputIndex] - startOfArray;
+            if (elementFilters[filterOffset + posInArray] != null) {
                 filterHits++;
             }
             outputIndex++;
         }
+        filterOffset += elementLength[inputIndex];
         if (filterHits < numElementFilters[inputIndex]) {
             // Some filter did not hit.
             return outputIndex;
         }
         outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIndex], inputIndex);
         addArrayToResult(inputIndex, initialOutputIndex, outputIndex);
-        int total = totalNumFilters != null ? totalNumFilters[inputIndex] : subscriptToFilter[0].size();
+        int total = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < total) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
             errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("List subscript out of bounds"));
