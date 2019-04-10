@@ -141,15 +141,20 @@ public abstract class AbstractTestQueryFramework
         QueryAssertions.assertQuery(queryRunner, session, actual, h2QueryRunner, expected, false, false);
     }
 
-        protected void assertQuery(Session session, @Language("SQL") String actual, @Language("SQL") String expected, Consumer<Plan> planAssertion)
+    protected void assertQuery(Session session, @Language("SQL") String actual, @Language("SQL") String expected, Consumer<Plan> planAssertion)
     {
         checkArgument(queryRunner instanceof DistributedQueryRunner, "pattern assertion is only supported for DistributedQueryRunner");
         QueryAssertions.assertQuery(queryRunner, session, actual, h2QueryRunner, expected, false, false, planAssertion);
     }
 
-    protected void assertQuery(Session session, @Language("SQL") String actual, Session referenceSession, Optional<String> expected)
+    protected void assertQuery(Session session, @Language("SQL") String actual, Session expectedSession)
     {
-        QueryAssertions.assertQuery(queryRunner, session, actual, referenceSession, expected);
+        QueryAssertions.assertQuery(queryRunner, session, actual, expectedSession);
+    }
+
+    protected void assertQuery(Session session, @Language("SQL") String actual, Session expectedSession, @Language("SQL") String expected)
+    {
+        QueryAssertions.assertQuery(queryRunner, session, actual, expectedSession, expected);
     }
 
     public void assertQueryOrdered(@Language("SQL") String sql)
