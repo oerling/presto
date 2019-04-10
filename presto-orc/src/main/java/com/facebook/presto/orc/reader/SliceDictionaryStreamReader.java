@@ -682,6 +682,10 @@ public class SliceDictionaryStreamReader
         return outputChannelSet && (isNewStripe || anyRowGroupDictionaries);
     }
 
+    // Returns the id used in the DictionaryBlock from getBlock() for
+    // a particular value and -1 if not found. The dictionary may
+    // consist of two concatenated sorted arrays, hence finding the
+    // value with the block alone is not efficient.
     public int getIdForValue(Slice value)
     {
         int id = searchDictionary(value, 0, stripeDictionarySize);

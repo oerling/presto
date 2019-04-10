@@ -90,7 +90,6 @@ public class MapDirectStreamReader
     private Type valueType;
     private HashSet<Long> longSubscripts;
     private HashSet<Slice> sliceSubscripts;
-    private Map<Object, Filter> subscriptToFilter;
     private boolean mayPruneKey;
     private boolean filterIsSetup = false;
     private Filters.PositionalFilter positionalFilter;
@@ -114,7 +113,10 @@ public class MapDirectStreamReader
     Long2ObjectOpenHashMap<Filter>[] longKeyToFilter;
     HashMap<Slice, Filter>[] sliceKeyToFilter;
     VariableWidthBlock previousKeyDictionary;
-    
+    // If the map has a positional filter, this is the number of
+    // element filters for each map. Null if no positional filter.
+    int[] localNumElementFilters;
+    int globalNumElementFilters;
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
         super();
@@ -406,6 +408,7 @@ public class MapDirectStreamReader
         }
         int numFilters = Filters.getNumDistinctPositionFilters(filter) + 1;
         longKeyToFilter = new Long2ObjectOpenHashMap[numFilters];
+        sliceKeyToFilter = new HashMap[numFilters];
         for (Filter  mapFilter : Filters.getDistinctPositionFilters(filter)) {
             if (mapFilter == Filters.isNotNull()) {
                 continue;
@@ -432,6 +435,7 @@ public class MapDirectStreamReader
                 else {
                     longKeyToFilter[ordinal].put(subscript, filter);
                 }
+                globalNumElementFilters++;
                 if (field != null && mayPruneKey) {
                     sliceSubscripts.add(Slices.copiedBuffer(field, UTF_8));
                 }
@@ -723,7 +727,8 @@ public class MapDirectStreamReader
         }
         outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIndex], inputIndex);
         addMapToResult(inputIndex, initialOutputIndex, outputIndex);
-        if (numElementFilters[inputIndex] < subscriptToFilter.size()) {
+        int numDefinedFilters = localNumElementFilters != null ? localNumElementFilters[inputIndex] : globalNumElementFilters;
+        if (numElementFilters[inputIndex] < numDefinedFilters) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
             errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("Map subscript not found"));
         }
