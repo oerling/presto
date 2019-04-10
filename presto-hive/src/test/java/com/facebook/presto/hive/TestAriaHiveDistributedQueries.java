@@ -462,6 +462,6 @@ public class TestAriaHiveDistributedQueries
                     "select count (*) from lineitem where \n" +
                     "if (linenumber = 2, false, suppkey / (linenumber - 3) >= 0) \n" +
                     "and if (linenumber = 3, false, partkey / (linenumber - 2) >= 0)",
-                    noAriaSession(), Optional.of("select count (*) from lineitem where linenumber > 3"));
+                    noAriaSession(), "select count (*) from lineitem where linenumber > 3");
     }
 }
