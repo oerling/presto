@@ -461,12 +461,7 @@ public class Filters
                 if (length != lower.length) {
                     return false;
                 }
-                for (int i = 0; i < length; i++) {
-                    if (buffer[i + offset] != lower[i]) {
-                        return false;
-                    }
-                    return true;
-                }
+                return memcmp(buffer, offset, length, upper, 0, upper.length) == 0;
             }
             if (lower != null) {
                 int lowerCmp = memcmp(buffer, offset, length, lower, 0, lower.length);
@@ -997,6 +992,9 @@ public class Filters
 
     public static int getNumDistinctPositionFilters(Filter filter)
     {
+        if (filter == null) {
+            return 0;
+        }
         if (filter instanceof PositionalFilter) {
             return ((PositionalFilter) filter).getParent().getFilters().size();
         }
@@ -1005,6 +1003,9 @@ public class Filters
 
     public static List<Filter> getDistinctPositionFilters(Filter filter)
     {
+        if (filter == null) {
+            return ImmutableList.of();
+        }
         if (filter instanceof PositionalFilter) {
             return ((PositionalFilter) filter).getParent().getFilters().entrySet().stream().map(c -> c.getValue()).collect(toList());
         }
