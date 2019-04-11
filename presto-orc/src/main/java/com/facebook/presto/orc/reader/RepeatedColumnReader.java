@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.orc.reader;
 
-import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.QualifyingSet;
 // import com.facebook.presto.orc.stream.BooleanInputStream;
 // import com.facebook.presto.orc.stream.LongInputStream;
@@ -21,7 +20,7 @@ import com.facebook.presto.orc.QualifyingSet;
 // import com.facebook.presto.spi.type.Type;
 
 // import java.io.IOException;
- import java.util.Arrays;
+import java.util.Arrays;
 import java.util.OptionalInt;
 
 import static com.google.common.base.Verify.verify;
@@ -167,7 +166,7 @@ abstract class RepeatedColumnReader
         return total;
     }
 
-@Override
+    @Override
     public void erase(int end)
     {
         if (outputChannel == -1 || numValues == 0) {
@@ -232,5 +231,4 @@ abstract class RepeatedColumnReader
             elementOffset = Arrays.copyOf(elementOffset, newSize);
         }
     }
-
 }
