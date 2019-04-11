@@ -47,15 +47,13 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.Set;
 
 import static com.facebook.presto.orc.QualifyingSet.roundupCapacity;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -92,7 +90,7 @@ public class MapDirectStreamReader
     private HashSet<Long> longSubscripts;
     private HashSet<Slice> sliceSubscripts;
     private boolean mayPruneKey;
-    private boolean filterIsSetup = false;
+    private boolean filterIsSetup;
     private Filters.PositionalFilter positionalFilter;
     private Filter[] elementFilters;
     // For each map in the inputQualifyingSet, the number of element
@@ -369,14 +367,14 @@ public class MapDirectStreamReader
         valueStreamReader.startRowGroup(dataStreamSources);
     }
 
-            @Override
-            protected void eraseContent(int innerEnd)
+    @Override
+    protected void eraseContent(int innerEnd)
     {
         keyStreamReader.erase(innerEnd);
         valueStreamReader.erase(innerEnd);
     }
 
-        @Override
+    @Override
     protected void compactContent(int[] innerSurviving, int innerSurvivingDase, int numInnerSurviving)
     {
         keyStreamReader.compactValues(innerSurviving, innerSurvivingBase, numInnerSurviving);
@@ -414,7 +412,7 @@ public class MapDirectStreamReader
         hasPositionalFilter = filter instanceof Filters.PositionalFilter;
         longKeyToFilter = new Long2ObjectOpenHashMap[numFilters];
         sliceKeyToFilter = new HashMap[numFilters];
-        for (Filter  mapFilter : Filters.getDistinctPositionFilters(filter)) {
+        for (Filter mapFilter : Filters.getDistinctPositionFilters(filter)) {
             if (mapFilter == Filters.isNotNull()) {
                 continue;
             }
@@ -457,9 +455,12 @@ public class MapDirectStreamReader
                 filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
             }
             else if (sliceSubscripts != null) {
-                filters = sliceSubscripts.stream().map(subscript -> { byte[] bytes = new byte[subscript.length()];
+                filters = sliceSubscripts.stream()
+                    .map(subscript -> {
+                        byte[] bytes = new byte[subscript.length()];
                         subscript.getBytes(0, bytes);
-                        return new Filters.BytesRange(bytes, true, bytes, true, false); }).collect(toList());
+                        return new Filters.BytesRange(bytes, true, bytes, true, false); })
+                    .collect(toList());
             }
             Filter filter = null;
             if (filters != null && filters.size() == 1) {
@@ -523,10 +524,10 @@ public class MapDirectStreamReader
                 numDefinedFilters = keyToFilter.size();
                 for (int key = startKeyIndex; key < keyIndex; key++) {
                     Filter filterAtPosition = keyToFilter.get(keyBlock.getLong(key + initialNumElements, 0));
-                if (filterAtPosition != null) {
-                    filterCount++;
-                    elementFilters[key] = filterAtPosition;
-                }
+                    if (filterAtPosition != null) {
+                        filterCount++;
+                        elementFilters[key] = filterAtPosition;
+                    }
                 }
             }
             else if (useDictionary) {
@@ -567,7 +568,7 @@ public class MapDirectStreamReader
             return false;
         }
         DictionaryBlock keys = (DictionaryBlock) keyBlock;
-        VariableWidthBlock newDictionary = (VariableWidthBlock)keys.getDictionary();
+        VariableWidthBlock newDictionary = (VariableWidthBlock) keys.getDictionary();
         if (previousKeyDictionary == newDictionary) {
             return true;
         }
@@ -631,21 +632,21 @@ public class MapDirectStreamReader
                 // The position in inputQualifyingSet for each value in
                 // keyBlock. Positions with the same value in this array
                 // belong to the same map.
-            int[] keyInputNumbers;
-            if (keyStreamReader.getFilter() != null) {
-                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
-                int numKeys = keyQualifyingSet.getPositionCount();
-                int[] inputNumbers = innerQualifyingSet.getInputNumbers();
-                keyInputNumbers = keyQualifyingSet.getInputNumbers();
-                for (int i = 0; i < numKeys; i++) {
-                    keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
+                int[] keyInputNumbers;
+                if (keyStreamReader.getFilter() != null) {
+                    keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                    int numKeys = keyQualifyingSet.getPositionCount();
+                    int[] inputNumbers = innerQualifyingSet.getInputNumbers();
+                    keyInputNumbers = keyQualifyingSet.getInputNumbers();
+                    for (int i = 0; i < numKeys; i++) {
+                        keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
+                    }
                 }
-            }
-            else {
-                keyQualifyingSet = innerQualifyingSet;
-                keyInputNumbers = innerQualifyingSet.getInputNumbers();
-            }
-            setupPositionalFilter(keyInputNumbers);
+                else {
+                    keyQualifyingSet = innerQualifyingSet;
+                    keyInputNumbers = innerQualifyingSet.getInputNumbers();
+                }
+                setupPositionalFilter(keyInputNumbers);
             }
             else {
                 if (keyStreamReader.getFilter() == null) {
@@ -769,7 +770,6 @@ public class MapDirectStreamReader
         }
         elementOffset[numValues + numInnerResults] = numInnerSurviving + initialNumElements;
         for (int i = beginResult; i < endResult; i++) {
-
             innerSurviving[numInnerSurviving++] = i;
         }
         elementOffset[numValues + numInnerResults + 1] = numInnerSurviving + initialNumElements;
@@ -814,7 +814,6 @@ public class MapDirectStreamReader
         elementOffset[position] = -1;
     }
 
-
     @Override
     public String toString()
     {
@@ -846,5 +845,4 @@ public class MapDirectStreamReader
     {
         return keyStreamReader.mustExtractValues(isNewStripe) || valueStreamReader.mustExtractValues(isNewStripe);
     }
-
 }
