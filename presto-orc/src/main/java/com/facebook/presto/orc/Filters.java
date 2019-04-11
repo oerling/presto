@@ -14,9 +14,9 @@
 package com.facebook.presto.orc;
 
 import com.facebook.presto.spi.SubfieldPath;
-
 import com.google.common.collect.ImmutableList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -25,11 +25,9 @@ import java.util.Objects;
 
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
 import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
-
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
-
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
@@ -523,7 +521,7 @@ public class Filters
             }
         }
 
-            public Map<SubfieldPath.PathElement, Filter> getFilters()
+        public Map<SubfieldPath.PathElement, Filter> getFilters()
         {
             return filters;
         }
@@ -779,7 +777,7 @@ public class Filters
         int failNext;
         // The StructFilter from which the positional filters are derived.
         StructFilter parent;
-        
+
         public PositionalFilter(StructFilter parent)
         {
             super(false);
@@ -876,8 +874,8 @@ public class Filters
             return true;
         }
 
-                @Override
-                public boolean testDouble(double value)
+        @Override
+        public boolean testDouble(double value)
         {
             if (failNext > 0) {
                 filterIdx++;
@@ -964,7 +962,7 @@ public class Filters
                 // The remaining elements of the containing array/map will also be disqualified.
                 if (allFilters) {
                     int nthArray = filterContainer[filterIdx];
-                    for (int i = filterIdx + 1; i <numFilters; i++) {
+                    for (int i = filterIdx + 1; i < numFilters; i++) {
                         if (filterContainer[i] != nthArray) {
                             break;
                         }
@@ -973,7 +971,7 @@ public class Filters
                 }
                 else {
                     int nthArray = filterContainer[filterOrder[filterIdx]];
-                    for (int i = filterIdx + 1; i <numFilters; i++) {
+                    for (int i = filterIdx + 1; i < numFilters; i++) {
                         if (filterContainer[filterOrder[i]] != nthArray) {
                             break;
                         }
