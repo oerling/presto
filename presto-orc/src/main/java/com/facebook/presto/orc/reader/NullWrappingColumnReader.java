@@ -92,11 +92,11 @@ abstract class NullWrappingColumnReader
 
     protected void addNullToKeep(int position, int inputIndex)
     {
-        if (nullsToAdd == null || nullsToAdd.length < numNullsToAdd) {
+        if (nullsToAdd == null || nullsToAdd.length <= numNullsToAdd) {
             nullsToAdd = resize(nullsToAdd, numNullsToAdd);
         }
 
-        if (nullsToAddIndexes == null || nullsToAddIndexes.length < nullsToAdd.length) {
+        if (nullsToAddIndexes == null || nullsToAddIndexes.length <= nullsToAdd.length) {
             nullsToAddIndexes = resize(nullsToAddIndexes, numNullsToAdd);
         }
 
