@@ -9,3 +9,4 @@
 ../test.sh tinystrmap1.sql
 ../test.sh tinystrmap2.sql
 ../test.sh tinystrmap3.sql
+../test.sh tinystrmap4.sql

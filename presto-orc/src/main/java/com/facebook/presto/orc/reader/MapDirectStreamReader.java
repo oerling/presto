@@ -394,7 +394,7 @@ public class MapDirectStreamReader
 
     public int getAverageResultSize()
     {
-        return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * innerRowCount / (1 + outerRowCount)));
+        return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * numNestedRowsRead / (1 + numContainerRowsRead)));
     }
 
     @Override
@@ -689,6 +689,7 @@ public class MapDirectStreamReader
                     }
                 }
                 keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+                numContainerRowsRead += numInnerResults;
             }
             else {
                 numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;
@@ -773,6 +774,7 @@ public class MapDirectStreamReader
         }
         elementOffset[numValues + numInnerResults + 1] = numInnerSurviving + initialNumElements;
         numInnerResults++;
+        numNestedRowsRead += endResult - beginResult;
     }
 
     @Override

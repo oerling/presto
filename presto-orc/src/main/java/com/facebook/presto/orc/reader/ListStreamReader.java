@@ -282,7 +282,7 @@ public class ListStreamReader
 
     public int getAverageResultSize()
     {
-        return (int) (1 + (elementStreamReader.getAverageResultSize() * innerRowCount / (1 + outerRowCount)));
+        return (int) (1 + (elementStreamReader.getAverageResultSize() * numNestedRowsRead / (1 + numContainerRowsRead)));
     }
 
     @Override
@@ -431,6 +431,7 @@ public class ListStreamReader
                 outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numElementResults);
             }
             elementStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+            numContainerRowsRead += numInnerResults;
         }
         else {
             numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;
@@ -507,7 +508,7 @@ public class ListStreamReader
 
     private void addArrayToResult(int inputIndex, int beginResult, int endResult)
     {
-        if (outputChannel == -1) {
+        if (!outputChannelSet) {
             return;
         }
         elementOffset[numValues + numInnerResults] = numInnerSurviving + initialNumElements;
@@ -516,6 +517,7 @@ public class ListStreamReader
         }
         elementOffset[numValues + numInnerResults + 1] = numInnerSurviving + initialNumElements;
         numInnerResults++;
+        numNestedRowsRead += endResult - beginResult;
     }
 
     @Override

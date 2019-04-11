@@ -35,16 +35,6 @@ abstract class RepeatedColumnReader
     protected int[] elementLength;
     // Start of each row of inputQualifyingSet in the inner  data.
     protected int[] elementStart;
-    // Filter to apply to the corresponding element of innerQualifyingSet.
-    Filter[] elementFilter;
-
-    // Number of filters for the corresponding element of the
-    // inputQualifyingSet. If this is less than the number of filters
-    // per element, then this means that the subscript of some filter
-    // did not exist in this element. Thus, if this many filters
-    // passed, we have an error because a missing subscript would have
-    // been accessed.
-    int[] numElementFilters;
 
     // Used for compactValues of repeated content.
     protected int[] innerSurviving;
@@ -52,9 +42,9 @@ abstract class RepeatedColumnReader
     protected int innerSurvivingBase;
 
     // Number of rows of nested content read. This is after applying any pushed down filters.
-    protected long innerRowCount;
-    // Number of top level rows read.
-    protected long outerRowCount;
+    protected long numNestedRowsRead;
+    // Number of arrays/maps read after applying pushed down filters.
+    protected long numContainerRowsRead;
 
     RepeatedColumnReader()
     {

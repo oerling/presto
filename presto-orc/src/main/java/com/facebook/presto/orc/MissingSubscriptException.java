@@ -18,10 +18,11 @@ public class MissingSubscriptException
 {
     public MissingSubscriptException()
     {
-        @Override
-            String getMessage()
-        {
-            return "Array subscript out of bounds or map key not present";
-        }
+    }
+
+    @Override
+    public String getMessage()
+    {
+        return "Array subscript out of bounds or map key not present";
     }
 }
