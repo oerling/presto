@@ -17,6 +17,7 @@ import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.Filters;
 import com.facebook.presto.orc.Filters.StructFilter;
+import com.facebook.presto.orc.MissingSubscriptException;
 import com.facebook.presto.orc.OrcCorruptionException;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
@@ -100,9 +101,9 @@ public class MapDirectStreamReader
     // Count of elements at the beginning of current call to scan().
     private int initialNumElements;
     private Block keyBlock;
-    // Qualifying rows after filter on key. If no filter on key, this is innerQualifyingSet.
+    // Qualifying rows after filter on key. If no filter on key, this
+    // is innerQualifyingSet.
     private QualifyingSet keyQualifyingSet;
-
     // Maps from slice or long key to the filter to apply to the
     // value.  If this has a positional filter, these arrays are
     // indexed on the ordinal of the StructFilter that corresponds to
@@ -111,14 +112,15 @@ public class MapDirectStreamReader
     // DictionaryBlock, then longKeyToFilter is used with dictionary
     // ids. This will update the mappings as needed as dictionaries
     // changee between stripes and row groups.
-    Long2ObjectOpenHashMap<Filter>[] longKeyToFilter;
-    HashMap<Slice, Filter>[] sliceKeyToFilter;
-    VariableWidthBlock previousKeyDictionary;
+    private Long2ObjectOpenHashMap<Filter>[] longKeyToFilter;
+    private HashMap<Slice, Filter>[] sliceKeyToFilter;
+    private VariableWidthBlock previousKeyDictionary;
     // If the map has a positional filter, this is the number of
     // element filters for each map. Null if no positional filter.
-    int[] localNumFilters;
-    int globalNumFilters;
-    boolean hasPositionalFilter;
+    private int[] localNumFilters;
+    private int globalNumFilters;
+    private boolean hasPositionalFilter;
+
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
         super();
@@ -680,8 +682,13 @@ public class MapDirectStreamReader
                 for (int i = 0; i < numInput; i++) {
                     outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numValueResults);
                 }
-                keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
                 valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+                if (filter != null) {
+                    for (int i = 0; i < numInnerSurviving; i++) {
+                        innerSurviving[i] = resultInputNumbers[innerSurviving[i]];
+                    }
+                }
+                keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
             }
             else {
                 numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;

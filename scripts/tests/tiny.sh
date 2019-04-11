@@ -1,1 +1,11 @@
 ../test.sh tinylist1.sql
+../test.sh tinylist2.sql
+../test.sh tinylist3.sql
+../test.sh tinylist4.sql
+../test.sh tinymap1.sql
+../test.sh tinymap2.sql
+../test.sh tinymap3.sql
+../test.sh tinymap4.sql
+../test.sh tinystrmap1.sql
+../test.sh tinystrmap2.sql
+../test.sh tinystrmap3.sql

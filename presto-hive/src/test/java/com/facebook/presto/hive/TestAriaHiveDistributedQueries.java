@@ -464,4 +464,10 @@ public class TestAriaHiveDistributedQueries
                     "and if (linenumber = 3, false, partkey / (linenumber - 2) >= 0)",
                     noAriaSession(), "select count (*) from lineitem where linenumber > 3");
     }
+
+    @Test
+    public void testRepeated()
+    {
+        assertQuery(ariaSession(), "select map(array[1], array[2])", noAriaSession());
+    }
 }

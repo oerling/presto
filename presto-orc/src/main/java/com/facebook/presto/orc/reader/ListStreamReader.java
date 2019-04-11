@@ -17,6 +17,7 @@ import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.Filters;
 import com.facebook.presto.orc.Filters.StructFilter;
+import com.facebook.presto.orc.MissingSubscriptException;
 import com.facebook.presto.orc.OrcCorruptionException;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
@@ -499,7 +500,7 @@ public class ListStreamReader
         int total = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < total) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
-            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new IllegalArgumentException("List subscript out of bounds"));
+            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException());
         }
         return outputIndex;
     }
