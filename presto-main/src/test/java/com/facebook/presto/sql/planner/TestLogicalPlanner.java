@@ -1122,6 +1122,21 @@ public class TestLogicalPlanner
                 anyTree(
                         tableScan("lineitem_ext", ImmutableMap.of("nested_ints", "nested_ints"))),
                 plan -> assertSubfieldPaths(plan, "lineitem_ext", ImmutableMap.of("nested_ints", ImmutableList.of(new SubfieldPath("nested_ints[*][2]")))));
+
+        assertPlanWithSession(
+                              "SELECT string_to_int_map['foo'] FROM lineitem_ext",
+                              pushdownSubfieldsIntoConnector, false,
+                              anyTree(
+                                      project(
+                                              ImmutableMap.of("map_filtered", expression(format("filter_by_subscript_paths(string_to_int_map, %s)[cast('foo' as varchar)]", optimizeExpression("array['string_to_int_map[\"foo\"]']", new ArrayType(createVarcharType(24)))))),
+                                              tableScan("lineitem_ext", ImmutableMap.of("string_to_int_map", "string_to_int_map")))));
+
+        assertPlanWithSession(
+                "SELECT ints[orderkey] FROM lineitem_ext",
+                pushdownSubfieldsIntoConnector, false,
+                anyTree(
+                        project(ImmutableMap.of("int_at_orderkey", expression("ints[orderkey]")),
+                                tableScan("lineitem_ext", ImmutableMap.of("ints", "ints", "orderkey", "orderkey")))));
     }
 
     private void assertSubfieldPaths(Plan plan, String tableName, Map<String, List<SubfieldPath>> expectedSubfieldPathsPerColumn)
