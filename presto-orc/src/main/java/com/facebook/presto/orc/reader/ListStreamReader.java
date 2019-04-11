@@ -43,10 +43,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -97,7 +95,7 @@ public class ListStreamReader
     // Count of elements at the beginning of current call to scan().
     int initialNumElements;
     Long2ObjectOpenHashMap<Filter>[] subscriptToFilter;
-    
+
     public ListStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
@@ -263,8 +261,10 @@ public class ListStreamReader
 
     @Override
     protected void eraseContent(int innerEnd)
-    {elementStreamReader.erase(innerEnd);
+    {
+        elementStreamReader.erase(innerEnd);
     }
+
     @Override
     protected void compactContent(int[] innerSurviving, int innerSurvivingDase, int numInnerSurviving)
     {
@@ -305,7 +305,7 @@ public class ListStreamReader
             int numFilters = Filters.getNumDistinctPositionFilters(filter) + 1;
             subscriptToFilter = new Long2ObjectOpenHashMap[numFilters];
             setupFilters:
-            for (Filter  arrayFilter : Filters.getDistinctPositionFilters(filter)) {
+            for (Filter arrayFilter : Filters.getDistinctPositionFilters(filter)) {
                 if (arrayFilter == Filters.isNotNull()) {
                     continue;
                 }
@@ -336,7 +336,7 @@ public class ListStreamReader
                 globalNumFilters = subscriptToFilter[0].size();
             }
         }
-            elementStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(0));
+        elementStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(0));
         filterIsSetup = true;
     }
 
@@ -463,7 +463,7 @@ public class ListStreamReader
                     }
                 }
             }
-            }
+        }
         endScan(presentStream);
     }
 
@@ -524,7 +524,7 @@ public class ListStreamReader
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
         int innerFirstRows = getInnerPosition(numFirstRows);
-            int[] offsets = mayReuse ? elementOffset : Arrays.copyOf(elementOffset, numFirstRows + 1);
+        int[] offsets = mayReuse ? elementOffset : Arrays.copyOf(elementOffset, numFirstRows + 1);
         boolean[] nulls = valueIsNull == null ? null
             : mayReuse ? valueIsNull : Arrays.copyOf(valueIsNull, numFirstRows);
         Block elements;
