@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -477,7 +478,7 @@ public class ListStreamReader
         int filterHits = 0;
         int count = 0;
         int initialOutputIndex = outputIndex;
-        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex]]) {
+        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex] - posInRowGroup]) {
             return outputIndex;
         }
         int[] inputNumbers = innerQualifyingSet.getInputNumbers();

@@ -737,7 +737,7 @@ public class MapDirectStreamReader
         int filterHits = 0;
         int count = 0;
         int initialOutputIndex = outputIndex;
-        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex]]) {
+        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex] - posInRowGroup]) {
             return outputIndex;
         }
         int[] inputNumbers = keyQualifyingSet.getInputNumbers();
