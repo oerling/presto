@@ -23,20 +23,21 @@ import com.facebook.presto.orc.QualifyingSet;
 import java.util.Arrays;
 import java.util.OptionalInt;
 
+import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.google.common.base.Verify.verify;
 
 abstract class RepeatedColumnReader
         extends NullWrappingColumnReader
 {
     // Starting offset of each result in the element reader's Block.
-    protected int[] elementOffset;
+    protected int[] elementOffset = new int[1];
     // Length of each row in the input QualifyingSet.
-    protected int[] elementLength;
+    protected int[] elementLength = new int[1];
     // Start of each row of inputQualifyingSet in the inner  data.
-    protected int[] elementStart;
+    protected int[] elementStart = new  int[1];
 
     // Used for compactValues of repeated content.
-    protected int[] innerSurviving;
+    protected int[] innerSurviving = new int[1];
     protected int numInnerSurviving;
     protected int innerSurvivingBase;
 
@@ -67,8 +68,8 @@ abstract class RepeatedColumnReader
             int position = surviving[i] + base;
             numInner += elementOffset[position + 1] - elementOffset[position];
         }
-        if (innerSurviving == null || innerSurviving.length < numInner) {
-            innerSurviving = new int[numInner];
+        if (innerSurviving.length < numInner) {
+            innerSurviving = newIntArrayForReuse(numInner);
         }
         numInnerSurviving = numInner;
         int fill = 0;
@@ -94,8 +95,8 @@ abstract class RepeatedColumnReader
         innerQualifyingSet.setParent(inputQualifyingSet);
         int[] inputRows = inputQualifyingSet.getPositions();
         int numActive = inputQualifyingSet.getPositionCount();
-        if (elementLength == null || elementLength.length < numActive) {
-            elementLength = new int[numActive];
+        if (elementLength.length < numActive) {
+            elementLength = newIntArrayForReuse(numActive);
             elementStart = new int[numActive];
         }
         innerQualifyingSet.reset(countInnerActive());
@@ -211,6 +212,7 @@ abstract class RepeatedColumnReader
         }
         compactQualifyingSet(surviving, numSurviving);
     }
+
     protected abstract void eraseContent(int innerEnd);
 
     protected abstract void compactContent(int[] innerSurviving, int innerSurvivingDase, int numInnerSurviving);
