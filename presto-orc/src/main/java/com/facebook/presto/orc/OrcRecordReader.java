@@ -32,6 +32,7 @@ import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageSourceOptions;
 import com.facebook.presto.spi.PageSourceOptions.ErrorSet;
 import com.facebook.presto.spi.PageSourceOptions.FilterFunction;
+import com.facebook.presto.spi.PageSourceOptions.ScanInfo;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.block.Block;
@@ -81,7 +82,7 @@ public class OrcRecordReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(OrcRecordReader.class).instanceSize();
     public static final long UNLIMITED_BUDGET = Long.MAX_VALUE;
-    private static final int MIN_BATCH_ROWS = 4;
+    public static final int MIN_BATCH_ROWS = 4;
     private static final int ROW_GROUP_REVIEW_INTERVAL = 1;
     private static final int BATCH_HARD_SHRINK_FACTOR = 16;
     private static final int BATCH_SOFT_SHRINK_FACTOR = 16;
@@ -148,6 +149,7 @@ public class OrcRecordReader
     private Throwable constantError;
     private Block[] constantBlocks;
     private List<FilterFunction> nonDeterministicConstantFilters;
+    private ScanInfo scanInfo;
 
     public OrcRecordReader(
             Map<Integer, Type> includedColumns,
@@ -787,6 +789,7 @@ public class OrcRecordReader
                 }
             }
         }
+        scanInfo = options.getScanInfo();
         FilterFunction[] filterFunctions = options.getFilterFunctions();
         boolean anyConstantFilterFunctions = false;
         ImmutableList.Builder<FilterFunction> nonDeterministicBuilder = ImmutableList.builder();
@@ -814,6 +817,11 @@ public class OrcRecordReader
             }
         }
         nonDeterministicConstantFilters = nonDeterministicBuilder.build();
+        OrcAdaptationStats adaptation = (OrcAdaptationStats) scanInfo.getStats();
+        if (adaptation != null) {
+            ariaBatchRows = adaptation.getBatchSize();
+            setReaderBudget();
+        }
         reader = new ColumnGroupReader(
                 streamReaders,
                 presentColumns,
@@ -824,7 +832,8 @@ public class OrcRecordReader
                 filters,
                 anyConstantFilterFunctions ? Arrays.stream(filterFunctions).filter(f -> !isConstantFilterFunction(f, constantBlocks)).toArray(FilterFunction[]::new) : filterFunctions,
                 enforceMemoryBudget,
-                constantBlocks);
+                constantBlocks,
+                adaptation);
         targetResultBytes = options.getTargetBytes();
         reader.setResultSizeBudget(targetResultBytes);
     }
@@ -865,6 +874,7 @@ public class OrcRecordReader
                         // If file ends before 2 reorder checks, do
                         // one more. Subsequent splits may start with
                         // the adaptation from the previous one.
+                        updateAdaptation();
                         reader.maybeReorderFilters();
                     }
                     filePosition = fileRowCount;
@@ -874,7 +884,7 @@ public class OrcRecordReader
                 if (qualifyingSet == null) {
                     qualifyingSet = new QualifyingSet();
                 }
-                qualifyingSet.setRange(0, Math.min(ariaBatchRows, currentGroupRowCount));
+                qualifyingSet.setRange(0, Math.min(ariaBatchRows, currentGroupRowCount), true);
                 reader.setQualifyingSets(qualifyingSet, null);
                 if (currentRowGroup != 0 && (currentRowGroup % ROW_GROUP_REVIEW_INTERVAL == 0)) {
                     // Decay row size stats and reconsider filter
@@ -891,7 +901,7 @@ public class OrcRecordReader
                 }
             }
             if (qualifyingSet.isEmpty()) {
-                qualifyingSet.setRange(qualifyingSet.getEnd(), Math.min(qualifyingSet.getEnd() + ariaBatchRows, currentGroupRowCount));
+                qualifyingSet.setRange(qualifyingSet.getEnd(), Math.min(qualifyingSet.getEnd() + ariaBatchRows, currentGroupRowCount), true);
             }
             long bytesBeforeAdvance = reader.getResultSizeInBytes();
             int numResultsBeforeAdvance = reader.getNumResults();
@@ -901,6 +911,7 @@ public class OrcRecordReader
             if (qualifyingSet.isEmpty()) {
                 continue;
             }
+            int firstPosition = qualifyingSet.getPositions()[0];
             try {
                 reader.advance();
             }
@@ -926,6 +937,7 @@ public class OrcRecordReader
                 }
                 continue;
             }
+            scanInfo.incrementScannedRows(qualifyingSet.getEnd() - firstPosition);
             if (adjustAndCheckIfFullBatch(numResultsBeforeAdvance, bytesBeforeAdvance)) {
                 return resultPage();
             }
@@ -986,5 +998,10 @@ public class OrcRecordReader
         for (FilterFunction filter : nonDeterministicConstantFilters) {
             evaluateConstantFilterFunction(filter, constantBlocks, qualifyingSet);
         }
+    }
+
+    private void updateAdaptation()
+    {
+        scanInfo.setStats(new OrcAdaptationStats(ariaBatchRows));
     }
 }

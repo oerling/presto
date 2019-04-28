@@ -28,6 +28,7 @@ import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.PageSourceOptions;
+import com.facebook.presto.spi.PageSourceOptions.ScanInfo;
 import com.facebook.presto.spi.RecordCursor;
 import com.facebook.presto.spi.RecordPageSource;
 import com.facebook.presto.spi.UpdatablePageSource;
@@ -88,6 +89,8 @@ public class ScanFilterAndProjectOperator
 
     private boolean filterAndProjectPushedDown;
     private boolean reusePages;
+    private ScanInfo scanInfo = new ScanInfo();
+    private long previousNumScannedRows;
 
     protected ScanFilterAndProjectOperator(
             OperatorContext operatorContext,
@@ -345,7 +348,8 @@ public class ScanFilterAndProjectOperator
                 projectionPushdownChannels == null ? channels : projectionPushdownChannels,
                 reusePages,
                 filters,
-                mergingOutput.getMinPageSizeInBytes());
+                mergingOutput.getMinPageSizeInBytes(),
+                scanInfo);
 
         boolean filterPushedDown = pageSource.pushdownFilterAndProjection(options);
         if (filterPushedDown && projectionPushedDown) {
@@ -453,8 +457,15 @@ public class ScanFilterAndProjectOperator
 
     private Page recordProcessedInput(Page page)
     {
-        operatorContext.recordProcessedInput(0, page.getPositionCount());
-        // account processed bytes from lazy blocks only when they are loaded
+        if (isAriaScanEnabled(operatorContext.getSession())) {
+            long numRows = scanInfo.getNumScannedRows();
+            operatorContext.recordProcessedInput(0, numRows - previousNumScannedRows);
+            previousNumScannedRows = numRows;
+        }
+        else {
+            operatorContext.recordProcessedInput(0, page.getPositionCount());
+        }
+            // account processed bytes from lazy blocks only when they are loaded
         Block[] blocks = new Block[page.getChannelCount()];
         for (int i = 0; i < page.getChannelCount(); ++i) {
             Block block = page.getBlock(i);

@@ -58,6 +58,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.roundupSize;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
@@ -392,7 +393,10 @@ public class MapDirectStreamReader
     @Override
     public int getAverageResultSize()
     {
-        return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * numNestedRowsRead / (1 + numContainerRowsRead)));
+        if (numNestedRowsRead == 0) {
+            return MapStreamReader.INITIAL_MAP_SIZE_GUESS;
+        }
+        return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * (numNestedRowsRead + 1) / (numContainerRowsRead + 1)));
     }
 
     @Override
@@ -401,8 +405,18 @@ public class MapDirectStreamReader
         if (!filterIsSetup) {
             setupFilterAndChannel();
         }
-        keyStreamReader.setResultSizeBudget(bytes / 2);
-        valueStreamReader.setResultSizeBudget(bytes / 2);
+        resultSizeBudget = bytes;
+        if (bytes == UNLIMITED_BUDGET) {
+            keyStreamReader.setResultSizeBudget(bytes);
+            valueStreamReader.setResultSizeBudget(bytes);
+            return;
+        }
+        double keySize = keyStreamReader.getAverageResultSize();
+        double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
+        double valueSize = valueStreamReader.getAverageResultSize() * Math.max(0.01, valueSelectivity);
+        double totalSize = valueSize + keySize;
+        keyStreamReader.setResultSizeBudget((long) (bytes * keySize / totalSize));
+        valueStreamReader.setResultSizeBudget((long) (bytes * valueSize / totalSize));
     }
 
     private void setupFilterAndChannel()
@@ -630,6 +644,7 @@ public class MapDirectStreamReader
         makeInnerQualifyingSet();
         ensureValuesCapacity(inputQualifyingSet.getPositionCount());
         if (innerQualifyingSet.getPositionCount() > 0) {
+            checkBudget();
             keyStreamReader.setInputQualifyingSet(innerQualifyingSet);
             keyStreamReader.scan();
             keyBlock = keyStreamReader.getBlock(keyStreamReader.getNumValues(), true);
@@ -669,6 +684,12 @@ public class MapDirectStreamReader
                 valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
                 valueStreamReader.scan();
                 innerPosInRowGroup = innerQualifyingSet.getEnd();
+                Filter valueFilter = valueStreamReader.getFilter();
+                if (valueFilter != null) {
+                    // We maintain selectivity for budget
+                    // checking. The time is not recorded.
+                    valueFilter.updateStats(keyQualifyingSet.getPositionCount(), valueStreamReader.getOutputQualifyingSet().getPositionCount(), 100);
+                }
             }
             else {
                 valueStreamReader.getOrCreateOutputQualifyingSet().reset(0);
@@ -699,6 +720,8 @@ public class MapDirectStreamReader
             }
             else {
                 numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;
+                numContainerRowsRead += numInnerResults;
+                numNestedRowsRead += valueStreamReader.getInputQualifyingSet().getPositionCount();
             }
         }
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
@@ -730,6 +753,21 @@ public class MapDirectStreamReader
             }
         }
         endScan(presentStream);
+    }
+
+    private void checkBudget()
+    {
+        int numInput = inputQualifyingSet.getPositionCount();
+        int numInner = innerQualifyingSet.getPositionCount();
+        double keysPerMap = (double) numInner / (double) numInput;
+        double numKeys = longSubscripts != null ? (double) longSubscripts.size() : sliceSubscripts != null ? (double) sliceSubscripts.size() : keysPerMap;
+        double innerCardinality = Math.min(numInner, numInner * (numKeys / keysPerMap));
+        double keySize = innerCardinality * keyStreamReader.getAverageResultSize();
+        double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
+        double valueSize = valueStreamReader.getAverageResultSize() * valueSelectivity;
+        if (keySize + valueSize * valueSelectivity > resultSizeBudget) {
+            throw batchTooLarge();
+        }
     }
 
     // Counts how many hits one map has. Adds the map to surviving

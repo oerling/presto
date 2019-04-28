@@ -24,6 +24,37 @@ public class PageSourceOptions
     private final int[] outputChannels;
     private final FilterFunction[] filterFunctions;
     private final int targetBytes;
+    private final ScanInfo scanInfo;
+
+    public abstract static class AdaptationStats
+    {
+    }
+
+    public static class ScanInfo
+    {
+        private AdaptationStats stats;
+        long numScannedRows;
+
+        public AdaptationStats getStats()
+        {
+            return stats;
+        }
+
+        public void setStats(AdaptationStats stats)
+        {
+            this.stats = stats;
+        }
+
+        public void incrementScannedRows(long numRows)
+        {
+            numScannedRows += numRows;
+        }
+
+        public long getNumScannedRows()
+        {
+            return numScannedRows;
+        }
+    }
 
     public static class FilterStats
     {
@@ -182,13 +213,24 @@ public class PageSourceOptions
                              int[] outputChannels,
                              boolean reusePages,
                              FilterFunction[] filterFunctions,
-                             int targetBytes)
+                             int targetBytes,
+                             ScanInfo scanInfo)
     {
         this.internalChannels = requireNonNull(internalChannels, "internalChannels is null");
         this.outputChannels = requireNonNull(outputChannels, "outputChannels is null");
         this.reusePages = reusePages;
         this.filterFunctions = requireNonNull(filterFunctions, "filterFunctions is null");
         this.targetBytes = targetBytes;
+        this.scanInfo = requireNonNull(scanInfo, "scanInfo is null");
+    }
+
+    public PageSourceOptions(int[] internalChannels,
+                             int[] outputChannels,
+                             boolean reusePages,
+                             FilterFunction[] filterFunctions,
+                                 int targetBytes)
+    {
+        this(internalChannels, outputChannels, reusePages, filterFunctions, targetBytes, new ScanInfo());
     }
 
     public int[] getInternalChannels()
@@ -214,5 +256,9 @@ public class PageSourceOptions
     public int getTargetBytes()
     {
         return targetBytes;
+    }
+    public ScanInfo getScanInfo()
+    {
+        return scanInfo;
     }
 }

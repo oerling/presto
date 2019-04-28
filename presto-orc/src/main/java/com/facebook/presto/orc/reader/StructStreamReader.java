@@ -343,7 +343,8 @@ public class StructStreamReader
                                        filters,
                                        new FilterFunction[0],
                                        true,
-                                       constantBlocks);
+                                       constantBlocks,
+                                       null);
     }
 
     @Override
