@@ -42,7 +42,8 @@ public class MapStreamReader
         implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(MapStreamReader.class).instanceSize();
-
+    // Guess a large size to force a small initial batch.
+    public static final int INITIAL_MAP_SIZE_GUESS = 200000;
     private final StreamDescriptor streamDescriptor;
     private final MapDirectStreamReader directReader;
     private final MapFlatStreamReader flatReader;
@@ -194,8 +195,7 @@ public class MapStreamReader
     public int getAverageResultSize()
     {
         if (currentReader == null) {
-            // This may be called before anything is set. In this case we return a minimal size corresponding to 2 longs per row plus one int for the offsets array.
-            return 2 * Long.BYTES + Integer.BYTES;
+            return INITIAL_MAP_SIZE_GUESS;
         }
         return currentReader.getAverageResultSize();
     }

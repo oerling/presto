@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.facebook.presto.orc.OrcRecordReader.MIN_BATCH_ROWS;
 import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static java.lang.String.format;
@@ -37,6 +38,7 @@ public class ColumnGroupReader
 {
     private static final int BUDGET_HARD_LIMIT_MULTIPLIER = 4;
     private static final int MIN_READER_BUDGET = 8000;
+    private static final double HIGH_SELECTIVITY = 0.02;
 
     private final FilterFunction[] filterFunctions;
     private final int[] outputChannels;
@@ -69,6 +71,7 @@ public class ColumnGroupReader
     private long[] readerBudget;
     private int[] filterResults;
     private Map<Integer, StreamReader> channelToStreamReader;
+    private final OrcAdaptationStats adaptation;
 
     public ColumnGroupReader(
             StreamReader[] streamReaders,
@@ -80,8 +83,10 @@ public class ColumnGroupReader
             Map<Integer, Filter> filters,
             FilterFunction[] filterFunctions,
             boolean enforceMemoryBudget,
-            Block[] constantBlocks)
+            Block[] constantBlocks,
+            OrcAdaptationStats adaptation)
     {
+        this.adaptation = adaptation;
         this.reorderFilters = true;
         this.enforceMemoryBudget = enforceMemoryBudget;
         this.outputChannels = requireNonNull(outputChannels, "outputChannels is null");
@@ -292,8 +297,9 @@ public class ColumnGroupReader
 
     // Divides the space available in the result Page between the
     // streams at firstStreamIdx and to the right of at.
-    private void makeResultBudget(int numRows)
+    private void makeResultBudget()
     {
+        int numRows = inputQualifyingSet.getPositionCount();
         if (targetResultBytes == UNLIMITED_BUDGET || !enforceMemoryBudget) {
             for (int i = 0; i < sortedStreamReaders.length; i++) {
                 StreamReader reader = sortedStreamReaders[i];
@@ -311,7 +317,7 @@ public class ColumnGroupReader
             bytesSoFar += reader.getResultSizeInBytes();
             Filter filter = reader.getFilter();
             if (filter != null) {
-                selectivity *= filter.getSelectivity();
+                selectivity *= Math.max(HIGH_SELECTIVITY, filter.getSelectivity());
             }
             if (reader.getChannel() != -1) {
                 readerBudget[i] = Math.max(MIN_READER_BUDGET, (long) (numRows * selectivity * reader.getAverageResultSize()));
@@ -322,7 +328,7 @@ public class ColumnGroupReader
                 // input.
                 if (i < filterFunctionOrder.length && filterFunctionOrder[i] != null) {
                     for (FilterFunction function : filterFunctionOrder[i]) {
-                        selectivity *= function.getSelectivity();
+                        selectivity *= Math.max(HIGH_SELECTIVITY, function.getSelectivity());
                     }
                 }
             }
@@ -338,6 +344,9 @@ public class ColumnGroupReader
             available = MIN_READER_BUDGET * sortedStreamReaders.length;
         }
         double grantedFraction = available < totalAsk ? (double) available / totalAsk : 1.0;
+        if (grantedFraction < 1 && inputQualifyingSet.mayTruncate() && reduceInputToFraction(grantedFraction)) {
+            return;
+        }
         for (int i = 0; i < sortedStreamReaders.length; i++) {
             StreamReader reader = sortedStreamReaders[i];
             if (reader.getChannel() != -1) {
@@ -347,6 +356,27 @@ public class ColumnGroupReader
                 reader.setResultSizeBudget((long) (readerBudget[i] * grantedFraction) * BUDGET_HARD_LIMIT_MULTIPLIER);
             }
         }
+    }
+
+    private boolean reduceInputToFraction(double fraction)
+    {
+        int numInput = inputQualifyingSet.getPositionCount();
+        if (numInput <= MIN_BATCH_ROWS) {
+            targetResultBytes = UNLIMITED_BUDGET;
+            makeResultBudget();
+            return true;
+        }
+        int newNumInput = Math.max(MIN_BATCH_ROWS, (int) (numInput * fraction));
+        if (newNumInput == numInput) {
+            return false;
+        }
+        inputQualifyingSet.setEnd(inputQualifyingSet.getPositions()[newNumInput]);
+        inputQualifyingSet.setPositionCount(newNumInput);
+        if (newNumInput == MIN_BATCH_ROWS) {
+            targetResultBytes = UNLIMITED_BUDGET;
+        }
+        makeResultBudget();
+        return true;
     }
 
     public Block[] getBlocks(int numFirstRows, boolean reuseBlocks, boolean fillAbsentWithNulls)
@@ -404,8 +434,8 @@ public class ColumnGroupReader
             inputQualifyingSet.eraseBelowRow(inputQualifyingSet.getEnd());
             return;
         }
+        makeResultBudget();
         QualifyingSet qualifyingSet = inputQualifyingSet;
-        makeResultBudget(qualifyingSet.getPositionCount());
         int numStreams = sortedStreamReaders.length;
         for (int streamIdx = 0; streamIdx < numStreams; ++streamIdx) {
             long startTime = 0;

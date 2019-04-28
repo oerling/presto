@@ -37,13 +37,18 @@ public class QualifyingSet
     static volatile int[] wholeRowGroup;
     static volatile int[] allZeros;
     private QualifyingSet parent;
+
     // True if the output of the scan whose input this is should be
     // expressed in row/input numbers of 'parent' of 'this'. If so,
     // 'inputNumbers' gives the translation. This is used when a
     // qualifying set is in terms of a non-null rows of a
     // struct/list/map but the results should be expressed in row
     // numbers that include the nulls.
-    boolean translateResultToParentRows;
+    private boolean translateResultToParentRows;
+
+    // Indicates that a reader may reset the end of this if it does
+    // not have enough space to process all positions.
+    private boolean mayTruncate;
 
     static {
         wholeRowGroup = new int[10000];
@@ -82,11 +87,12 @@ public class QualifyingSet
         return newWholeRowGroup;
     }
 
-    public void setRange(int begin, int end)
+    public void setRange(int begin, int end, boolean mayTruncate)
     {
         checkArgument(begin >= 0, "begin must not be negative");
         checkArgument(begin < end, "begin must be less than end");
         this.end = end;
+        this.mayTruncate = mayTruncate;
         int[] wholeRowGroup = ensureWholeRowGroupCapacity(end);
         if (positions == null || positions.length < end - begin) {
             positions = new int[end];
@@ -102,6 +108,11 @@ public class QualifyingSet
         }
 
         positionCount = end - begin;
+    }
+
+    public void setRange(int begin, int end)
+    {
+        setRange(begin, end, false);
     }
 
     public boolean isEmpty()
@@ -342,6 +353,11 @@ public class QualifyingSet
     public boolean hasErrors()
     {
         return errorSet != null && !errorSet.isEmpty();
+    }
+
+    public boolean mayTruncate()
+    {
+        return mayTruncate;
     }
 
     public void check()
