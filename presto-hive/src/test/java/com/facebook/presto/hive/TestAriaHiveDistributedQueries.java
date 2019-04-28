@@ -193,6 +193,14 @@ public class TestAriaHiveDistributedQueries
         log.info("Created %s rows for %s in %s", rows, tableName, nanosSince(start).convertToMostSuccinctTimeUnit());
     }
 
+    private Session noAriaSession()
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+            .setSystemProperty(ARIA_SCAN, "false")
+            .setCatalogSessionProperty(HiveQueryRunner.HIVE_CATALOG, HiveSessionProperties.ARIA_SCAN_ENABLED, "false")
+            .build();
+    }
+
     private Session ariaSession()
     {
         return Session.builder(getQueryRunner().getDefaultSession())
