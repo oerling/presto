@@ -90,10 +90,10 @@ public final class HiveQueryRunner
 
         DistributedQueryRunner queryRunner =
                 DistributedQueryRunner.builder(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))))
-            .setNodeCount(singleThreaded ? 1 : 4)
-                        .setExtraProperties(extraProperties)
-                        .setBaseDataDir(baseDataDir)
-                        .build();
+                .setNodeCount(singleThreaded ? 1 : 4)
+                .setExtraProperties(extraProperties)
+                .setBaseDataDir(baseDataDir)
+                .build();
         try {
             queryRunner.installPlugin(new TpchPlugin());
             queryRunner.createCatalog("tpch", "tpch");
