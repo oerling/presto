@@ -14,6 +14,7 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.memory.context.LocalMemoryContext;
+import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.OrcCorruptionException;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
@@ -30,6 +31,7 @@ import org.openjdk.jol.info.ClassLayout;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.DATA;
@@ -58,7 +60,7 @@ public class LongDirectStreamReader
 
     private LocalMemoryContext systemMemoryContext;
 
-    private ResultsProcessor resultsProcessor = new ResultsProcessor();
+    private AbstractResultsProcessor resultsProcessor;
 
     public LongDirectStreamReader(StreamDescriptor streamDescriptor, LocalMemoryContext systemMemoryContext)
     {
@@ -158,6 +160,19 @@ public class LongDirectStreamReader
 
         rowGroupOpen = false;
     }
+
+    @Override
+    public void setFilterAndChannel(Filter filter, int channel, int columnIndex, Type type)
+    {
+        super.setFilterAndChannel(filter, channel, columnIndex, type);
+        if (filter == null) {
+            resultsProcessor = new NoFilterResultsProcessor();
+        }
+        else {
+            resultsProcessor = new ResultsProcessor();
+        }
+    }
+
     @Override
     public void scan()
             throws IOException
@@ -193,8 +208,14 @@ public class LongDirectStreamReader
         endScan(presentStream);
     }
 
-    private final class ResultsProcessor
+    private abstract class AbstractResultsProcessor
             implements LongInputStream.ResultsConsumer
+    {
+        abstract void reset();
+    }
+
+    private final class ResultsProcessor
+            extends AbstractResultsProcessor
     {
         private int[] offsets;
         private int[] rowNumbers;
@@ -268,6 +289,34 @@ public class LongDirectStreamReader
                 values[numResults + numValues] = value;
             }
             ++numResults;
+        }
+    }
+
+    private final class NoFilterResultsProcessor
+            extends AbstractResultsProcessor
+    {
+        private long[] parentValues;
+        private int resultFill;
+
+        void reset()
+        {
+            parentValues = values;
+            resultFill = numValues;
+        }
+
+        @Override
+        public boolean consume(int offsetIndex, long value)
+        {
+            parentValues[resultFill++] = value;
+            return true;
+        }
+
+        @Override
+        public int consumeRepeated(int offsetIndex, long value, int count)
+        {
+            Arrays.fill(parentValues, resultFill, resultFill + count, value);
+            resultFill += count;
+            return count;
         }
     }
 
