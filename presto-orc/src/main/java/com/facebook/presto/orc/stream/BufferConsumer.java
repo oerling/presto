@@ -136,6 +136,69 @@ public class BufferConsumer
     {
         long result = 0;
         int shift = 0;
+        int available = available();
+        if (available >= 2 * Long.BYTES) {
+            long word = ByteArrays.getLong(buffer, position);
+            int count = 1;
+            result = word & 0x7f;
+            if ((word & 0x80) != 0) {
+                long control = word >>> 8;
+                long mask = 0x7f << 7;
+                while (true) {
+                    word = word >>> 1;
+                    result |= word & mask;
+                    count++;
+                    if ((control & 0x80) == 0) {
+                        break;
+                    }
+                    mask = mask << 7;
+                    control = control >>> 8;
+                }
+            }
+            if (count == 8) {
+                word = ByteArrays.getLong(buffer, position + 8);
+                result |= (word & 0x7f) << 56;
+                if ((word & 0x80) == 0) {
+                    count++;
+                }
+                else {
+                    result |= 1L << 63;
+                    count += 2;
+                }
+            }
+            position += count;
+        }
+        else {
+            byte currentByte;
+            do {
+                if (available == 0) {
+                    if (!refresh() || available() == 0) {
+                        throw new OrcCorruptionException(input.getOrcDataSourceId(), "End of stream in RLE Integer");
+                    }
+                    available = available();
+                }
+                currentByte = buffer[position];
+                result |= (long) (currentByte & 0x7f) << shift;
+                shift += 7;
+                available--;
+                position++;
+            }
+            while ((currentByte & 0x80) != 0);
+        }
+        if (signed) {
+            return zigzagDecode(result);
+        }
+        else {
+            return result;
+        }
+    }
+
+    public long decodeVarints(int count)
+            throws IOException
+    {
+        long result = 0;
+        int shift = 0;
+
         do {
             if (available() == 0) {
                 if (!refresh() || available() == 0) {
