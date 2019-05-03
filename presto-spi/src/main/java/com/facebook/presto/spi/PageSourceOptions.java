@@ -84,9 +84,12 @@ public class PageSourceOptions
 
         public void decayStats()
         {
-            nIn /= 2;
-            nOut /= 2;
-            time /= 2;
+            // Do not decay nOut down to 0 because this would make finite selectivity infinite.
+            if (nOut > 1) {
+                nIn /= 2;
+                nOut /= 2;
+                time /= 2;
+            }
         }
     }
 
