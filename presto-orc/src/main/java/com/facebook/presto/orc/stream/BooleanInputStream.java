@@ -138,6 +138,9 @@ public class BooleanInputStream
             vector[i] = nextBit();
             count += vector[i] ? 1 : 0;
         }
+        if (batchSize <= bitsInFirstByte) {
+            return count;
+        }
         verify(bitsInData == 0);
         int wholeBytes = (batchSize - bitsInFirstByte) / 8;
         int numFilled = bitsInFirstByte;
