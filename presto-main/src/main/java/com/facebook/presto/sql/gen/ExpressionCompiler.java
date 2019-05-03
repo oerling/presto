@@ -24,6 +24,8 @@ import com.facebook.presto.spi.relation.CallExpression;
 import com.facebook.presto.spi.relation.InputReferenceExpression;
 import com.facebook.presto.spi.relation.LambdaDefinitionExpression;
 import com.facebook.presto.spi.relation.RowExpression;
+import com.facebook.presto.spi.relation.SpecialFormExpression;
+import com.facebook.presto.spi.relation.SpecialFormExpression.Form;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -248,8 +250,8 @@ public class ExpressionCompiler
 
     private void collectConjuncts(RowExpression expression, ImmutableList.Builder<RowExpression> conjuncts)
     {
-        if (expression instanceof CallExpression && functionManager.getFunctionMetadata(((CallExpression) expression).getFunctionHandle()).getName().equals("AND")) {
-            for (RowExpression argument : ((CallExpression) expression).getArguments()) {
+        if (expression instanceof SpecialFormExpression && ((SpecialFormExpression) expression).getForm() == Form.AND) {
+            for (RowExpression argument : ((SpecialFormExpression) expression).getArguments()) {
                 collectConjuncts(argument, conjuncts);
             }
         }
@@ -292,7 +294,7 @@ public class ExpressionCompiler
         }
 
         ImmutableList.Builder<Supplier<PageFilter>> result = ImmutableList.builder();
-        CallExpression topAnd = (CallExpression) filter.get();
+        SpecialFormExpression topAnd = (SpecialFormExpression) filter.get();
         Map<Set<InputReferenceExpression>, List<RowExpression>> inputsToConjuncts = new HashMap();
         for (RowExpression conjunct : allConjuncts) {
             ImmutableSet.Builder<InputReferenceExpression> inputs = ImmutableSet.builder();
@@ -303,7 +305,7 @@ public class ExpressionCompiler
         for (List<RowExpression> conjuncts : inputsToConjuncts.values()) {
             RowExpression firstConjunct = conjuncts.get(0);
             for (int i = 1; i < conjuncts.size(); i++) {
-                firstConjunct = new CallExpression(topAnd.getDisplayName(), topAnd.getFunctionHandle(), topAnd.getType(), ImmutableList.of(firstConjunct, conjuncts.get(i)));
+                firstConjunct = new SpecialFormExpression(Form.AND, topAnd.getType(), ImmutableList.of(firstConjunct, conjuncts.get(i)));
             }
             result.add(pageFunctionCompiler.compileFilter(firstConjunct, classNameSuffix));
         }
