@@ -33,6 +33,7 @@ import com.facebook.presto.spi.RecordCursor;
 import com.facebook.presto.spi.RecordPageSource;
 import com.facebook.presto.spi.UpdatablePageSource;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.block.LazyBlock;
 import com.facebook.presto.spi.block.RunLengthEncodedBlock;
 import com.facebook.presto.spi.type.Type;
@@ -230,6 +231,18 @@ public class ScanFilterAndProjectOperator
         final ConnectorSession session;
         final PageFilter filter;
 
+        // If the function has a single argument and this is a
+        // DictionaryBlock, we can cache results. The cache is valid
+        // as long as the dictionary inside the block is physically
+        // the same.
+        byte[] dictionaryResults;
+        Block previousDictionary;
+        Page dictionaryPage;
+
+        private static final byte FILTER_NOT_EVALUATED = 0;
+        private static final byte FILTER_PASSED = 1;
+        private static final byte FILTER_FAILED = 2;
+
         FilterExpression(ConnectorSession session, PageFilter filter)
         {
             super(filter.getInputChannels().getInputChannels().stream().mapToInt(Integer::intValue).toArray(), 1);
@@ -249,6 +262,9 @@ public class ScanFilterAndProjectOperator
             int positionCount = page.getPositionCount();
             if (outputRows.length < positionCount) {
                 throw new IllegalArgumentException("outputRows too small");
+            }
+            if (inputChannels.length == 1 && page.getBlock(0) instanceof DictionaryBlock && filter.isDeterministic()) {
+                return evaluateAgainstDictionary(page, outputRows, errorSet);
             }
             try {
                 SelectedPositions positions = filter.filter(session, page);
@@ -284,6 +300,57 @@ public class ScanFilterAndProjectOperator
                     }
                 }
                 catch (RuntimeException e) {
+                    outputRows[numTrue++] = i;
+                    errorSet.addError(i, positionCount, e);
+                }
+            }
+            return numTrue;
+        }
+
+        private int evaluateAgainstDictionary(Page page, int[] outputRows, PageSourceOptions.ErrorSet errorSet)
+        {
+            PageFilter rowFilter = filter;
+            if (filter instanceof DictionaryAwarePageFilter) {
+                DictionaryAwarePageFilter dictionaryFilter = (DictionaryAwarePageFilter) filter;
+                rowFilter = dictionaryFilter.getFilter();
+            }
+            int numTrue = 0;
+            DictionaryBlock block = (DictionaryBlock) page.getBlock(0);
+            int positionCount = block.getPositionCount();
+            Block dictionary = block.getDictionary();
+            if (dictionary != previousDictionary) {
+                previousDictionary = dictionary;
+                int numEntries = dictionary.getPositionCount();
+                dictionaryPage = new Page(numEntries, dictionary);
+                if (dictionaryResults == null || dictionaryResults.length < numEntries) {
+                    // 0 means unevaluated, so no extra initialization needed.
+                    dictionaryResults = new byte[numEntries];
+                }
+                else {
+                    Arrays.fill(dictionaryResults, 0, numEntries, FILTER_NOT_EVALUATED);
+                }
+            }
+            for (int i = 0; i < positionCount; i++) {
+                int dictionaryPosition = block.getId(i);
+                byte result = dictionaryResults[dictionaryPosition];
+                if (result == FILTER_FAILED) {
+                    continue;
+                }
+                if (result == FILTER_PASSED) {
+                    outputRows[numTrue++] = i;
+                    continue;
+                }
+                try {
+                    if (rowFilter.filter(session, dictionaryPage, dictionaryPosition)) {
+                        outputRows[numTrue++] = i;
+                        dictionaryResults[dictionaryPosition] = FILTER_PASSED;
+                    }
+                    else {
+                        dictionaryResults[dictionaryPosition] = FILTER_FAILED;
+                    }
+                }
+                catch (RuntimeException e) {
+                    // We do not record errors in the dictionary results.
                     outputRows[numTrue++] = i;
                     errorSet.addError(i, positionCount, e);
                 }
