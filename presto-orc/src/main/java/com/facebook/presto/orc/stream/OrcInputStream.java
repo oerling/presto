@@ -54,6 +54,12 @@ public final class OrcInputStream
 
     private final LocalMemoryContext bufferMemoryUsage;
     private boolean isUncompressed;
+
+    // If the buffer is not compressed, it can have a header before
+    // the actual payload. The buffer filled by uncompressing always
+    // has payload at 0. This matters when seeking to checkpoint
+    // within a buffer that is already read.
+    private int bufferHeaderSize;
     private int uncompressedOffset;
     private Buffer bufferContainer = new Buffer();
 
@@ -221,7 +227,7 @@ public final class OrcInputStream
             discardedBuffer = false;
         }
 
-        if (decompressedOffset != position) {
+        if (decompressedOffset != position - bufferHeaderSize) {
             position = uncompressedOffset;
             if (available() < decompressedOffset) {
                 decompressedOffset -= available();
@@ -292,6 +298,7 @@ public final class OrcInputStream
         if (isUncompressed) {
             buffer = (byte[]) chunk.getBase();
             position = toIntExact(chunk.getAddress() - ARRAY_BYTE_BASE_OFFSET);
+            bufferHeaderSize = position;
             length = toIntExact(position + chunk.length());
         }
         else {
@@ -321,6 +328,7 @@ public final class OrcInputStream
             };
             length = decompressor.get().decompress((byte[]) chunk.getBase(), (int) (chunk.getAddress() - ARRAY_BYTE_BASE_OFFSET), chunk.length(), output);
             position = 0;
+            bufferHeaderSize = 0;
         }
         uncompressedOffset = position;
     }
