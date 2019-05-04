@@ -146,7 +146,7 @@ public class BooleanInputStream
         int numFilled = bitsInFirstByte;
         for (int i = 0; i < wholeBytes; i++) {
             byte data = byteStream.next();
-            count += Integer.bitCount(data);
+            count += Integer.bitCount(data & 0xff);
             vector[numFilled] = (data & 0x80) != 0;
             vector[numFilled + 1] = (data & 0x40) != 0;
             vector[numFilled + 2] = (data & 0x20) != 0;
