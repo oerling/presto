@@ -173,7 +173,6 @@ public class LongDirectStreamReader
         if (input.getPositionCount() > 0) {
             if (filter != null) {
                 int numInput = input.getPositionCount();
-                outputQualifyingSet.reset(numInput);
                 resultsProcessor.reset();
                 numInnerResults = dataStream.scan(input.getPositions(), 0, numInput, input.getEnd(), resultsProcessor);
                 outputQualifyingSet.setPositionCount(numInnerResults);

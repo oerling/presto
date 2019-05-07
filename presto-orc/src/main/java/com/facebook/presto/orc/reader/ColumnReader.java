@@ -199,8 +199,11 @@ abstract class ColumnReader
             throws IOException
     {
         numResults = 0;
-        if (filter != null && outputQualifyingSet == null) {
-            outputQualifyingSet = new QualifyingSet();
+        if (filter != null) {
+            if (outputQualifyingSet == null) {
+                outputQualifyingSet = new QualifyingSet();
+            }
+            outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
         }
         int rowsInRange = inputQualifyingSet.getEnd() - posInRowGroup;
         int neededLengths = 0;

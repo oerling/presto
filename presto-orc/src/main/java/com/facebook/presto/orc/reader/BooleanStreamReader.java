@@ -205,9 +205,6 @@ public class BooleanStreamReader
         int end = input.getEnd();
         int rowsInRange = end - posInRowGroup;
         int[] inputPositions = input.getPositions();
-        if (filter != null) {
-            output.reset(rowsInRange);
-        }
         ensureValuesCapacity(numValues + inputQualifyingSet.getPositionCount(), false);
 
         if (dataStream == null) {
@@ -216,7 +213,7 @@ public class BooleanStreamReader
             return;
         }
 
-        int nextActive = inputPositions[0];
+        int nextActive = input.getPositionCount() > 0 ? inputPositions[0] : -1;
         int activeIdx = 0;
         int toSkip = 0;
         for (int i = 0; i < rowsInRange; i++) {
