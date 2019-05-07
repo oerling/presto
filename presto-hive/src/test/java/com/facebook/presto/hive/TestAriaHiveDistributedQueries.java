@@ -20,21 +20,35 @@ import com.google.common.collect.ImmutableList;
 import io.airlift.log.Logger;
 import org.testng.annotations.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import static com.facebook.presto.SystemSessionProperties.ARIA_REUSE_PAGES;
 import static com.facebook.presto.SystemSessionProperties.ARIA_SCAN;
 import static com.facebook.presto.SystemSessionProperties.PUSHDOWN_SUBFIELDS;
 import static com.facebook.presto.hive.HiveQueryRunner.HIVE_CATALOG;
 import static com.facebook.presto.tests.QueryAssertions.copyTpchTables;
 import static com.facebook.presto.tpch.TpchMetadata.TINY_SCHEMA_NAME;
+import static com.google.common.io.Resources.getResource;
 import static io.airlift.tpch.TpchTable.getTables;
 import static io.airlift.units.Duration.nanosSince;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.fail;
 
 public class TestAriaHiveDistributedQueries
         extends AbstractTestQueryFramework
 {
     private static final Logger log = Logger.get(TestAriaHiveDistributedQueries.class);
+    Map<String, String> tables = new HashMap();
+    private Set<String> createdTables = new HashSet();
 
     protected TestAriaHiveDistributedQueries()
     {
@@ -578,5 +592,108 @@ public class TestAriaHiveDistributedQueries
                 "SELECT orderkey, linenumber, string_map['comment'], order_part_supp_map[2]\n" +
                 "FROM lineitem_aria_nulls\n" +
                 "WHERE linenumber = 1\n", noAriaSession());
+    }
+
+    private void readTables()
+            throws IOException
+    {
+        synchronized (getClass()) {
+            if (tables.size() > 0) {
+                return;
+            }
+            Path path = Paths.get(getResource("query_tests/test_tables.sql").getFile());
+            List<String> lines = Files.readAllLines(path);
+            String name = null;
+            String query = null;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (name == null) {
+                    if (line.startsWith("--table: ")) {
+                        name = line.split(" ")[1].trim();
+                    }
+                }
+                else if (name != null) {
+                    if (line.startsWith(";")) {
+                        tables.put(name, query);
+                        name = null;
+                        query = null;
+                        continue;
+                    }
+                    if (query == null) {
+                        query = line;
+                    }
+                    else {
+                        query = query + "\n" + line;
+                    }
+                }
+            }
+        }
+    }
+
+    private void testQuery(String[] tables, String query)
+            throws IOException
+    {
+        readTables();
+        for (String table : tables) {
+            createTestTable(table);
+        }
+        assertQuery(ariaSession(), query, noAriaSession());
+    }
+
+    private void createTestTable(String name)
+    {
+        synchronized (getClass()) {
+            if (createdTables.contains(name)) {
+                return;
+            }
+            String query = tables.get(name);
+            assertTrue(query != null, "No query defined for creating " + name);
+            createTable(getQueryRunner(), noAriaSession(), name, "CREATE TABLE " + name + " AS\n" + query);
+            createdTables.add(name);
+        }
+    }
+
+    private void runTestFile(String name)
+    {
+        Path path = Paths.get(getResource(name).getFile());
+        try {
+            List<String> lines = Files.readAllLines(path);
+            String[] names = null;
+            String query = null;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (names == null) {
+                    if (line.startsWith("--tables: ")) {
+                        names = line.substring(9).trim().split(" ,");
+                    }
+                }
+                else {
+                    if (line.startsWith(";")) {
+                        if (names == null || query == null) {
+                            fail("No query or --tables: declared before line " + i);
+                        }
+                        testQuery(names, query);
+                        names = null;
+                        query = null;
+                        continue;
+                    }
+                    if (query == null) {
+                        query = line;
+                    }
+                    else {
+                        query = query + "\n" + line;
+                    }
+                }
+            }
+        }
+        catch (IOException e) {
+            fail("Failed to read file: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testNested()
+    {
+        runTestFile("query_tests/nested.sql");
     }
 }
