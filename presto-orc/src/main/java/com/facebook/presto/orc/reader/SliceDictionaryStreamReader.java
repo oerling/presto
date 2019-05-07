@@ -441,13 +441,9 @@ public class SliceDictionaryStreamReader
             int end = input.getEnd();
             inDictionaryStream.getSetBits(input.getPositions(), numInput, begin, end - begin, inDictionaryFlags);
         }
-        if (filter != null) {
-            outputQualifyingSet.reset(numInput);
-        }
 
         if (numInput > 0) {
             if (filter != null) {
-                outputQualifyingSet.reset(numInput);
                 resultsProcessor.reset();
                 numInnerResults = dataStream.scan(input.getPositions(), 0, numInput, input.getEnd(), resultsProcessor);
                 outputQualifyingSet.setPositionCount(numInnerResults);
@@ -463,14 +459,6 @@ public class SliceDictionaryStreamReader
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (filter != null) {
             outputQualifyingSet.setEnd(inputQualifyingSet.getEnd());
-        }
-        if (outputChannelSet) {
-            if (numValues > 0) {
-                averageResultSize = SIZE_OF_INT + toIntExact(dictionaryBlock.getSizeInBytes() / numValues);
-            }
-            else {
-                averageResultSize = SIZE_OF_INT;
-            }
         }
         endScan(presentStream);
     }
@@ -596,7 +584,8 @@ public class SliceDictionaryStreamReader
     @Override
     public int getResultSizeInBytes()
     {
-        return numValues * SIZE_OF_INT + toIntExact(dictionaryBlock.getSizeInBytes());
+        // Do not count the dictionary size, otherwise a large dictionary would force small batches.
+        return numValues * SIZE_OF_INT;
     }
 
     @Override

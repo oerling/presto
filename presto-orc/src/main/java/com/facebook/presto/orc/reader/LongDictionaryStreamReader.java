@@ -297,9 +297,6 @@ public class LongDictionaryStreamReader
             int end = input.getEnd();
             inDictionaryStream.getSetBits(input.getPositions(), numInput, begin, end - begin, inDictionaryFlags);
         }
-        if (filter != null) {
-            outputQualifyingSet.reset(numInput);
-        }
 
         if (numInput > 0) {
             resultsProcessor.reset();

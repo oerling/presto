@@ -81,7 +81,7 @@ public class SliceDirectStreamReader
     // Content bytes to be returned in Block.
     private byte[] bytes;
     // Start offsets for use in returned Block.
-    private int[] resultOffsets;
+    private int[] resultOffsets = new int[1];
     // Temp space for extracting values to filter when a value straddles buffers.
     private byte[] tempBytes;
     private long totalBytes;
@@ -343,13 +343,11 @@ public class SliceDirectStreamReader
         QualifyingSet input = inputQualifyingSet;
         QualifyingSet output = outputQualifyingSet;
         int end = input.getEnd();
+        int numInput = input.getPositionCount();
         int rowsInRange = end - posInRowGroup;
-        if (filter != null) {
-            output.reset(rowsInRange);
-        }
         int[] inputPositions = input.getPositions();
         lengthIdx = 0;
-        int nextActive = inputPositions[0];
+        int nextActive = numInput > 0 ? inputPositions[0] : -1;
         int activeIdx = 0;
         int numActive = input.getPositionCount();
         int toSkip = 0;
@@ -492,7 +490,7 @@ public class SliceDirectStreamReader
 
     private void ensureResultsCapacity(int count, int totalSize, boolean includeNulls)
     {
-        if (bytes.length < totalSize) {
+        if (bytes == null || bytes.length < totalSize) {
             bytes = resize(bytes, totalSize);
         }
 
