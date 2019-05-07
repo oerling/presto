@@ -174,7 +174,6 @@ public class LongInputStreamV1
                 while (offsetIdx < endIndex && offsets[offsetIdx] - 1 == offsets[offsetIdx - 1]);
             }
         }
-        skip(endOffset - offsets[beginOffset + numOffsets - 1] - 1);
         return numResults;
     }
 
