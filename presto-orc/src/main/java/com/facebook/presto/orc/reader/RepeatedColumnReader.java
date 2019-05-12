@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.orc.reader;
 
+import com.facebook.presto.orc.Filters;
 import com.facebook.presto.orc.QualifyingSet;
 
 import java.util.OptionalInt;
@@ -24,6 +25,9 @@ import static com.google.common.base.Verify.verify;
 abstract class RepeatedColumnReader
         extends NullWrappingColumnReader
 {
+    // Guess a large size to force a small initial batch.
+    public static final int INITIAL_SIZE_GUESS = 200000;
+
     // Starting offset of each result in the element reader's Block.
     protected int[] elementOffset = new int[1];
     // Length of each row in the input QualifyingSet.
@@ -35,6 +39,11 @@ abstract class RepeatedColumnReader
     protected int[] innerSurviving = new int[1];
     protected int numInnerSurviving;
     protected int innerSurvivingBase;
+    // qualifyingOuter is the subset of inputQualifyingSet that is
+    // non-null and not dropped by possible other conditions on the
+    // repeated type, e.g. cardinality.
+    private int[] qualifyingOuter;
+    protected int numQualifyingOuter;
 
     // Number of rows of nested content read. This is after applying any pushed down filters.
     protected long numNestedRowsRead;
@@ -83,13 +92,17 @@ abstract class RepeatedColumnReader
     {
         hasNulls = presentStream != null;
         int nonNullRowIndex = 0;
+        int numActive = inputQualifyingSet.getPositionCount();
         boolean nonDeterministic = filter != null && !deterministicFilter;
+        numQualifyingOuter = 0;
+        if (qualifyingOuter == null || qualifyingOuter.length < numActive) {
+            qualifyingOuter = newIntArrayForReuse(numActive);
+        }
         if (innerQualifyingSet == null) {
             innerQualifyingSet = new QualifyingSet();
         }
         innerQualifyingSet.setParent(inputQualifyingSet);
         int[] inputRows = inputQualifyingSet.getPositions();
-        int numActive = inputQualifyingSet.getPositionCount();
         if (elementLength.length < numActive) {
             elementLength = newIntArrayForReuse(numActive);
             elementStart = newIntArrayForReuse(numActive);
@@ -99,6 +112,7 @@ abstract class RepeatedColumnReader
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
         boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());
+        boolean isNull = filter == Filters.isNull();
         for (int activeIndex = 0; activeIndex < numActive; activeIndex++) {
             int row = inputRows[activeIndex] - posInRowGroup;
             if (presentStream != null && !present[row]) {
@@ -115,7 +129,10 @@ abstract class RepeatedColumnReader
                 int length = lengths[nonNullRowIndex];
                 elementLength[activeIndex] = length;
                 elementStart[activeIndex] = prevInner;
-                innerQualifyingSet.appendRange(prevInner, activeIndex, length);
+                if (!(isNull || (nonDeterministic && !filter.testNotNull()))) {
+                    qualifyingOuter[numQualifyingOuter++] = activeIndex;
+                    innerQualifyingSet.appendRange(prevInner, activeIndex, length);
+                }
             }
         }
         numInnerRows = innerQualifyingSet.getPositionCount();
@@ -123,6 +140,10 @@ abstract class RepeatedColumnReader
         innerQualifyingSet.setEnd(skip + prevInner);
         skip = countPresent(prevRow, inputQualifyingSet.getEnd() - posInRowGroup);
         lengthIdx = nonNullRowIndex + skip;
+        if (nonDeterministic) {
+            // The filter will be called on non-null rows in sequence.
+            filter.setScanRows(inputQualifyingSet.getPositions(), qualifyingOuter, numQualifyingOuter);
+        }
     }
 
     // Returns the number of nested rows to skip to go from
@@ -217,6 +238,46 @@ abstract class RepeatedColumnReader
         }
         if (elementOffset == null || elementOffset.length < numValues + numAdded + 1) {
             elementOffset = resize(elementOffset, numValues + numAdded + 1);
+        }
+    }
+
+    // Sets outputQualifyingSet to the top level rows hat passed tests
+    // in this, e.g. not null or cardinality.
+    protected void setOutputToQualifyingOuter(int lastElementOffset)
+    {
+        if (filter != null) {
+            int[] rows = inputQualifyingSet.getPositions();
+            int[] inputNumbers = inputQualifyingSet.getInputNumbers();
+            for (int i = 0; i < numQualifyingOuter; i++) {
+                int activeIndex = qualifyingOuter[i];
+                outputQualifyingSet.append(rows[activeIndex], inputNumbers[activeIndex]);
+            }
+        }
+        if (outputChannelSet) {
+            int valueIndex = numValues;
+            for (int i = 0; i < numQualifyingOuter; i++) {
+                elementOffset[valueIndex] = lastElementOffset;
+                lastElementOffset += elementLength[qualifyingOuter[i]];
+                valueIndex++;
+            }
+            elementOffset[valueIndex] = lastElementOffset;
+        }
+    }
+
+    protected void fixupOffsetsAfterNulls(int lastElementOffset)
+    {
+        // Nulls were added by
+        // addNullsAfterScan(). Fill null positions in
+        // elementOffset with the offset of the next non-null.
+        elementOffset[numValues + numResults] = lastElementOffset;
+        int nextNonNull = lastElementOffset;
+        for (int i = numValues + numResults - 1; i >= numValues; i--) {
+            if (elementOffset[i] == -1) {
+                elementOffset[i] = nextNonNull;
+            }
+            else {
+                nextNonNull = elementOffset[i];
+            }
         }
     }
 }

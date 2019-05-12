@@ -65,137 +65,6 @@ public class TestAriaHiveDistributedQueries
                 .build();
 
         copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, noAria, getTables());
-
-        createTable(queryRunner, noAria, "lineitem_aria", "CREATE TABLE lineitem_aria AS\n" +
-                "SELECT\n" +
-                "    orderkey,\n" +
-                "    partkey,\n" +
-                "    suppkey,\n" +
-                "    linenumber,\n" +
-                "    quantity,\n" +
-                "    extendedprice,\n" +
-                "    shipmode,\n" +
-                "    shipdate,\n" +
-                "    comment,\n" +
-                "    returnflag = 'R' AS is_returned,\n" +
-                "    CAST(quantity + 1 AS REAL) AS float_quantity,\n" +
-                "    CAST(discount AS decimal(5, 2)) AS short_decimal_discount,\n" +
-                "    CAST(discount AS decimal(38, 2)) AS long_decimal_discount,\n" +
-                "    CAST(array_position(array['SHIP','REG AIR','AIR','FOB','MAIL','RAIL','TRUCK'], shipmode) AS tinyint) AS tinyint_shipmode,\n" +
-                "    date_add('second', suppkey, cast(shipdate as timestamp)) AS timestamp_shipdate,\n" +
-                "    MAP(\n" +
-                "        ARRAY[1, 2, 3],\n" +
-                "        ARRAY[orderkey, partkey, suppkey]\n" +
-                "    ) AS order_part_supp_map,\n" +
-                "    ARRAY[ARRAY[orderkey, partkey, suppkey]] AS order_part_supp_array\n" +
-                "FROM tpch.tiny.lineitem");
-
-        createTable(queryRunner, noAria, "lineitem_aria_nulls",
-                "CREATE TABLE lineitem_aria_nulls AS\n" +
-                "SELECT *,\n" +
-                "  IF(have_complex_nulls, null, if (returnflag = 'N', \n" +
-                "    map(array[1, 2, 3], array[orderkey, partkey, suppkey]),\n" +
-                "    map(array[1, 2, 3, 4], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)])))\n" +
-                "  as order_part_supp_map,\n" +
-                "  IF(have_complex_nulls, null, if (returnflag = 'N', \n" +
-                "    array[orderkey, partkey, suppkey], array[orderkey, partkey, suppkey, if (returnflag = 'A', 1, 2)]))\n" +
-                "  as order_part_supp_array,\n" +
-                "  IF(have_complex_nulls, null, IF (returnflag = 'N', \n" +
-                "    map(array['shipmode', 'shipinstruct', 'comment'],\n" +
-                "    array[shipmode, shipinstruct, comment])))\n" +
-                "  as string_map\n" +
-                "FROM (\n" +
-                "  SELECT \n" +
-                "       orderkey,\n" +
-                "       linenumber,\n" +
-                "       have_simple_nulls and mod(orderkey + linenumber, 5) = 0 AS have_complex_nulls,\n" +
-                "       IF(have_simple_nulls and mod(orderkey + linenumber, 11) = 0, null, partkey) as partkey,\n" +
-                "       IF(have_simple_nulls and mod(orderkey + linenumber, 13) = 0, null, suppkey) as suppkey,\n" +
-                "       IF(have_simple_nulls and mod (orderkey + linenumber, 17) = 0, null, quantity) as quantity,\n" +
-                "       IF(have_simple_nulls and mod (orderkey + linenumber, 19) = 0, null, extendedprice) as extendedprice,\n" +
-                "       IF(have_simple_nulls and mod (orderkey + linenumber, 23) = 0, null, shipmode) as shipmode,\n" +
-                "       IF(have_simple_nulls and mod (orderkey + linenumber, 7) = 0, null, comment) as comment,\n" +
-                "       IF(have_simple_nulls and mod(orderkey + linenumber, 31) = 0, null, returnflag = 'R') as is_returned,\n" +
-                "       IF(have_simple_nulls and mod(orderkey + linenumber, 11) = 0, null, returnflag) as returnflag,\n" +
-                "       IF(have_simple_nulls and mod(orderkey + linenumber, 37) = 0, null, CAST(quantity + 1 as real)) as float_quantity,\n" +
-                "       IF(have_simple_nulls and mod (orderkey + linenumber, 23) = 0, null, shipinstruct) as shipinstruct\n" +
-                "  FROM (SELECT mod(orderkey, 32000) > 16000 as have_simple_nulls, * from tpch.tiny.lineitem))");
-
-        createTable(queryRunner, noAria, "lineitem_aria_strings", "CREATE TABLE lineitem_aria_strings AS\n" +
-                "SELECT\n" +
-                "    orderkey,\n" +
-                "    partkey,\n" +
-                "    suppkey,\n" +
-                "    linenumber,\n" +
-                "    comment,\n" +
-                "    CONCAT(CAST(partkey AS VARCHAR), comment) AS partkey_comment,\n" +
-                "    CONCAT(CAST(suppkey AS VARCHAR), comment) AS suppkey_comment,\n" +
-                "    CONCAT(CAST(quantity AS VARCHAR), comment) AS quantity_comment\n" +
-                "FROM tpch.tiny.lineitem\n" +
-                "WHERE orderkey < 100000");
-
-        createTable(queryRunner, noAria, "lineitem_aria_string_structs", "CREATE TABLE lineitem_aria_string_structs AS\n" +
-                "SELECT\n" +
-                "    orderkey,\n" +
-                "    partkey,\n" +
-                "    suppkey,\n" +
-                "    linenumber,\n" +
-                "    CAST(\n" +
-                "        ROW(\n" +
-                "            comment,\n" +
-                "            CONCAT(CAST(partkey AS VARCHAR), comment)\n" +
-                "        ) AS ROW(\n" +
-                "            comment VARCHAR,\n" +
-                "            partkey_comment VARCHAR\n" +
-                "        )\n" +
-                "    ) AS partkey_struct,\n" +
-                "    CAST(\n" +
-                "        ROW(\n" +
-                "            CONCAT(CAST(suppkey AS VARCHAR), comment),\n" +
-                "            CONCAT(CAST(quantity AS VARCHAR), comment)\n" +
-                "        ) AS ROW(\n" +
-                "            suppkey_comment VARCHAR,\n" +
-                "            quantity_comment VARCHAR\n" +
-                "        )\n" +
-                "    ) AS suppkey_quantity_struct\n" +
-                "FROM tpch.tiny.lineitem\n" +
-                "WHERE orderkey < 100000");
-
-        createTable(queryRunner, noAria, "lineitem_aria_string_structs_with_nulls", "CREATE TABLE lineitem_aria_string_structs_with_nulls AS\n" +
-                "SELECT\n" +
-                "    orderkey,\n" +
-                "    partkey,\n" +
-                "    suppkey,\n" +
-                "    linenumber,\n" +
-                "    CAST(\n" +
-                "        IF(mod(partkey, 5) = 0, NULL,\n" +
-                "            ROW(\n" +
-                "                comment,\n" +
-                "                IF (mod(partkey, 13) = 0, NULL,\n" +
-                "                    CONCAT(CAST(partkey AS VARCHAR), comment)\n" +
-                "                )\n" +
-                "            )\n" +
-                "        ) AS ROW(\n" +
-                "            comment VARCHAR,\n" +
-                "            partkey_comment VARCHAR\n" +
-                "        )\n" +
-                "    ) AS partkey_struct,\n" +
-                "    CAST(\n" +
-                "        IF(mod(suppkey, 7) = 0, NULL,\n" +
-                "            ROW(\n" +
-                "                IF (mod(suppkey, 17) = 0, NULL,\n" +
-                "                    CONCAT(CAST(suppkey AS VARCHAR), comment)\n" +
-                "                ),\n" +
-                "                CONCAT(CAST(quantity AS VARCHAR), comment)\n" +
-                "            )\n" +
-                "        ) AS ROW(\n" +
-                "            suppkey_comment VARCHAR,\n" +
-                "            quantity_comment varchar\n" +
-                "        )\n" +
-                "    ) AS suppkey_quantity_struct\n" +
-                "FROM tpch.tiny.lineitem\n" +
-                "WHERE orderkey < 100000");
-
         return queryRunner;
     }
 
@@ -232,6 +101,8 @@ public class TestAriaHiveDistributedQueries
     @Test
     public void testFilters()
     {
+        requireTestTable("lineitem_aria");
+        requireTestTable("lineitem_aria_nulls");
         assertQuery(ariaSession(), "SELECT\n" +
                 "    orderkey,\n" +
                 "    linenumber,\n" +
@@ -240,9 +111,9 @@ public class TestAriaHiveDistributedQueries
                 "    comment\n" +
                 "FROM lineitem\n" +
                 "WHERE\n" +
-                "    orderkey BETWEEN 100000 AND 200000\n" +
-                "    AND partkey BETWEEN 10000 AND 30000\n" +
-                "    AND suppkey BETWEEN 1000 AND 5000\n" +
+                "    orderkey BETWEEN 10000 AND 20000\n" +
+                "    AND partkey BETWEEN 10 AND 50\n" +
+                "    AND suppkey BETWEEN 10 AND 50\n" +
                 "    AND comment > 'f'");
 
         assertQuery(ariaSession(), "SELECT\n" +
@@ -253,10 +124,10 @@ public class TestAriaHiveDistributedQueries
                 "    comment\n" +
                 "FROM lineitem_aria_nulls\n" +
                 "WHERE\n" +
-                "    orderkey BETWEEN 100000 AND 200000\n" +
-                "    AND partkey BETWEEN 10000 AND 30000\n" +
-                "    AND suppkey BETWEEN 1000 AND 5000\n" +
-                "    AND comment > 'f'");
+                "    orderkey BETWEEN 10000 AND 40000\n" +
+                "    AND partkey BETWEEN 1000 AND 3000\n" +
+                "    AND suppkey BETWEEN 10 AND 50\n" +
+                    "    AND comment > 'f'", noAriaSession());
 
         // SliceDictionaryStreamReader for shipinstruct
         assertQuery(ariaSession(), "SELECT\n" +
@@ -377,6 +248,9 @@ public class TestAriaHiveDistributedQueries
     @Test
     public void testStrings()
     {
+        requireTestTable("lineitem_aria_string_structs_with_nulls");
+        requireTestTable("lineitem_aria_strings");
+        requireTestTable("lineitem_aria_string_structs");
         assertQuery(ariaSession(), "SELECT\n" +
                 "    orderkey,\n" +
                 "    linenumber,\n" +
@@ -522,126 +396,60 @@ public class TestAriaHiveDistributedQueries
     @Test
     public void testRepeated()
     {
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_array\n" +
-                "FROM lineitem_aria_nulls\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_array\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE order_part_supp_array[2] between 10 AND 500\n" +
-                "AND order_part_supp_array[3] between 10 AND 1000\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_array\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE cardinality(order_part_supp_array) > 3\n" +
-                "AND order_part_supp_array[2] between 10 AND 500\n" +
-                "AND order_part_supp_array[3] between 10 AND 1000\n" +
-                "AND order_part_supp_array[4] = 2\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_array\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE linenumber = 1\n" +
-                "AND cardinality(order_part_supp_array) > 3\n" +
-                "AND order_part_supp_array[2] between 10 AND 500\n" +
-                "AND order_part_supp_array[3] between 10 AND 1000\n" +
-                "AND order_part_supp_array[4] = 2\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_map[1]\n" +
-                "FROM lineitem_aria_nulls\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_map[1]\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE order_part_supp_map[2] between 10 AND 500\n" +
-                "AND order_part_supp_map[3] between 10 AND 1000\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_map[1]\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE cardinality(order_part_supp_map) > 3\n" +
-                "AND order_part_supp_map[2] between 10 AND 500\n" +
-                "AND order_part_supp_map[3] between 10 AND 1000\n" +
-                "AND order_part_supp_map[4] = 2\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, order_part_supp_map[1]\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE linenumber = 1\n" +
-                "AND cardinality(order_part_supp_map) > 3\n" +
-                "AND order_part_supp_map[2] between 10 AND 500\n" +
-                "AND order_part_supp_map[3] between 10 AND 1000\n" +
-                "AND order_part_supp_map[4] = 2\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, string_map['comment']\n" +
-                "FROM lineitem_aria_nulls\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, string_map['comment']\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE string_map['shipmode'] in ('AIR', 'REG AIR')\n" +
-                "AND string_map['comment'] between 'f' AND 'h'\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, string_map['comment']\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE linenumber = 1\n" +
-                "AND string_map['shipmode'] in ('AIR', 'REG AIR')\n" +
-                "AND string_map['comment'] between 'f' AND 'h'\n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, string_map['comment'], order_part_supp_map[1]\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE linenumber = 1\n" +
-                "AND string_map['shipmode'] in ('AIR', 'REG AIR')\n" +
-                "AND order_part_supp_map[2] < 1000 \n", noAriaSession());
-        assertQuery(ariaSession(),
-                "SELECT orderkey, linenumber, string_map['comment'], order_part_supp_map[2]\n" +
-                "FROM lineitem_aria_nulls\n" +
-                "WHERE linenumber = 1\n", noAriaSession());
+        runTestFile("query_tests/repeated.sql");
     }
 
     private void readTables()
-            throws IOException
     {
         synchronized (getClass()) {
             if (tables.size() > 0) {
                 return;
             }
-            Path path = Paths.get(getResource("query_tests/test_tables.sql").getFile());
-            List<String> lines = Files.readAllLines(path);
-            String name = null;
-            String query = null;
-            for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i);
-                if (name == null) {
-                    if (line.startsWith("--table: ")) {
-                        name = line.split(" ")[1].trim();
+            try {
+                Path path = Paths.get(getResource("query_tests/test_tables.sql").getFile());
+                List<String> lines = Files.readAllLines(path);
+                String name = null;
+                String query = null;
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i);
+                    if (name == null) {
+                        if (line.startsWith("--table: ")) {
+                            name = line.split(" ")[1].trim();
+                        }
                     }
-                }
-                else if (name != null) {
-                    if (line.startsWith(";")) {
-                        tables.put(name, query);
-                        name = null;
-                        query = null;
-                        continue;
-                    }
-                    if (query == null) {
-                        query = line;
-                    }
-                    else {
-                        query = query + "\n" + line;
+                    else if (name != null) {
+                        if (line.trim().startsWith(";")) {
+                            tables.put(name, query);
+                            name = null;
+                            query = null;
+                            continue;
+                        }
+                        if (query == null) {
+                            query = line;
+                        }
+                        else {
+                            query = query + "\n" + line;
+                        }
                     }
                 }
             }
-        }
-    }
+            catch (IOException e) {
+                fail("Could not read test_tables.sql: " + e.getMessage());
+            }
+        }}
 
     private void testQuery(String[] tables, String query)
             throws IOException
     {
-        readTables();
         for (String table : tables) {
-            createTestTable(table);
+            requireTestTable(table);
         }
         assertQuery(ariaSession(), query, noAriaSession());
     }
 
-    private void createTestTable(String name)
+    private void requireTestTable(String name)
     {
+        readTables();
         synchronized (getClass()) {
             if (createdTables.contains(name)) {
                 return;
@@ -662,27 +470,23 @@ public class TestAriaHiveDistributedQueries
             String query = null;
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
-                if (names == null) {
-                    if (line.startsWith("--tables: ")) {
-                        names = line.substring(9).trim().split(" ,");
+                if (line.startsWith("--tables: ")) {
+                    names = line.substring(9).trim().split(" ,");
+                    continue;
+                }
+                if (line.trim().startsWith(";")) {
+                    if (names == null || query == null) {
+                        fail("No query or --tables: declared before line " + i);
                     }
+                    testQuery(names, query);
+                    query = null;
+                    continue;
+                }
+                if (query == null) {
+                    query = line;
                 }
                 else {
-                    if (line.startsWith(";")) {
-                        if (names == null || query == null) {
-                            fail("No query or --tables: declared before line " + i);
-                        }
-                        testQuery(names, query);
-                        names = null;
-                        query = null;
-                        continue;
-                    }
-                    if (query == null) {
-                        query = line;
-                    }
-                    else {
-                        query = query + "\n" + line;
-                    }
+                    query = query + "\n" + line;
                 }
             }
         }
@@ -695,5 +499,21 @@ public class TestAriaHiveDistributedQueries
     public void testNested()
     {
         runTestFile("query_tests/nested.sql");
+    }
+
+    @Test
+    public void testNulls2()
+    {
+        runTestFile("query_tests/nulls.sql");
+    }
+
+    public void testFilters2()
+    {
+        runTestFile("query_tests/filters2.sql");
+    }
+
+    public void testStruct()
+    {
+        runTestFile("query_tests/struct.sql");
     }
 }

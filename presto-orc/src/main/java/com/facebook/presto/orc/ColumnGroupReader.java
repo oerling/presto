@@ -430,8 +430,9 @@ public class ColumnGroupReader
             throws IOException
     {
         if (sortedStreamReaders.length == 0) {
-            numRowsInResult += inputQualifyingSet.getPositionCount();
-            inputQualifyingSet.eraseBelowRow(inputQualifyingSet.getEnd());
+            int numAdded = inputQualifyingSet.getPositionCount();
+            numRowsInResult += numAdded;
+            alignResultsAndRemoveFromQualifyingSet(numAdded, -1);
             return;
         }
         makeResultBudget();
@@ -680,13 +681,18 @@ public class ColumnGroupReader
                 }
             }
         }
-
-        StreamReader lastReader = sortedStreamReaders[lastStreamIdx];
-        int endRow = lastReader.getPosition();
-        QualifyingSet lastOutput = lastReader.getOutputQualifyingSet();
-        if (lastOutput != null) {
-            // Signals errors if any left.
-            lastOutput.eraseBelowRow(endRow);
+        int endRow;
+        if (sortedStreamReaders.length > 0) {
+            StreamReader lastReader = sortedStreamReaders[lastStreamIdx];
+            endRow = lastReader.getPosition();
+            QualifyingSet lastOutput = lastReader.getOutputQualifyingSet();
+            if (lastOutput != null) {
+                // Signals errors if any left.
+                lastOutput.eraseBelowRow(endRow);
+            }
+        }
+        else {
+            endRow = inputQualifyingSet.getEnd();
         }
         for (int streamIdx = lastStreamIdx - 1; streamIdx >= 0; --streamIdx) {
             StreamReader reader = sortedStreamReaders[streamIdx];

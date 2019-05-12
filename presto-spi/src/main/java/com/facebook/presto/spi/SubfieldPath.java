@@ -56,6 +56,31 @@ public class SubfieldPath
         }
     }
 
+    public static final class Cardinality
+            extends PathElement
+    {
+        private static final Cardinality CARDINALITY = new Cardinality();
+
+        private Cardinality() {}
+
+        public static Cardinality getInstance()
+        {
+            return CARDINALITY;
+        }
+
+        @Override
+        public boolean isSubscript()
+        {
+            return true;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "[#]";
+        }
+    }
+
     public static final class NestedField
             extends PathElement
     {
@@ -206,6 +231,11 @@ public class SubfieldPath
     public static PathElement allSubscripts()
     {
         return AllSubscripts.getInstance();
+    }
+
+    public static PathElement cardinality()
+    {
+        return Cardinality.getInstance();
     }
 
     @JsonCreator

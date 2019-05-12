@@ -17,6 +17,8 @@ import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.ColumnGroupReader;
 import com.facebook.presto.orc.Filter;
 import com.facebook.presto.orc.Filters;
+import com.facebook.presto.orc.Filters.PositionalFilter;
+import com.facebook.presto.orc.Filters.StructFilter;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.StreamDescriptor;
 import com.facebook.presto.orc.metadata.ColumnEncoding;
@@ -50,6 +52,7 @@ import java.util.Set;
 
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.resize;
+import static com.facebook.presto.orc.ResizedArrays.roundupSize;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
@@ -72,17 +75,21 @@ public class StructStreamReader
     private int readOffset;
     private int nextBatchSize;
 
-    ColumnGroupReader reader;
+    private ColumnGroupReader reader;
     // Channel number in output of getBlock for fields. -1 if not returned.
-    int[] fieldChannels;
-    Type[] fieldTypes;
+    private int[] fieldChannels;
+    private Type[] fieldTypes;
     // Number of values in field readers. Differs from numValues if there are null structs.
-    int fieldBlockSize;
-    int[] fieldBlockOffset;
-    int[] fieldSurviving;
+    private int fieldBlockSize;
+    private int[] fieldBlockOffset;
+    private int[] fieldSurviving;
     // Copy of inputQualifyingSet.
-    QualifyingSet inputCopy;
-    StreamReader[] streamReaders;
+    private QualifyingSet inputCopy;
+    private StreamReader[] streamReaders;
+    private boolean hasPositionalFilter;
+    // The array of Filters for each StreamReader that has a PositionalFilter.
+    private Filter[][] positionFilters;
+    FilterSet[] ordinalToFilters;
 
     StructStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -309,7 +316,7 @@ public class StructStreamReader
                 constantBlocks[i] = getNullBlock(fieldType, 1);
             }
             fieldTypes[i] = fieldType;
-            if (filter != null) {
+            if (filter instanceof StructFilter) {
                 Filter fieldFilter = ((Filters.StructFilter) filter).getMember(new NestedField(fieldName.get()));
                 if (fieldFilter != null) {
                     filters.put(i, fieldFilter);
@@ -325,6 +332,9 @@ public class StructStreamReader
             }
         }
         fieldChannels = fieldColumns;
+        if (filter instanceof PositionalFilter) {
+            initPositionalFilter(filters);
+        }
         if (!outputChannelSet) {
             // If the struct is not projected out, none of its members is either.
             Arrays.fill(fieldChannels, -1);
@@ -347,12 +357,35 @@ public class StructStreamReader
                                        null);
     }
 
+    private void initPositionalFilter(Map<Integer, Filter> filters)
+    {
+        List<Filter> distinctFilters = Filters.getDistinctPositionFilters(filter);
+        ordinalToFilters = new FilterSet[distinctFilters.size() + 1];
+        positionFilters = new Filter[streamReaders.length][];
+        for (Filter positionFilter : distinctFilters) {
+            if (positionFilter == Filters.isNotNull()) {
+                continue;
+            }
+            StructFilter structFilter = (StructFilter) positionFilter;
+            int ordinal = structFilter.getOrdinal();
+            FilterSet filterSet = new FilterSet(structFilter);
+            ordinalToFilters[ordinal] = filterSet;
+            for (int i : filterSet.getReaderIndices()) {
+                if (streamReaders[i] != null && filters.get(i) == null) {
+                    PositionalFilter columnFilter = new PositionalFilter(structFilter);
+                    filters.put(i, columnFilter);
+                }
+            }
+        }
+    }
+
     @Override
     public void setResultSizeBudget(long bytes)
     {
         if (reader == null) {
             setupForScan();
         }
+        resultSizeBudget = bytes;
         if (reader != null) {
             reader.setResultSizeBudget(bytes);
         }
@@ -487,6 +520,9 @@ public class StructStreamReader
             innerQualifyingSet.copyFrom(inputQualifyingSet);
             innerQualifyingSet.setTranslateResultToParentRows(false);
         }
+        if (filter instanceof PositionalFilter) {
+            setupPositionalFilter();
+        }
         reader.setQualifyingSets(innerQualifyingSet, outputQualifyingSet);
         if (innerQualifyingSet.getPositionCount() > 0) {
             reader.advance();
@@ -494,26 +530,30 @@ public class StructStreamReader
         }
         ensureOutput(numInnerRows + numNullsToAdd);
         // The outputQualifyingSet is written by advance.
-        int numStructs = reader.getNumResults() - initialFieldResults;
-        for (int i = 0; i < numStructs; i++) {
-            addStructResult();
+        if (outputChannelSet) {
+            int numStructs = reader.getNumResults() - initialFieldResults;
+            for (int i = 0; i < numStructs; i++) {
+                addStructResult();
+            }
         }
         int lastFieldOffset = fieldBlockSize == 0 ? 0 : fieldBlockOffset[fieldBlockSize];
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
-        if (numResults > numInnerResults) {
-            // Fill null positions in fieldBlockOffset  with the offset of the next non-null.
-            fieldBlockOffset[numValues + numResults] = lastFieldOffset;
-            int nextNonNull = lastFieldOffset;
-            for (int i = numValues + numResults - 1; i >= numValues; i--) {
-                if (fieldBlockOffset[i] == -1) {
-                    fieldBlockOffset[i] = nextNonNull;
-                }
-                else {
-                    nextNonNull = fieldBlockOffset[i];
+        if (outputChannelSet) {
+            if (numResults > numInnerResults) {
+                // Fill null positions in fieldBlockOffset  with the offset of the next non-null.
+                fieldBlockOffset[numValues + numResults] = lastFieldOffset;
+                int nextNonNull = lastFieldOffset;
+                for (int i = numValues + numResults - 1; i >= numValues; i--) {
+                    if (fieldBlockOffset[i] == -1) {
+                        fieldBlockOffset[i] = nextNonNull;
+                    }
+                    else {
+                        nextNonNull = fieldBlockOffset[i];
+                    }
                 }
             }
+            fieldBlockSize = numValues + numResults;
         }
-        fieldBlockSize = numValues + numResults;
         endScan(presentStream);
         check();
     }
@@ -544,6 +584,9 @@ public class StructStreamReader
 
     void ensureOutput(int numAdded)
     {
+        if (!outputChannelSet) {
+            return;
+        }
         if (valueIsNull != null && valueIsNull.length < numValues + numAdded) {
             valueIsNull = resize(valueIsNull, numValues + numAdded);
         }
@@ -627,5 +670,62 @@ public class StructStreamReader
     public boolean mustExtractValuesBeforeScan(boolean isNewStripe)
     {
         return reader != null && reader.mustExtractValuesBeforeScan(isNewStripe);
+    }
+
+    private void setupPositionalFilter()
+    {
+        int numPositions = innerQualifyingSet.getPositionCount();
+        for (int i = 0; i < positionFilters.length; i++) {
+            if (streamReaders[i].getFilter() != null) {
+                if (positionFilters[i] == null || positionFilters[i].length < numPositions) {
+                    positionFilters[i] = new Filter[roundupSize(numPositions)];
+                }
+                else {
+                    Arrays.fill(positionFilters[i], 0, numPositions, null);
+                }
+            }
+        }
+        for (int i = 0; i < numPositions; i++) {
+            Filter positionFilter = filter.nextFilter();
+            if (positionFilter instanceof StructFilter) {
+                StructFilter structFilter = (StructFilter) positionFilter;
+                int ordinal = structFilter.getOrdinal();
+                ordinalToFilters[ordinal].setPositionFilters(i);
+            }
+        }
+        for (int i = 0; i < positionFilters.length; i++) {
+            if (positionFilters[i] != null) {
+                ((PositionalFilter) streamReaders[i].getFilter()).setFilters(innerQualifyingSet, positionFilters[i]);
+            }
+        }
+    }
+
+    // There is one of these per distinct StructFilter in the PositionalFilter of this reader.
+    private class FilterSet
+    {
+        int[] readerIndices;
+        Filter[] filterAtIndex;
+
+        public FilterSet(StructFilter structFilter)
+        {
+            readerIndices = structFilter.getFilters().entrySet().stream().mapToInt(c -> {
+                NestedField field = (NestedField) c.getKey();
+                StreamReader reader = structFields.get(field.getName());
+                return Arrays.asList(streamReaders).indexOf(reader);
+            }).toArray();
+            filterAtIndex = structFilter.getFilters().entrySet().stream().map(c -> c.getValue()).toArray(size -> new Filter[size]);
+        }
+
+        public int[] getReaderIndices()
+        {
+            return readerIndices;
+        }
+
+        public void setPositionFilters(int row)
+        {
+            for (int i = 0; i < readerIndices.length; i++) {
+                positionFilters[readerIndices[i]][row] = filterAtIndex[i];
+            }
+        }
     }
 }

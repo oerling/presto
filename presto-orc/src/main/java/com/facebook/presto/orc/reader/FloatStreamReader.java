@@ -247,7 +247,7 @@ public class FloatStreamReader
                     }
                 }
                 if (++activeIdx == input.getPositionCount()) {
-                    toSkip = countPresent(i + 1, end - posInRowGroup);
+                    toSkip += countPresent(i + 1, end - posInRowGroup);
                     break;
                 }
                 nextActive = inputPositions[activeIdx];

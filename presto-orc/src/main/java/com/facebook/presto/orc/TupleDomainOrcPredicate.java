@@ -20,6 +20,8 @@ import com.facebook.presto.orc.metadata.statistics.RangeStatistics;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.predicate.Domain;
+import com.facebook.presto.spi.predicate.EquatableValueSet;
+import com.facebook.presto.spi.predicate.EquatableValueSet.ValueEntry;
 import com.facebook.presto.spi.predicate.Marker;
 import com.facebook.presto.spi.predicate.Range;
 import com.facebook.presto.spi.predicate.SortedRangeSet;
@@ -42,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
@@ -140,6 +143,9 @@ public class TupleDomainOrcPredicate<C>
 
     private boolean columnOverlaps(ColumnReference<C> columnReference, Domain predicateDomain, long numberOfRows, ColumnStatistics columnStatistics)
     {
+        if (columnReference.getColumn() instanceof ColumnHandle && ((ColumnHandle) columnReference.getColumn()).getSubfieldPath() != null) {
+            return true;
+        }
         Domain stripeDomain = getDomain(columnReference.getType(), numberOfRows, columnStatistics);
         if (!stripeDomain.overlaps(predicateDomain)) {
             // there is no overlap between the predicate and this column
@@ -356,7 +362,7 @@ public class TupleDomainOrcPredicate<C>
             ColumnHandle topLevelColumn = subfield == null ? columnHandle : columnHandle.createSubfieldColumnHandle(null);
             ColumnReference<C> columnReference = null;
             for (ColumnReference<C> c : columnReferences) {
-                if (c.getColumn().equals(topLevelColumn)) {
+                if (c.getColumn().equals(topLevelColumn) || c.getColumn().equals(columnHandle)) {
                     columnReference = c;
                     break;
                 }
@@ -367,33 +373,42 @@ public class TupleDomainOrcPredicate<C>
             if (columnReference == null) {
                 continue;
             }
-            ValueSet values = predicateDomain.getValues();
-            if (!(values instanceof SortedRangeSet)) {
-                throw new UnsupportedOperationException("Unexpected TupleDomain: " + values.getClass().getSimpleName());
-            }
-
-            List<Range> ranges = ((SortedRangeSet) values).getOrderedRanges();
-            Type type = predicateDomain.getType();
-            boolean nullAllowed = predicateDomain.isNullAllowed();
-
             Filter filter;
-            if (ranges.isEmpty() && nullAllowed) {
-                filter = Filters.isNull();
-            }
-            else if (ranges.size() == 1) {
-                filter = createRangeFilter(type, ranges.get(0), nullAllowed);
-            }
-            else {
-                List<Filter> rangeFilters = ranges.stream()
-                        .map(r -> createRangeFilter(type, r, false))
-                        .filter(f -> f != Filters.alwaysFalse())
-                        .collect(toImmutableList());
-                if (rangeFilters.isEmpty()) {
-                    filter = nullAllowed ? Filters.isNull() : Filters.alwaysFalse();
+            ValueSet values = predicateDomain.getValues();
+            boolean nullAllowed = predicateDomain.isNullAllowed();
+            if (values instanceof EquatableValueSet) {
+                Set<ValueEntry> entries = ((EquatableValueSet) values).getEntries();
+                if (entries.isEmpty()) {
+                    filter = nullAllowed ? Filters.isNull() : Filters.isNotNull();
                 }
                 else {
-                    filter = Filters.createMultiRange(rangeFilters, nullAllowed);
+                    throw new UnsupportedOperationException("EquatableValueSet with non empty entries is not supported");
                 }
+            }
+            else if (values instanceof SortedRangeSet) {
+                List<Range> ranges = ((SortedRangeSet) values).getOrderedRanges();
+                Type type = predicateDomain.getType();
+                if (ranges.isEmpty() && nullAllowed) {
+                    filter = Filters.isNull();
+                }
+                else if (ranges.size() == 1) {
+                    filter = createRangeFilter(type, ranges.get(0), nullAllowed);
+                }
+                else {
+                    List<Filter> rangeFilters = ranges.stream()
+                            .map(r -> createRangeFilter(type, r, false))
+                            .filter(f -> f != Filters.alwaysFalse())
+                            .collect(toImmutableList());
+                    if (rangeFilters.isEmpty()) {
+                        filter = nullAllowed ? Filters.isNull() : Filters.alwaysFalse();
+                    }
+                    else {
+                        filter = Filters.createMultiRange(rangeFilters, nullAllowed);
+                    }
+                }
+            }
+            else {
+                throw new UnsupportedOperationException("Unexpected TupleDomain: " + values.getClass().getSimpleName());
             }
             addFilter(columnReference.getOrdinal(), subfield, filter, filters);
         }
@@ -439,17 +454,33 @@ public class TupleDomainOrcPredicate<C>
         }
 
         Filter topFilter = filters.get(ordinal);
-        verify(topFilter == null || topFilter instanceof Filters.StructFilter);
-        Filters.StructFilter structFilter = (Filters.StructFilter) topFilter;
-        if (structFilter == null) {
-            structFilter = new Filters.StructFilter();
-            filters.put(ordinal, structFilter);
+        Filter newFilter = combineFilter(topFilter, filter);
+        if (newFilter != topFilter) {
+            filters.put(ordinal, newFilter);
+            if (!(newFilter instanceof Filters.StructFilter)) {
+                return;
+            }
+            topFilter = newFilter;
         }
+        verify(topFilter instanceof Filters.StructFilter);
+        Filters.StructFilter structFilter = (Filters.StructFilter) topFilter;
         int depth = subfield.getPathElements().size();
         for (int i = 1; i < depth; i++) {
             Filter memberFilter = structFilter.getMember(subfield.getPathElements().get(i));
             if (i == depth - 1) {
-                verify(memberFilter == null);
+                if (memberFilter == Filters.alwaysFalse()) {
+                    return;
+                }
+                if (memberFilter != null && memberFilter instanceof Filters.StructFilter) {
+                    if (filter == Filters.isNotNull()) {
+                        return;
+                    }
+                    if (filter == Filters.isNull()) {
+                        if (!((Filters.StructFilter) memberFilter).isOnlyIsNulls()) {
+                            filter = Filters.alwaysFalse();
+                        }
+                    }
+                }
                 structFilter.addMember(subfield.getPathElements().get(i), filter);
                 return;
             }
@@ -459,10 +490,43 @@ public class TupleDomainOrcPredicate<C>
                 structFilter = (Filters.StructFilter) memberFilter;
             }
             else {
+                newFilter = combineFilter(memberFilter, filter);
+                if (newFilter != memberFilter) {
+                    structFilter.addMember(subfield.getPathElements().get(i), newFilter);
+                    if (!(newFilter instanceof Filters.StructFilter)) {
+                        return;
+                    }
+                    memberFilter = newFilter;
+                }
                 verify(memberFilter instanceof Filters.StructFilter);
                 structFilter = (Filters.StructFilter) memberFilter;
             }
         }
+    }
+
+    // A struct can have IsNull, IsNotNull or a StructFilter.
+    // AlwaysFalse + anything is AlwaysFalse
+    // IsNotNull + anything = StructFilter.
+    // IsNull + IsNull is unchanged. Isnull otherwise is AlwaysFalse.
+    // StructFilter + IsNull is always false if StructFilter contains anything except is null
+    private static Filter combineFilter(Filter structFilter, Filter memberFilter)
+    {
+        if (structFilter == null) {
+            return new Filters.StructFilter();
+        }
+        if (structFilter == Filters.alwaysFalse()) {
+            return structFilter;
+        }
+        if (structFilter == Filters.isNull()) {
+            if (memberFilter == Filters.isNull()) {
+                return structFilter;
+            }
+            return Filters.alwaysFalse();
+        }
+        if (structFilter == Filters.isNotNull()) {
+            return new Filters.StructFilter();
+        }
+        return structFilter;
     }
 
     private static Filter bigintRangeToFilter(Range range, boolean nullAllowed)

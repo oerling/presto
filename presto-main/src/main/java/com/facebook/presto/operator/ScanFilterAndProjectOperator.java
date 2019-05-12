@@ -511,12 +511,14 @@ public class ScanFilterAndProjectOperator
                 Iterator<Optional<Page>> output = pageProcessor.process(operatorContext.getSession().toConnectorSession(), yieldSignal, pageProcessorMemoryContext, page);
                 mergingOutput.addInput(output);
             }
+            else if (isAriaScanEnabled(operatorContext.getSession())) {
+                recordProcessedInput(null);
+            }
 
             if (finishing) {
                 mergingOutput.finish();
             }
         }
-
         Page result = mergingOutput.getOutput();
         outputMemoryContext.setBytes(mergingOutput.getRetainedSizeInBytes() + pageProcessorMemoryContext.getBytes());
         return result;
@@ -528,6 +530,9 @@ public class ScanFilterAndProjectOperator
             long numRows = scanInfo.getNumScannedRows();
             operatorContext.recordProcessedInput(0, numRows - previousNumScannedRows);
             previousNumScannedRows = numRows;
+            if (page == null) {
+                return null;
+            }
         }
         else {
             operatorContext.recordProcessedInput(0, page.getPositionCount());
