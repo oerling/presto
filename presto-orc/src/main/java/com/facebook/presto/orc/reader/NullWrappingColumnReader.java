@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 package com.facebook.presto.orc.reader;
-
+import com.facebook.presto.orc.Filters;
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.stream.BooleanInputStream;
 import com.facebook.presto.orc.stream.LongInputStream;
@@ -73,17 +73,20 @@ abstract class NullWrappingColumnReader
         int prevInner = innerPosInRowGroup;
         numNullsToAdd = 0;
         boolean keepNulls = filter == null || (!nonDeterministic && filter.testNull());
+        boolean isNull = filter == Filters.isNull();
         for (int activeIdx = 0; activeIdx < numActive; activeIdx++) {
             int row = inputRows[activeIdx] - posInRowGroup;
             if (!present[row]) {
-                if (keepNulls || (nonDeterministic && testNullAt(row + posInRowGroup))) {
+                if (keepNulls || (nonDeterministic && filter.testNull())) {
                     addNullToKeep(inputRows[activeIdx], activeIdx);
                 }
             }
             else {
                 prevInner += countPresent(prevRow, row);
                 prevRow = row;
-                innerQualifyingSet.append(prevInner, activeIdx);
+                if (!(isNull || (nonDeterministic && !filter.testNotNull()))) {
+                    innerQualifyingSet.append(prevInner, activeIdx);
+                }
             }
         }
         numInnerRows = innerQualifyingSet.getPositionCount();

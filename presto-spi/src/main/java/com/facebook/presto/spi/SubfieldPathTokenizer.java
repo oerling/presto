@@ -235,6 +235,9 @@ public class SubfieldPathTokenizer
         if (index.equals("*")) {
             return SubfieldPath.allSubscripts();
         }
+        if (index.equals("#")) {
+            return SubfieldPath.cardinality();
+        }
         return new SubfieldPath.StringSubscript(index);
     }
 

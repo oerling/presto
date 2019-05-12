@@ -320,7 +320,7 @@ public class SliceDirectStreamReader
         if (totalRows == 0) {
             return 16;
         }
-        return (int) ((4 + totalBytes) / totalRows);
+        return 4 + (int) (totalBytes / totalRows);
     }
 
     @Override

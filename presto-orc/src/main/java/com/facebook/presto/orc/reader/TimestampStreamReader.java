@@ -309,7 +309,7 @@ public class TimestampStreamReader
                     }
                 }
                 if (++activeIdx == input.getPositionCount()) {
-                    toSkip = countPresent(i + 1, end - posInRowGroup);
+                    toSkip += countPresent(i + 1, end - posInRowGroup);
                     break;
                 }
                 nextActive = inputPositions[activeIdx];

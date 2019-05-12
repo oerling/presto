@@ -16,6 +16,7 @@ package com.facebook.presto.orc;
 import com.facebook.presto.spi.SubfieldPath;
 import com.google.common.collect.ImmutableList;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -528,6 +529,24 @@ public class Filters
         {
             return ordinal;
         }
+
+        public void setOrdinal(int ordinal)
+        {
+            this.ordinal = ordinal;
+        }
+
+        public boolean isOnlyIsNulls()
+        {
+            for (Map.Entry<SubfieldPath.PathElement, Filter> entry : filters.entrySet()) {
+                if (entry.getValue() instanceof StructFilter && !((StructFilter) entry.getValue()).isOnlyIsNulls()) {
+                    return false;
+                }
+                if (entry.getValue() != isNull()) {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     public static class MultiRange
@@ -769,6 +788,9 @@ public class Filters
         // The StructFilter from which the positional filters are derived.
         private StructFilter parent;
 
+        // The set of StructFilters that may occur in filters. Empty if this filters a scalar column.
+        private List<Filter> distinctChildFilters = new ArrayList();
+
         public PositionalFilter(StructFilter parent)
         {
             super(false);
@@ -837,6 +859,19 @@ public class Filters
             }
         }
 
+        public void addChild(Filter child)
+        {
+            if (child instanceof StructFilter && distinctChildFilters.indexOf(child) < 0) {
+                distinctChildFilters.add(child);
+                ((StructFilter) child).setOrdinal(distinctChildFilters.size());
+            }
+        }
+
+        List<Filter> getDistinctChildren()
+        {
+            return distinctChildFilters;
+        }
+
         @Override
         public boolean testNull()
         {
@@ -848,6 +883,21 @@ public class Filters
             Filter filter = nextFilter();
             if (filter != null) {
                 return processResult(filter.testNull());
+            }
+            return true;
+        }
+
+        @Override
+        public boolean testNotNull()
+        {
+            if (numNextPositionsToFail > 0) {
+                filterIndex++;
+                numNextPositionsToFail--;
+                return false;
+            }
+            Filter filter = nextFilter();
+            if (filter != null) {
+                return processResult(filter.testNotNull());
             }
             return true;
         }
@@ -988,8 +1038,27 @@ public class Filters
             return ImmutableList.of();
         }
         if (filter instanceof PositionalFilter) {
+            List<Filter> distinctChildren = ((PositionalFilter) filter).getDistinctChildren();
+            if (distinctChildren.size() > 0) {
+                return distinctChildren;
+            }
             return ImmutableList.copyOf(((PositionalFilter) filter).getParent().getFilters().values());
         }
         return ImmutableList.of(filter);
+    }
+
+    public static boolean isAlwaysFalse(Filter filter)
+    {
+        if (filter == alwaysFalse()) {
+            return true;
+        }
+        else if (filter instanceof StructFilter) {
+            for (Map.Entry<SubfieldPath.PathElement, Filter> entry : ((StructFilter) filter).getFilters().entrySet()) {
+                if (isAlwaysFalse(entry.getValue())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

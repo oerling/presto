@@ -87,6 +87,7 @@ public class OrcRecordReader
     private static final int BATCH_HARD_SHRINK_FACTOR = 16;
     private static final int BATCH_SOFT_SHRINK_FACTOR = 16;
     private static final int BATCH_GROW_FACTOR = 2;
+    private static final long ADAPTATION_INTERVAL_NS = 100000000;
 
     private final OrcDataSource orcDataSource;
 
@@ -150,6 +151,7 @@ public class OrcRecordReader
     private Block[] constantBlocks;
     private List<FilterFunction> nonDeterministicConstantFilters;
     private ScanInfo scanInfo;
+    private long lastAdaptationTime;
 
     public OrcRecordReader(
             Map<Integer, Type> includedColumns,
@@ -779,8 +781,12 @@ public class OrcRecordReader
         verify(currentRowGroup == -1, "Should not call pushdownFilterAndProjection() after getNextPage()");
         Map<Integer, Filter> filters = predicate.getFilters();
         for (int i = 0; i < channelColumns.length; i++) {
+            Filter filter = filters.get(channelColumns[i]);
+            if (filter == Filters.alwaysFalse()) {
+                constantFilterIsFalse = true;
+                return;
+            }
             if (constantBlocks[i] != null) {
-                Filter filter = filters.get(channelColumns[i]);
                 if (filter != null) {
                     verify(constantBlocks[i].isNull(0), "Non-null constant blocks are not supported");
                     if (!filter.testNull()) {
@@ -872,8 +878,8 @@ public class OrcRecordReader
                         // If file ends before 2 reorder checks, do
                         // one more. Subsequent splits may start with
                         // the adaptation from the previous one.
-                        updateAdaptation();
                         reader.maybeReorderFilters();
+                        updateAdaptation();
                     }
                     filePosition = fileRowCount;
                     currentPosition = totalRowCount;
@@ -881,16 +887,6 @@ public class OrcRecordReader
                 }
                 qualifyingSet.setRange(0, Math.min(ariaBatchRows, currentGroupRowCount), true);
                 reader.setQualifyingSets(qualifyingSet, null);
-                if (currentRowGroup != 0 && (currentRowGroup % ROW_GROUP_REVIEW_INTERVAL == 0)) {
-                    // Decay row size stats and reconsider filter
-                    // order every ROW_GROUP_REVIEW_INTERVAL row
-                    // groups.
-                    numAriaRows /= 2;
-                    numAriaBytes /= 2;
-                    if (reorderFilters) {
-                        reader.maybeReorderFilters();
-                    }
-                }
                 if (numResults > 0 && reader.mustExtractValuesBeforeScan(currentRowGroup == 0)) {
                     return resultPage();
                 }
@@ -941,8 +937,10 @@ public class OrcRecordReader
 
     private boolean adjustAndCheckIfFullBatch(int numResultsBeforeAdvance, long bytesBeforeAdvance)
     {
+        checkAdaptation();
         numResults = reader.getNumResults();
         long readerBytes = reader.getResultSizeInBytes();
+        verify(numResults == 0 ? readerBytes == 0 : true, "If there are 0 results these must take 0 bytes");
         long bytesInLastBatch = readerBytes - bytesBeforeAdvance;
         numAriaBytes += bytesInLastBatch;
         numAriaRows += numResults - numResultsBeforeAdvance;
@@ -970,6 +968,19 @@ public class OrcRecordReader
         // project out column values so that the caller can check for yield
         // and interruptions.
         return numResults > targetResultRows || readerBytes > targetResultBytes - bytesInLastBatch;
+    }
+
+    private void checkAdaptation()
+    {
+        long now = System.nanoTime();
+        if (lastAdaptationTime == 0 || now - lastAdaptationTime > ADAPTATION_INTERVAL_NS) {
+            lastAdaptationTime = now;
+            numAriaRows /= 2;
+            numAriaBytes /= 2;
+            if (reorderFilters) {
+                reader.maybeReorderFilters();
+            }
+        }
     }
 
     private void setReaderBudget()

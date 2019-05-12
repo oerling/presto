@@ -573,7 +573,7 @@ public final class SystemSessionProperties
                 booleanProperty(
                         PUSHDOWN_SUBFIELDS,
                         "Pushdown subfield pruning into a projection on top of table scan",
-                        false,
+                        true,
                         false),
                 booleanProperty(ARIA_SCAN,
                                 "Enable Aria Presto! scan operator",

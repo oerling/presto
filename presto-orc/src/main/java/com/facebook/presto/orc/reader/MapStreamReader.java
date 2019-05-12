@@ -35,6 +35,7 @@ import static com.facebook.presto.orc.metadata.ColumnEncoding.ColumnEncodingKind
 import static com.facebook.presto.orc.metadata.ColumnEncoding.ColumnEncodingKind.DIRECT_V2;
 import static com.facebook.presto.orc.metadata.ColumnEncoding.ColumnEncodingKind.DWRF_DIRECT;
 import static com.facebook.presto.orc.metadata.ColumnEncoding.ColumnEncodingKind.DWRF_MAP_FLAT;
+import static com.facebook.presto.orc.reader.RepeatedColumnReader.INITIAL_SIZE_GUESS;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
@@ -42,8 +43,6 @@ public class MapStreamReader
         implements StreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(MapStreamReader.class).instanceSize();
-    // Guess a large size to force a small initial batch.
-    public static final int INITIAL_MAP_SIZE_GUESS = 200000;
     private final StreamDescriptor streamDescriptor;
     private final MapDirectStreamReader directReader;
     private final MapFlatStreamReader flatReader;
@@ -195,7 +194,7 @@ public class MapStreamReader
     public int getAverageResultSize()
     {
         if (currentReader == null) {
-            return INITIAL_MAP_SIZE_GUESS;
+            return INITIAL_SIZE_GUESS;
         }
         return currentReader.getAverageResultSize();
     }

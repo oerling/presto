@@ -394,7 +394,7 @@ public class MapDirectStreamReader
     public int getAverageResultSize()
     {
         if (numNestedRowsRead == 0) {
-            return MapStreamReader.INITIAL_MAP_SIZE_GUESS;
+            return RepeatedColumnReader.INITIAL_SIZE_GUESS;
         }
         return (int) (1 + ((keyStreamReader.getAverageResultSize() + valueStreamReader.getAverageResultSize()) * (numNestedRowsRead + 1) / (numContainerRowsRead + 1)));
     }
@@ -424,6 +424,8 @@ public class MapDirectStreamReader
         if (filter == Filters.isNull()) {
             return;
         }
+        ImmutableSet.Builder<Slice> newSliceSubscripts = ImmutableSet.builder();
+        ImmutableSet.Builder<Long> newLongSubscripts = ImmutableSet.builder();
         List<Filter> positionFilters = Filters.getDistinctPositionFilters(filter);
         int numFilters = positionFilters.size() + 1;
         hasPositionalFilter = filter instanceof Filters.PositionalFilter;
@@ -435,6 +437,10 @@ public class MapDirectStreamReader
                 continue;
             }
             StructFilter structFilter = (StructFilter) mapFilter;
+            if (positionalFilter == null) {
+                positionalFilter = new Filters.PositionalFilter(structFilter);
+                elementFilter = positionalFilter;
+            }
             int ordinal = structFilter.getOrdinal();
             Map<PathElement, Filter> filters = structFilter.getFilters();
             for (Map.Entry<PathElement, Filter> entry : filters.entrySet()) {
@@ -442,14 +448,11 @@ public class MapDirectStreamReader
                 String field = isStringKey ? ((StringSubscript) entry.getKey()).getIndex() : null;
                 long subscript = isStringKey ? 0 : ((LongSubscript) entry.getKey()).getIndex();
                 Filter valueFilter = entry.getValue();
+                positionalFilter.addChild(valueFilter);
                 if (longKeyToFilter[ordinal] == null) {
                     longKeyToFilter[ordinal] = new Long2ObjectOpenHashMap();
                     if (isStringKey) {
                         sliceKeyToFilter[ordinal] = new HashMap();
-                    }
-                    if (positionalFilter == null) {
-                        positionalFilter = new Filters.PositionalFilter(structFilter);
-                        elementFilter = positionalFilter;
                     }
                 }
                 if (isStringKey) {
@@ -460,20 +463,25 @@ public class MapDirectStreamReader
                 }
                 globalNumFilters++;
                 if (isStringKey && mayPruneKey) {
-                    sliceSubscripts.add(Slices.copiedBuffer(field, UTF_8));
+                    newSliceSubscripts.add(Slices.copiedBuffer(field, UTF_8));
                 }
                 else if (mayPruneKey) {
-                    longSubscripts.add(Long.valueOf(subscript));
+                    newLongSubscripts.add(Long.valueOf(subscript));
                 }
             }
         }
+        
         valueStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(1));
         if (mayPruneKey) {
             List<Filter> filters = null;
             if (longSubscripts != null) {
+                newLongSubscripts.addAll(longSubscripts);
+                longSubscripts = newLongSubscripts.build();
                 filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
             }
             else if (sliceSubscripts != null) {
+                newSliceSubscripts.addAll(sliceSubscripts); 
+                sliceSubscripts = newSliceSubscripts.build();
                 filters = sliceSubscripts.stream()
                     .map(subscript -> {
                         byte[] bytes = new byte[subscript.length()];
@@ -643,114 +651,85 @@ public class MapDirectStreamReader
         int lastElementOffset = numValues == 0 ? 0 : elementOffset[numValues];
         makeInnerQualifyingSet();
         ensureValuesCapacity(inputQualifyingSet.getPositionCount());
-        if (innerQualifyingSet.getPositionCount() > 0) {
-            checkBudget();
-            keyStreamReader.setInputQualifyingSet(innerQualifyingSet);
-            keyStreamReader.scan();
-            keyBlock = keyStreamReader.getBlock(keyStreamReader.getNumValues(), true);
-            if (positionalFilter != null) {
-                // The position in inputQualifyingSet for each value in
-                // keyBlock. Positions with the same value in this array
-                // belong to the same map.
-                int[] keyInputNumbers;
-                if (keyStreamReader.getFilter() != null) {
-                    keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
-                    int numKeys = keyQualifyingSet.getPositionCount();
-                    int[] inputNumbers = innerQualifyingSet.getInputNumbers();
-                    keyInputNumbers = keyQualifyingSet.getInputNumbers();
-                    for (int i = 0; i < numKeys; i++) {
-                        keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
-                    }
-                }
-                else {
-                    keyQualifyingSet = innerQualifyingSet;
-                    keyInputNumbers = innerQualifyingSet.getInputNumbers();
-                }
-                setupPositionalFilter(keyInputNumbers);
-            }
-            else {
-                if (keyStreamReader.getFilter() == null) {
-                    keyQualifyingSet = innerQualifyingSet;
-                }
-                else {
-                    keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
-                    adjustElementLengths();
-                }
-            }
-            if (keyQualifyingSet.getPositionCount() > 0) {
-                if (keyQualifyingSet != innerQualifyingSet) {
-                    keyQualifyingSet.setParent(inputQualifyingSet);
-                }
-                valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
-                valueStreamReader.scan();
-                innerPosInRowGroup = innerQualifyingSet.getEnd();
-                Filter valueFilter = valueStreamReader.getFilter();
-                if (valueFilter != null) {
-                    // We maintain selectivity for budget
-                    // checking. The time is not recorded.
-                    valueFilter.updateStats(keyQualifyingSet.getPositionCount(), valueStreamReader.getOutputQualifyingSet().getPositionCount(), 100);
+        checkBudget();
+        keyStreamReader.setInputQualifyingSet(innerQualifyingSet);
+        keyStreamReader.scan();
+        keyBlock = keyStreamReader.getNumValues() > 0 ? keyStreamReader.getBlock(keyStreamReader.getNumValues(), true) : null;
+        if (positionalFilter != null) {
+            // The position in inputQualifyingSet for each value in
+            // keyBlock. Positions with the same value in this array
+            // belong to the same map.
+            int[] keyInputNumbers;
+            if (keyStreamReader.getFilter() != null) {
+                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                int numKeys = keyQualifyingSet.getPositionCount();
+                int[] inputNumbers = innerQualifyingSet.getInputNumbers();
+                keyInputNumbers = keyQualifyingSet.getInputNumbers();
+                for (int i = 0; i < numKeys; i++) {
+                    keyInputNumbers[i] = inputNumbers[keyInputNumbers[i]];
                 }
             }
             else {
-                valueStreamReader.getOrCreateOutputQualifyingSet().reset(0);
+                keyQualifyingSet = innerQualifyingSet;
+                keyInputNumbers = innerQualifyingSet.getInputNumbers();
             }
-            if (filter != null) {
-                QualifyingSet filterResult = valueStreamReader.getOutputQualifyingSet();
-                outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
-                int numValueResults = filterResult.getPositionCount();
-                int[] resultInputNumbers = filterResult.getInputNumbers();
-                int[] resultRows = filterResult.getPositions();
-                if (innerSurviving == null || innerSurviving.length < numValueResults) {
-                    innerSurviving = newIntArrayForReuse(numValueResults);
-                }
-                numInnerSurviving = 0;
-                int outputIndex = 0;
-                numInnerResults = 0;
-                for (int i = 0; i < numInput; i++) {
-                    outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numValueResults);
-                }
-                valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
-                if (filter != null) {
-                    for (int i = 0; i < numInnerSurviving; i++) {
-                        innerSurviving[i] = resultInputNumbers[innerSurviving[i]];
-                    }
-                }
-                keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
-                numContainerRowsRead += numInnerResults;
-            }
-            else {
-                numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;
-                numContainerRowsRead += numInnerResults;
-                numNestedRowsRead += valueStreamReader.getInputQualifyingSet().getPositionCount();
-            }
-        }
-        addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
-        if (filter == null) {
-            // The lengths are unchanged by reading the values.
-            int valueIndex = numValues;
-            for (int i = 0; i < numInput; i++) {
-                elementOffset[valueIndex] = lastElementOffset;
-                lastElementOffset += elementLength[i];
-                valueIndex++;
-            }
-            elementOffset[valueIndex] = lastElementOffset;
+            setupPositionalFilter(keyInputNumbers);
         }
         else {
-            if (numNullsToAdd > 0 && outputChannel != -1) {
-                // There was a filter and nulls were added by
-                // addNullsAfterScan(). Fill null positions in
-                // elementOffset with the offset of the next non-null.
-                elementOffset[numValues + numResults] = lastElementOffset;
-                int nextNonNull = lastElementOffset;
-                for (int i = numValues + numResults - 1; i >= numValues; i--) {
-                    if (elementOffset[i] == -1) {
-                        elementOffset[i] = nextNonNull;
-                    }
-                    else {
-                        nextNonNull = elementOffset[i];
-                    }
+            if (keyStreamReader.getFilter() == null) {
+                keyQualifyingSet = innerQualifyingSet;
+            }
+            else {
+                keyQualifyingSet = keyStreamReader.getOutputQualifyingSet();
+                adjustElementLengths();
+            }
+        }
+        if (keyQualifyingSet != innerQualifyingSet) {
+            keyQualifyingSet.setParent(inputQualifyingSet);
+        }
+        valueStreamReader.setInputQualifyingSet(keyQualifyingSet);
+        valueStreamReader.scan();
+        innerPosInRowGroup = innerQualifyingSet.getEnd();
+        Filter valueFilter = valueStreamReader.getFilter();
+        if (valueFilter != null) {
+            // We maintain selectivity for budget
+            // checking. The time is not recorded.
+            valueFilter.updateStats(keyQualifyingSet.getPositionCount(), valueStreamReader.getOutputQualifyingSet().getPositionCount(), 100);
+        }
+        if (valueFilter != null) {
+            QualifyingSet filterResult = valueStreamReader.getOutputQualifyingSet();
+            int numValueResults = filterResult.getPositionCount();
+            int[] resultInputNumbers = filterResult.getInputNumbers();
+            int[] resultRows = filterResult.getPositions();
+            if (innerSurviving == null || innerSurviving.length < numValueResults) {
+                innerSurviving = newIntArrayForReuse(numValueResults);
+            }
+            numInnerSurviving = 0;
+            int outputIndex = 0;
+            numInnerResults = 0;
+            for (int i = 0; i < numInput; i++) {
+                outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numValueResults);
+            }
+            valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+            if (filter != null) {
+                for (int i = 0; i < numInnerSurviving; i++) {
+                    innerSurviving[i] = resultInputNumbers[innerSurviving[i]];
                 }
             }
+            keyStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
+            numContainerRowsRead += numInnerResults;
+        }
+        else {
+            numInnerResults = numQualifyingOuter;
+            numContainerRowsRead += numInnerResults;
+            numNestedRowsRead += valueStreamReader.getInputQualifyingSet().getPositionCount();
+            setOutputToQualifyingOuter(lastElementOffset);
+        }
+        int addedNulls = numNullsToAdd;
+        lastElementOffset = elementOffset[numValues + numInnerResults];
+        addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
+        if (addedNulls > 0 && outputChannelSet) {
+            fixupOffsetsAfterNulls(lastElementOffset);
         }
         endScan(presentStream);
     }

@@ -69,6 +69,11 @@ public class Filter
         return nullAllowed;
     }
 
+    public boolean testNotNull()
+    {
+        return !nullAllowed;
+    }
+
     // If there are no scores, return a number for making initial filter order. Less is better.
     int staticScore()
     {

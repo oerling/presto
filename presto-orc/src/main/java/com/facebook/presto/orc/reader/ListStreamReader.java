@@ -270,6 +270,9 @@ public class ListStreamReader
     @Override
     public int getAverageResultSize()
     {
+        if (numNestedRowsRead == 0) {
+            return RepeatedColumnReader.INITIAL_SIZE_GUESS;
+        }
         return (int) (1 + (elementStreamReader.getAverageResultSize() * numNestedRowsRead / (1 + numContainerRowsRead)));
     }
 
@@ -284,7 +287,7 @@ public class ListStreamReader
 
     private void setupFilterAndChannel()
     {
-        if (filter == null) {
+        if (filter == null || filter == Filters.isNotNull()) {
             elementStreamReader.setFilterAndChannel(null, outputChannel, -1, type.getTypeParameters().get(0));
             filterIsSetup = true;
             return;
@@ -303,6 +306,10 @@ public class ListStreamReader
             if (positionFilter == Filters.isNotNull()) {
                 continue;
             }
+            if (positionalFilter == null) {
+                positionalFilter = new Filters.PositionalFilter((StructFilter) positionFilter);
+                elementFilter = positionalFilter;
+            }
             verify(positionFilter instanceof StructFilter);
             Filters.StructFilter listFilter = (Filters.StructFilter) positionFilter;
             int ordinal = listFilter.getOrdinal();
@@ -316,12 +323,9 @@ public class ListStreamReader
 
                 verify(entry.getKey() instanceof LongSubscript);
                 long subscript = ((LongSubscript) entry.getKey()).getIndex();
+                positionalFilter.addChild(entry.getValue());
                 if (subscriptToFilter[ordinal] == null) {
                     subscriptToFilter[ordinal] = new Long2ObjectOpenHashMap();
-                    if (positionalFilter == null) {
-                        positionalFilter = new Filters.PositionalFilter(listFilter);
-                        elementFilter = positionalFilter;
-                    }
                 }
                 subscriptToFilter[ordinal].put(subscript - 1, entry.getValue());
             }
@@ -360,7 +364,8 @@ public class ListStreamReader
             int length = elementLength[i];
             int filterCount = 0;
             Filter arrayFilter = filter.nextFilter();
-            if (filter == Filters.isNotNull()) {
+            if (arrayFilter == null || arrayFilter == Filters.isNotNull()) {
+                innerStart += length;
                 continue;
             }
             int ordinal = ((StructFilter) arrayFilter).getOrdinal();
@@ -407,9 +412,8 @@ public class ListStreamReader
         ensureValuesCapacity(inputQualifyingSet.getPositionCount());
         int lastElementOffset = numValues == 0 ? 0 : elementOffset[numValues];
         int numInput = inputQualifyingSet.getPositionCount();
-        if (filter != null) {
+        if (elementStreamReader.getFilter() != null) {
             QualifyingSet filterResult = elementStreamReader.getOutputQualifyingSet();
-            outputQualifyingSet.reset(inputQualifyingSet.getPositionCount());
             int numElementResults = filterResult.getPositionCount();
             int[] resultInputNumbers = filterResult.getInputNumbers();
             int[] resultRows = filterResult.getPositions();
@@ -427,35 +431,16 @@ public class ListStreamReader
             numContainerRowsRead += numInnerResults;
         }
         else {
-            numInnerResults = inputQualifyingSet.getPositionCount() - numNullsToAdd;
+            numInnerResults = numQualifyingOuter;
+            numContainerRowsRead += inputQualifyingSet.getPositionCount();
+            numNestedRowsRead += innerQualifyingSet.getPositionCount();
+            setOutputToQualifyingOuter(lastElementOffset);
         }
+        int addedNulls = numNullsToAdd;
+        lastElementOffset = elementOffset[numValues + numInnerResults];
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
-        if (filter == null) {
-            // The lengths are unchanged.
-            int valueIndex = numValues;
-            for (int i = 0; i < numInput; i++) {
-                elementOffset[valueIndex] = lastElementOffset;
-                lastElementOffset += elementLength[i];
-                valueIndex++;
-            }
-            elementOffset[valueIndex] = lastElementOffset;
-        }
-        else {
-            if (numNullsToAdd > 0 && outputChannel != -1) {
-                // There was a filter and nulls were added by
-                // addNullsAfterScan(). Fill null positions in
-                // elementOffset with the offset of the next non-null.
-                elementOffset[numValues + numResults] = lastElementOffset;
-                int nextNonNull = lastElementOffset;
-                for (int i = numValues + numResults - 1; i >= numValues; i--) {
-                    if (elementOffset[i] == -1) {
-                        elementOffset[i] = nextNonNull;
-                    }
-                    else {
-                        nextNonNull = elementOffset[i];
-                    }
-                }
-            }
+        if (addedNulls > 0 && outputChannelSet) {
+            fixupOffsetsAfterNulls(lastElementOffset);
         }
         endScan(presentStream);
     }
