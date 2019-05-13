@@ -550,7 +550,7 @@ public class MapDirectStreamReader
                 Long2ObjectOpenHashMap<Filter> keyToFilter = longKeyToFilter[ordinal];
                 numDefinedFilters = keyToFilter.size();
                 for (int key = startKeyIndex; key < keyIndex; key++) {
-                    Filter filterAtPosition = keyToFilter.get(keyBlock.getLong(key + initialNumElements, 0));
+                    Filter filterAtPosition = keyToFilter.get(keyBlock.getLong(key + initialNumElements));
                     if (filterAtPosition != null) {
                         filterCount++;
                         elementFilters[key] = filterAtPosition;
