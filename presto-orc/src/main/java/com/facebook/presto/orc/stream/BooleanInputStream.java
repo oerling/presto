@@ -174,6 +174,10 @@ public class BooleanInputStream
     public void getSetBits(int[] offsets, int numOffsets, int offsetBase, int numBits, boolean[] vector)
             throws IOException
     {
+        if (numOffsets == 0) {
+            skip(numBits);
+            return;
+        }
         if (offsets[0] == offsetBase && offsets[numOffsets - 1] == offsetBase + numOffsets - 1) {
             // No gaps in offsets.
             getSetBits(numOffsets, vector);
