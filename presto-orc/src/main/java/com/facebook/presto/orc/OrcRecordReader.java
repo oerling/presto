@@ -44,6 +44,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.io.Closer;
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
@@ -88,6 +89,7 @@ public class OrcRecordReader
     private static final int BATCH_SOFT_SHRINK_FACTOR = 16;
     private static final int BATCH_GROW_FACTOR = 2;
     private static final long ADAPTATION_INTERVAL_NS = 100000000;
+    private static final Logger log = Logger.get(OrcRecordReader.class);
 
     private final OrcDataSource orcDataSource;
 
@@ -917,6 +919,7 @@ public class OrcRecordReader
                 reader.compactValues(new int[0], numResultsBeforeAdvance, 0);
                 ariaBatchRows = Math.max(MIN_BATCH_ROWS, ariaBatchRows / BATCH_HARD_SHRINK_FACTOR);
                 int[] rows = qualifyingSet.getPositions();
+                log.warn("Retry due batch too large. Batch size from " + batchSize + "to " + ariaBatchRows);
                 int numRows = Math.min(ariaBatchRows, batchSize);
                 qualifyingSet.setPositionCount(numRows);
                 // The first row not in scope is 1 above the last in scope.

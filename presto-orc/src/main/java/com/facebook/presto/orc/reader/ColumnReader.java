@@ -336,7 +336,7 @@ abstract class ColumnReader
     protected void checkEnoughValues(int numFirstRows)
     {
         if (numValues < numFirstRows) {
-            throw new IllegalArgumentException(format("Reader does not have enough rows: requested %s, available %s", numFirstRows, numValues));
+            throw new IllegalArgumentException(format("Reader does not have enough rows: requested %s, available %s, reader %s", numFirstRows, numValues, toString()));
         }
     }
 }

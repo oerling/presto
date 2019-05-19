@@ -435,11 +435,7 @@ public class StructStreamReader
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
-        if (fieldBlockOffset == null) {
-            // No values.
-            return;
-        }
-        if (outputChannelSet) {
+        if (outputChannelSet && numValues > 0) {
             check();
             if (fieldSurviving == null || fieldSurviving.length < numSurviving) {
                 fieldSurviving = newIntArrayForReuse(numSurviving);

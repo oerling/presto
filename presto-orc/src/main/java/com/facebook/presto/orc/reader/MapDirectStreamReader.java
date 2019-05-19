@@ -33,6 +33,7 @@ import com.facebook.presto.spi.SubfieldPath.PathElement;
 import com.facebook.presto.spi.SubfieldPath.StringSubscript;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.DictionaryBlock;
+import com.facebook.presto.spi.block.IntArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.block.VariableWidthBlock;
 import com.facebook.presto.spi.type.MapType;
@@ -413,7 +414,7 @@ public class MapDirectStreamReader
         }
         double keySize = keyStreamReader.getAverageResultSize();
         double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
-        double valueSize = valueStreamReader.getAverageResultSize() * Math.max(0.01, valueSelectivity);
+        double valueSize = valueStreamReader.getAverageResultSize() * Math.max(0.2, valueSelectivity);
         double totalSize = valueSize + keySize;
         keyStreamReader.setResultSizeBudget((long) (bytes * keySize / totalSize));
         valueStreamReader.setResultSizeBudget((long) (bytes * valueSize / totalSize));
@@ -470,7 +471,7 @@ public class MapDirectStreamReader
                 }
             }
         }
-        
+
         valueStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(1));
         if (mayPruneKey) {
             List<Filter> filters = null;
@@ -480,7 +481,7 @@ public class MapDirectStreamReader
                 filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
             }
             else if (sliceSubscripts != null) {
-                newSliceSubscripts.addAll(sliceSubscripts); 
+                newSliceSubscripts.addAll(sliceSubscripts);
                 sliceSubscripts = newSliceSubscripts.build();
                 filters = sliceSubscripts.stream()
                     .map(subscript -> {
@@ -527,7 +528,7 @@ public class MapDirectStreamReader
             }
         }
         boolean useDictionary = setupKeyIdToFilterMapping();
-        boolean longKeys = keyBlock instanceof LongArrayBlock;
+        boolean isLongKey = keyBlock instanceof LongArrayBlock || keyBlock instanceof IntArrayBlock;
         int keyIndex = 0;
         for (int i = 0; i < numInput; i++) {
             Filter thisFilter = filter.nextFilter();
@@ -546,11 +547,11 @@ public class MapDirectStreamReader
             int ordinal = mapFilter.getOrdinal();
             int filterCount = 0;
             int numDefinedFilters = 0;
-            if (longKeys) {
+            if (isLongKey) {
                 Long2ObjectOpenHashMap<Filter> keyToFilter = longKeyToFilter[ordinal];
                 numDefinedFilters = keyToFilter.size();
                 for (int key = startKeyIndex; key < keyIndex; key++) {
-                    Filter filterAtPosition = keyToFilter.get(keyBlock.getLong(key + initialNumElements));
+                    Filter filterAtPosition = keyToFilter.get(getLongKeyValue(key + initialNumElements));
                     if (filterAtPosition != null) {
                         filterCount++;
                         elementFilters[key] = filterAtPosition;
@@ -586,6 +587,15 @@ public class MapDirectStreamReader
             }
         }
         positionalFilter.setFilters(keyQualifyingSet, elementFilters);
+    }
+
+    private long getLongKeyValue(int position)
+    {
+        if (keyBlock instanceof LongArrayBlock) {
+            return keyBlock.getLong(position);
+        }
+        checkArgument(keyBlock instanceof IntArrayBlock, "An integer key block must be either a ongArrayBlock or an IntArrayBlock");
+        return keyBlock.getInt(position);
     }
 
     private boolean setupKeyIdToFilterMapping()
@@ -736,15 +746,22 @@ public class MapDirectStreamReader
 
     private void checkBudget()
     {
+        // If the value reader is a repeated reader that has no data,
+        // we do not do this check. This reader will already jave
+        // reported a large size so the input batch should be small
+        // enough.
+        if (valueStreamReader instanceof RepeatedColumnReader && ((RepeatedColumnReader) valueStreamReader).numContainerRowsRead == 0) {
+            return;
+        }
         int numInput = inputQualifyingSet.getPositionCount();
         int numInner = innerQualifyingSet.getPositionCount();
         double keysPerMap = (double) numInner / (double) numInput;
         double numKeys = longSubscripts != null ? (double) longSubscripts.size() : sliceSubscripts != null ? (double) sliceSubscripts.size() : keysPerMap;
-        double innerCardinality = Math.min(numInner, numInner * (numKeys / keysPerMap));
-        double keySize = innerCardinality * keyStreamReader.getAverageResultSize();
+        long keySize = keyStreamReader.getAverageResultSize();
+        double keySelectivity = keysPerMap / numKeys;
         double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
-        double valueSize = valueStreamReader.getAverageResultSize() * valueSelectivity;
-        if (keySize + valueSize * valueSelectivity > resultSizeBudget) {
+        long valueSize = valueStreamReader.getAverageResultSize();
+        if ((keySize + valueSize) * valueSelectivity * keySelectivity > resultSizeBudget) {
             throw batchTooLarge();
         }
     }
@@ -780,7 +797,7 @@ public class MapDirectStreamReader
         int numDefinedFilters = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < numDefinedFilters) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
-            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException());
+            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException(this.toString()));
         }
         return outputIndex;
     }

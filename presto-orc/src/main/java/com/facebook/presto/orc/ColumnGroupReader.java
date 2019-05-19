@@ -38,7 +38,7 @@ public class ColumnGroupReader
 {
     private static final int BUDGET_HARD_LIMIT_MULTIPLIER = 4;
     private static final int MIN_READER_BUDGET = 8000;
-    private static final double HIGH_SELECTIVITY = 0.02;
+    private static final double HIGH_SELECTIVITY = 0.5;
 
     private final FilterFunction[] filterFunctions;
     private final int[] outputChannels;
@@ -300,7 +300,7 @@ public class ColumnGroupReader
     private void makeResultBudget()
     {
         int numRows = inputQualifyingSet.getPositionCount();
-        if (targetResultBytes == UNLIMITED_BUDGET || !enforceMemoryBudget) {
+        if (targetResultBytes == UNLIMITED_BUDGET || !enforceMemoryBudget || numRows <= MIN_BATCH_ROWS) {
             for (int i = 0; i < sortedStreamReaders.length; i++) {
                 StreamReader reader = sortedStreamReaders[i];
                 if (reader.getChannel() != -1) {
@@ -372,7 +372,7 @@ public class ColumnGroupReader
         }
         inputQualifyingSet.setEnd(inputQualifyingSet.getPositions()[newNumInput]);
         inputQualifyingSet.setPositionCount(newNumInput);
-        if (newNumInput == MIN_BATCH_ROWS) {
+        if (newNumInput <= MIN_BATCH_ROWS) {
             targetResultBytes = UNLIMITED_BUDGET;
         }
         makeResultBudget();
@@ -449,6 +449,7 @@ public class ColumnGroupReader
             if (!hasFilter(streamIdx)) {
                 reader.setOutputQualifyingSet(null);
             }
+            setBudget(reader, qualifyingSet);
             if (reorderFilters && filter != null) {
                 startTime = System.nanoTime();
             }
@@ -480,6 +481,16 @@ public class ColumnGroupReader
             inputQualifyingSet.eraseBelowRow(inputQualifyingSet.getEnd());
         }
         numRowsInResult += numAdded;
+    }
+
+    private void setBudget(StreamReader reader, QualifyingSet qualifyingSet)
+    {
+        if (reader.getChannel() == -1) {
+            return;
+        }
+        if (qualifyingSet.getPositionCount() <= MIN_BATCH_ROWS) {
+            reader.setResultSizeBudget(UNLIMITED_BUDGET);
+        }
     }
 
     private QualifyingSet evaluateFilterFunction(int streamIdx, QualifyingSet qualifyingSet)

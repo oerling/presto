@@ -286,7 +286,7 @@ public class SliceDirectStreamReader
     @Override
     public void compactValues(int[] positions, int base, int numPositions)
     {
-        if (outputChannelSet) {
+        if (outputChannelSet && numValues > 0) {
             int toOffset = resultOffsets[base];
             for (int i = 0; i < numPositions; i++) {
                 int fromPosition = base + positions[i];

@@ -16,13 +16,20 @@ package com.facebook.presto.orc;
 public class MissingSubscriptException
         extends RuntimeException
 {
+    private String context = "";
+
     public MissingSubscriptException()
     {
+    }
+
+        public MissingSubscriptException(String context)
+    {
+        this.context = context;
     }
 
     @Override
     public String getMessage()
     {
-        return "Array subscript out of bounds or map key not present";
+        return "Array subscript out of bounds or map key not present" + " " + context;
     }
 }

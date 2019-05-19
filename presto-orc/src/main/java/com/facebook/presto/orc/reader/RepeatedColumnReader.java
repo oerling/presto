@@ -203,7 +203,7 @@ abstract class RepeatedColumnReader
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
-        if (outputChannel != -1) {
+        if (outputChannel != -1 && numValues > 0) {
             computeInnerSurviving(surviving, base, numSurviving);
             int elementBase = getInnerPosition(base);
             for (int i = 0; i < numSurviving; i++) {
