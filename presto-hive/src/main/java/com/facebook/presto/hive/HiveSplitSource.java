@@ -118,7 +118,7 @@ class HiveSplitSource
         this.tableName = requireNonNull(tableName, "tableName is null");
         this.compactEffectivePredicate = requireNonNull(compactEffectivePredicate, "compactEffectivePredicate is null");
         this.queues = requireNonNull(queues, "queues is null");
-        this.maxOutstandingSplitsBytes = toIntExact(maxOutstandingSplitsSize.toBytes());
+        this.maxOutstandingSplitsBytes = 4 * toIntExact(maxOutstandingSplitsSize.toBytes());
         this.splitLoader = requireNonNull(splitLoader, "splitLoader is null");
         this.highMemorySplitSourceCounter = requireNonNull(highMemorySplitSourceCounter, "highMemorySplitSourceCounter is null");
 
