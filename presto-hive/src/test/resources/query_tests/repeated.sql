@@ -87,3 +87,5 @@ SELECT orderkey, linenumber, string_map['comment'], order_part_supp_map[2]
 FROM lineitem_aria_nulls
 WHERE linenumber = 1
 ;
+select count(*) from lineitem_aria where order_part_supp_map[2] < 1000 and  order_part_supp_map[3] < 10
+;

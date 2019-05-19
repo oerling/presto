@@ -28,4 +28,7 @@ WHERE partkey_struct IS NOT NULL and partkey_struct.comment IS NOT NULL
 SELECT orderkey, linenumber, partkey_struct.comment from lineitem_aria_string_structs_with_nulls
 WHERE partkey_struct IS NULL and partkey_struct.comment IS NOT NULL
 ;
-
+select count (*) from lineitem_aria_string_structs where partkey_struct.comment > 'f' and partkey_struct.partkey_comment > '14'
+;
+select partkey_struct.comment from lineitem_aria_string_structs where partkey_struct.comment > 'f'
+;
