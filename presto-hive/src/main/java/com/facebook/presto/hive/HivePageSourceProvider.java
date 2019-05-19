@@ -138,8 +138,13 @@ public class HivePageSourceProvider
             boolean s3SelectPushdownEnabled)
     {
         ImmutableSet.Builder<HiveColumnHandle> requiredInterimColumns = ImmutableSet.builder();
+        // Add distinct top level columns from the predicate. The
+        // record reader gets the subfield paths from the predicate,
+        // here we just need top level columns.
         requiredInterimColumns.addAll(effectivePredicate.getDomains().map(Map::keySet).orElse(ImmutableSet.of()).stream()
                 .filter(c -> c.getColumnType() == REGULAR)
+                                      .map(c -> c.getSubfieldPath() != null ? (HiveColumnHandle) c.createSubfieldColumnHandle(null) : c)
+                .distinct()
                 .collect(toImmutableList()));
         requiredInterimColumns.addAll(bucketConversion.map(BucketConversion::getBucketColumnHandles).orElse(ImmutableList.of()));
 
