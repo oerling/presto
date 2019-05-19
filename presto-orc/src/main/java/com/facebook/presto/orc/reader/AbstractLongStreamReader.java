@@ -14,19 +14,23 @@
 package com.facebook.presto.orc.reader;
 
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.IntArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
 
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.OptionalInt;
 
+import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.resize;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 
 abstract class AbstractLongStreamReader
             extends NullWrappingColumnReader
 {
     protected long[] values;
+    protected int[] intValues;
 
     AbstractLongStreamReader()
     {
@@ -75,7 +79,24 @@ abstract class AbstractLongStreamReader
     {
         checkEnoughValues(numFirstRows);
         if (mayReuse) {
+            if (type == INTEGER) {
+                if (intValues == null || intValues.length < numValues) {
+                    intValues = newIntArrayForReuse(numValues);
+                }
+                for (int i = 0; i < numFirstRows; i++) {
+                    intValues[i] = (int) values[i];
+                }
+                return new IntArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), intValues);
+            }
             return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
+        }
+        if (type == INTEGER) {
+            int[] ints = new int[numFirstRows];
+            for (int i = 0; i < numFirstRows; i++) {
+                ints[i] = (int) values[i];
+            }
+            return new IntArrayBlock(numFirstRows,
+                                      valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)), ints);
         }
         if (numFirstRows < numValues || values.length > (int) (numFirstRows * 1.2)) {
             return new LongArrayBlock(numFirstRows,
