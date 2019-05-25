@@ -32,7 +32,6 @@ public class LongInputStreamV1
     private int delta;
     private int used;
     private boolean repeat;
-    private long lastReadInputCheckpoint;
 
     // Position of the first value of the run in literals from the checkpoint.
     private int currentRunOffset;
@@ -40,13 +39,11 @@ public class LongInputStreamV1
     public LongInputStreamV1(OrcInputStream input, boolean signed)
     {
         this.bufferConsumer = new BufferConsumer(input, signed);
-        lastReadInputCheckpoint = input.getCheckpoint();
     }
 
     private void readHeader()
             throws IOException
     {
-        lastReadInputCheckpoint = bufferConsumer.getCheckpoint();
         int control = bufferConsumer.read();
         if (control == -1) {
             throw new OrcCorruptionException(bufferConsumer.getOrcDataSourceId(), "Read past end of RLE integer");
@@ -103,20 +100,11 @@ public class LongInputStreamV1
             throws IOException
     {
         LongStreamV1Checkpoint v1Checkpoint = (LongStreamV1Checkpoint) checkpoint;
-
-        // if the checkpoint is within the current buffer, just adjust the pointer
-        if (lastReadInputCheckpoint == v1Checkpoint.getInputStreamCheckpoint() && v1Checkpoint.getOffset() <= numLiterals && v1Checkpoint.getOffset() >= used) {
-            skip(v1Checkpoint.getOffset() - used);
-            currentRunOffset = -used;
-        }
-        else {
-            // otherwise, discard the buffer and start over
-            bufferConsumer.seekToCheckpoint(v1Checkpoint.getInputStreamCheckpoint());
-            numLiterals = 0;
-            used = 0;
-            currentRunOffset = -v1Checkpoint.getOffset();
-            skip(v1Checkpoint.getOffset());
-        }
+        bufferConsumer.seekToCheckpoint(v1Checkpoint.getInputStreamCheckpoint());
+        numLiterals = 0;
+        used = 0;
+        currentRunOffset = -v1Checkpoint.getOffset();
+        skip(v1Checkpoint.getOffset());
     }
 
     public void skip(long items)
@@ -182,7 +170,7 @@ public class LongInputStreamV1
     {
         long result = 0;
         if (repeat) {
-            used = offset - currentRunOffset;
+            used = offset + 1 - currentRunOffset;
             result = literal + (offset - currentRunOffset) * delta;
         }
         else {
