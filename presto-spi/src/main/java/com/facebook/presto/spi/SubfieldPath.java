@@ -133,10 +133,17 @@ public class SubfieldPath
             extends PathElement
     {
         private final long index;
+        private final boolean nullIfAbsent;
+
+        public LongSubscript(long index, boolean nullIfAbsent)
+        {
+            this.index = index;
+            this.nullIfAbsent = nullIfAbsent;
+        }
 
         public LongSubscript(long index)
         {
-            this.index = index;
+            this(index, false);
         }
 
         public long getIndex()
@@ -155,7 +162,7 @@ public class SubfieldPath
             }
 
             LongSubscript that = (LongSubscript) o;
-            return index == that.index;
+            return index == that.index && nullIfAbsent == that.nullIfAbsent;
         }
 
         @Override
@@ -175,16 +182,28 @@ public class SubfieldPath
         {
             return true;
         }
+
+        public boolean isNullIfAbsent()
+        {
+            return nullIfAbsent;
+        }
     }
 
     public static final class StringSubscript
             extends PathElement
     {
         private final String index;
+        private final boolean nullIfAbsent;
+
+        public StringSubscript(String index, boolean nullIfAbsent)
+        {
+            this.index = requireNonNull(index, "index is null");
+            this.nullIfAbsent = nullIfAbsent;
+        }
 
         public StringSubscript(String index)
         {
-            this.index = requireNonNull(index, "index is null");
+            this(index, false);
         }
 
         public String getIndex()
@@ -203,7 +222,7 @@ public class SubfieldPath
             }
 
             StringSubscript that = (StringSubscript) o;
-            return Objects.equals(index, that.index);
+            return Objects.equals(index, that.index) && nullIfAbsent == that.nullIfAbsent;
         }
 
         @Override
@@ -222,6 +241,11 @@ public class SubfieldPath
         public boolean isSubscript()
         {
             return true;
+        }
+
+        public boolean isNullIfAbsent()
+        {
+            return nullIfAbsent;
         }
     }
 
