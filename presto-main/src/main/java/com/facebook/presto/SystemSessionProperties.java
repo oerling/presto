@@ -127,6 +127,7 @@ public final class SystemSessionProperties
     public static final String MAX_TASKS_PER_STAGE = "max_tasks_per_stage";
     public static final String DEFAULT_FILTER_FACTOR_ENABLED = "default_filter_factor_enabled";
     public static final String PUSH_LIMIT_THROUGH_OUTER_JOIN = "push_limit_through_outer_join";
+    public static final String LEGACY_MAP_SUBSCRIPT = "legacy_map_subscript";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -611,6 +612,11 @@ public final class SystemSessionProperties
                         PUSH_LIMIT_THROUGH_OUTER_JOIN,
                         "push limits to the outer side of an outer join",
                         featuresConfig.isPushLimitThroughOuterJoin(),
+                        false),
+                booleanProperty(
+                                LEGACY_MAP_SUBSCRIPT,
+                        "Treat missing map subscripts as if the value were null",
+                        featuresConfig.isLegacyMapSubscript(),
                         false));
     }
 
@@ -1037,5 +1043,10 @@ public final class SystemSessionProperties
     public static boolean isPushLimitThroughOuterJoin(Session session)
     {
         return session.getSystemProperty(PUSH_LIMIT_THROUGH_OUTER_JOIN, Boolean.class);
+    }
+
+    public static boolean isLegacyMapSubscript(Session session)
+    {
+        return session.getSystemProperty(LEGACY_MAP_SUBSCRIPT, Boolean.class);
     }
 }

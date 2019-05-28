@@ -86,7 +86,7 @@ public class FeaturesConfig
     private boolean legacyLogFunction;
     private boolean groupByUsesEqualTo;
     private boolean legacyTimestamp = true;
-    private boolean legacyMapSubscript;
+    private boolean legacyMapSubscript = true;
     private boolean legacyRowFieldOrdinalAccess;
     private boolean legacyCharToVarcharCoercion;
     private boolean optimizeMixedDistinctAggregations;
