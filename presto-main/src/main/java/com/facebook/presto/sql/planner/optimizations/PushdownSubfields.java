@@ -368,7 +368,7 @@ public class PushdownSubfields
                     else {
                         for (SubfieldPath path : subfieldPaths) {
                             if (member.getName().equals(path.getColumnName())) {
-                                subfieldPaths.add(new SubfieldPath(ImmutableList.<PathElement>builder()
+                                newPaths.add(new SubfieldPath(ImmutableList.<PathElement>builder()
                                         .add(new NestedField(source))
                                         .add(allSubscripts())
                                         .addAll(path.getPathElements().subList(1, path.getPathElements().size()))
