@@ -37,14 +37,14 @@ FROM lineitem_aria_nulls
 SELECT orderkey, linenumber, order_part_supp_map[1]
 FROM lineitem_aria_nulls
 WHERE order_part_supp_map[2] between 10 AND 500
-AND order_part_supp_map[3] between 10 AND 1000
+AND order_part_supp_map[3] between 10 AND 50
 ;
 
 SELECT orderkey, linenumber, order_part_supp_map_empty[1]
 FROM lineitem_aria_nulls
 WHERE cardinality(order_part_supp_map_empty) > 3
 AND order_part_supp_map_empty[2] between 10 AND 500
-AND order_part_supp_map_empty[3] between 10 AND 1000
+AND order_part_supp_map_empty[3] between 10 AND 50
 AND order_part_supp_map_empty[4] = 2
 ;
 
