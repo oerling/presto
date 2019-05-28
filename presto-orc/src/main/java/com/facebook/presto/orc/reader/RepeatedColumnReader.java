@@ -123,7 +123,7 @@ abstract class RepeatedColumnReader
             if (presentStream != null && !present[row]) {
                 elementLength[activeIndex] = 0;
                 elementStart[activeIndex] = prevInner;
-                if (keepNulls || (nonDeterministic && testNullAt(row))) {
+                if (keepNulls || (nonDeterministic && filter.testNull())) {
                     addNullToKeep(inputRows[activeIndex], activeIndex);
                 }
             }

@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.orc.reader;
 
-
 import com.facebook.presto.orc.QualifyingSet;
 import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.spi.block.Block;
@@ -104,7 +103,6 @@ public abstract class VariantStreamReader
         return currentReader.getOrCreateOutputQualifyingSet();
     }
 
-    
     @Override
     public final void erase(int end)
     {

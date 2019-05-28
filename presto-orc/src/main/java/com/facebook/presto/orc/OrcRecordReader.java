@@ -158,7 +158,6 @@ public class OrcRecordReader
     // Read at least this many rows before considering larger batch.
     private int numRowsBeforeAdjustBatch;
 
-
     public static long minSplitOffset;
     public static long maxSplitOffset = Long.MAX_VALUE;
 

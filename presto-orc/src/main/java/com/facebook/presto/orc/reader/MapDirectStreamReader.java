@@ -67,8 +67,6 @@ import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.facebook.presto.spi.SubfieldPath.allSubscripts;
-import static com.facebook.presto.spi.type.BigintType.BIGINT;
-import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -491,19 +489,19 @@ public class MapDirectStreamReader
                 if (sliceSubscripts != null) {
                     newSliceSubscripts.addAll(sliceSubscripts);
                 }
-                    sliceSubscripts = newSliceSubscripts.build();
+                sliceSubscripts = newSliceSubscripts.build();
                 filters = sliceSubscripts.stream()
                     .map(subscript -> {
-                            byte[] bytes = new byte[subscript.length()];
-                            subscript.getBytes(0, bytes);
-                            return new Filters.BytesRange(bytes, true, bytes, true, false); })
+                        byte[] bytes = new byte[subscript.length()];
+                        subscript.getBytes(0, bytes);
+                        return new Filters.BytesRange(bytes, true, bytes, true, false); })
                     .collect(toList());
             }
             else {
                 if (longSubscripts != null) {
                     newLongSubscripts.addAll(longSubscripts);
                 }
-                    longSubscripts = newLongSubscripts.build();
+                longSubscripts = newLongSubscripts.build();
                 filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
             }
             Filter filter = null;

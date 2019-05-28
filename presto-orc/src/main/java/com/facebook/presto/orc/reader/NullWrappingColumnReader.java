@@ -36,7 +36,6 @@ abstract class NullWrappingColumnReader
     protected int numNullsToAdd;
     // Number of elements retrieved from inner reader.
     protected int numInnerResults;
-    private int[] tempInt;
 
     protected NullWrappingColumnReader(OptionalInt fixedValueSize)
     {
@@ -96,16 +95,6 @@ abstract class NullWrappingColumnReader
             // The filter will be called on non-null rows in sequence.
             filter.setScanRows(inputQualifyingSet.getPositions(), innerQualifyingSet.getInputNumbers(), innerQualifyingSet.getPositionCount());
         }
-    }
-
-    protected boolean testNullAt(int row)
-    {
-        if (tempInt == null) {
-            tempInt = new int[1];
-        }
-        tempInt[0] = row;
-        filter.setScanRows(tempInt, null, 1);
-        return filter.testNull();
     }
 
     protected void addNullToKeep(int position, int inputIndex)
