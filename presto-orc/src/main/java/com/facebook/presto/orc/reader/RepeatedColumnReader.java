@@ -42,13 +42,18 @@ abstract class RepeatedColumnReader
     // qualifyingOuter is the subset of inputQualifyingSet that is
     // non-null and not dropped by possible other conditions on the
     // repeated type, e.g. cardinality.
-    private int[] qualifyingOuter;
+    protected int[] qualifyingOuter;
     protected int numQualifyingOuter;
 
     // Number of rows of nested content read. This is after applying any pushed down filters.
     protected long numNestedRowsRead;
     // Number of arrays/maps read after applying pushed down filters.
     protected long numContainerRowsRead;
+
+    // Number of leading list elements to include. -1 if not
+    // applicable. Applies to lists of which only some elements are
+    // referenced. -1 if all elements are referenced.
+    protected long maxListLength = -1;
 
     RepeatedColumnReader()
     {
@@ -127,6 +132,12 @@ abstract class RepeatedColumnReader
                 nonNullRowIndex += countPresent(prevRow, row);
                 prevRow = row;
                 int length = lengths[nonNullRowIndex];
+                // Adjust length down if elements past a given point
+                // are not accessed. The cast is safe since the range
+                // is checked in the if.
+                if (maxListLength > 0 && maxListLength < length) {
+                    length = (int) maxListLength;
+                }
                 elementLength[activeIndex] = length;
                 elementStart[activeIndex] = prevInner;
                 if (!(isNull || (nonDeterministic && !filter.testNotNull()))) {
@@ -203,7 +214,7 @@ abstract class RepeatedColumnReader
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
-        if (outputChannel != -1 && numValues > 0) {
+        if (outputChannelSet) {
             computeInnerSurviving(surviving, base, numSurviving);
             int elementBase = getInnerPosition(base);
             for (int i = 0; i < numSurviving; i++) {

@@ -57,7 +57,6 @@ import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.google.common.base.MoreObjects.toStringHelper;
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
@@ -107,10 +106,21 @@ public class ListStreamReader
         ImmutableSet.Builder<Integer> referencedSubscripts = ImmutableSet.builder();
         ImmutableList.Builder<SubfieldPath> pathsForElement = ImmutableList.builder();
         boolean mayPruneElement = true;
+        boolean hasAllSubscripts = false;
+        long maxSubscript = -1;
         for (SubfieldPath subfield : subfields) {
             List<PathElement> pathElements = subfield.getPathElements();
             PathElement subscript = pathElements.get(depth + 1);
-            checkArgument(subscript instanceof LongSubscript, "List reader needs a PathElement with a subscript");
+            if (subscript instanceof LongSubscript && !hasAllSubscripts) {
+                maxSubscript = Math.max(maxSubscript, ((LongSubscript) subscript).getIndex());
+            }
+            else if (subscript instanceof AllSubscripts) {
+                maxSubscript = -1;
+                hasAllSubscripts = true;
+            }
+            else {
+                throw new IllegalArgumentException("List reader needs a PathElement with a subscript");
+            }
             if (pathElements.size() > depth + 2) {
                 pathsForElement.add(subfield);
             }
@@ -121,6 +131,8 @@ public class ListStreamReader
         if (mayPruneElement) {
             elementStreamReader.setReferencedSubfields(pathsForElement.build(), depth + 1);
         }
+        // Subscripts are 1-based, so no + 1 here.
+        maxListLength = maxSubscript;
     }
 
     @Override
@@ -301,6 +313,7 @@ public class ListStreamReader
         List<Filter> positionFilters = Filters.getDistinctPositionFilters(filter);
         int numFilters = positionFilters.size() + 1;
         subscriptToFilter = new Long2ObjectOpenHashMap[numFilters];
+        long maxSubscript = -1;
         setupFilters:
         for (Filter positionFilter : positionFilters) {
             if (positionFilter == Filters.isNotNull()) {
@@ -328,12 +341,20 @@ public class ListStreamReader
                     subscriptToFilter[ordinal] = new Long2ObjectOpenHashMap();
                 }
                 subscriptToFilter[ordinal].put(subscript - 1, entry.getValue());
+                maxSubscript = Math.max(maxSubscript, subscript);
             }
         }
         if (!hasPositionalFilter) {
             globalNumFilters = subscriptToFilter[0].size();
         }
         elementStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(0));
+        if (!outputChannelSet && maxSubscript != -1) {
+            // Subscripts are 1-based, so no + 1 here.
+            maxListLength = maxSubscript;
+        }
+        else if (outputChannelSet && maxListLength != -1 && maxListLength < maxSubscript) {
+            maxListLength = maxSubscript;
+        }
         filterIsSetup = true;
     }
 
@@ -360,8 +381,9 @@ public class ListStreamReader
             }
         }
         int innerStart = 0;
-        for (int i = 0; i < numInput; i++) {
-            int length = elementLength[i];
+        for (int i = 0; i < numQualifyingOuter; i++) {
+            int currentInputNumber = qualifyingOuter[i];
+            int length = elementLength[currentInputNumber];
             int filterCount = 0;
             Filter arrayFilter = filter.nextFilter();
             if (arrayFilter == null || arrayFilter == Filters.isNotNull()) {
@@ -375,9 +397,9 @@ public class ListStreamReader
                     elementFilters[innerStart + subscript] = entry.getValue();
                     filterCount++;
                 }
-                numElementFilters[i] = filterCount;
+                numElementFilters[currentInputNumber] = filterCount;
                 if (hasPositionalFilter) {
-                    localNumFilters[i] = subscriptToFilter[ordinal].size();
+                    localNumFilters[currentInputNumber] = subscriptToFilter[ordinal].size();
                 }
             }
             innerStart += length;
@@ -401,14 +423,9 @@ public class ListStreamReader
         if (positionalFilter != null) {
             setupPositionalFilter();
         }
-        if (innerQualifyingSet.getPositionCount() > 0) {
-            elementStreamReader.setInputQualifyingSet(innerQualifyingSet);
-            elementStreamReader.scan();
-            innerPosInRowGroup = innerQualifyingSet.getEnd();
-        }
-        else {
-            elementStreamReader.getOrCreateOutputQualifyingSet().reset(0);
-        }
+        elementStreamReader.setInputQualifyingSet(innerQualifyingSet);
+        elementStreamReader.scan();
+        innerPosInRowGroup = innerQualifyingSet.getEnd();
         ensureValuesCapacity(inputQualifyingSet.getPositionCount());
         int lastElementOffset = numValues == 0 ? 0 : elementOffset[numValues];
         int numInput = inputQualifyingSet.getPositionCount();
@@ -424,8 +441,8 @@ public class ListStreamReader
             int outputIndex = 0;
             numInnerResults = 0;
             filterOffset = 0;
-            for (int i = 0; i < numInput; i++) {
-                outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numElementResults);
+            for (int i = 0; i < numQualifyingOuter; i++) {
+                outputIndex = processFilterHits(qualifyingOuter[i], outputIndex, resultRows, resultInputNumbers, numElementResults);
             }
             elementStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
             numContainerRowsRead += numInnerResults;
@@ -454,9 +471,6 @@ public class ListStreamReader
     {
         int filterHits = 0;
         int initialOutputIndex = outputIndex;
-        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex] - posInRowGroup]) {
-            return outputIndex;
-        }
         int[] inputNumbers = innerQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the array corresponding to inputIndex.
         int startOfArray = elementStart[inputIndex];
@@ -477,7 +491,7 @@ public class ListStreamReader
         int total = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < total) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
-            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException());
+            errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException(toString()));
         }
         return outputIndex;
     }

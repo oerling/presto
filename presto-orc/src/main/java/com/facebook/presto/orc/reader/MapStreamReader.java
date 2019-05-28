@@ -40,13 +40,12 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
 public class MapStreamReader
-        implements StreamReader
+        extends VariantStreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(MapStreamReader.class).instanceSize();
     private final StreamDescriptor streamDescriptor;
     private final MapDirectStreamReader directReader;
     private final MapFlatStreamReader flatReader;
-    private StreamReader currentReader;
 
     public MapStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -79,6 +78,7 @@ public class MapStreamReader
     public void startStripe(InputStreamSources dictionaryStreamSources, List<ColumnEncoding> encoding)
             throws IOException
     {
+        StreamReader previousReader = currentReader;
         ColumnEncodingKind kind = encoding.get(streamDescriptor.getStreamId())
                 .getColumnEncoding(streamDescriptor.getSequence())
                 .getColumnEncodingKind();
@@ -91,45 +91,8 @@ public class MapStreamReader
         else {
             throw new IllegalArgumentException("Unsupported encoding " + kind);
         }
-
+        readerChanged(previousReader);
         currentReader.startStripe(dictionaryStreamSources, encoding);
-    }
-
-    @Override
-    public void startRowGroup(InputStreamSources dataStreamSources)
-            throws IOException
-    {
-        currentReader.startRowGroup(dataStreamSources);
-    }
-
-    @Override
-    public void setInputQualifyingSet(QualifyingSet qualifyingSet)
-    {
-        currentReader.setInputQualifyingSet(qualifyingSet);
-    }
-
-    @Override
-    public QualifyingSet getInputQualifyingSet()
-    {
-        return currentReader.getInputQualifyingSet();
-    }
-
-    @Override
-    public QualifyingSet getOutputQualifyingSet()
-    {
-        return currentReader.getOutputQualifyingSet();
-    }
-
-    @Override
-    public void setOutputQualifyingSet(QualifyingSet set)
-    {
-        currentReader.setOutputQualifyingSet(set);
-    }
-
-    @Override
-    public QualifyingSet getOrCreateOutputQualifyingSet()
-    {
-        return currentReader.getOrCreateOutputQualifyingSet();
     }
 
     @Override
@@ -147,47 +110,9 @@ public class MapStreamReader
     }
 
     @Override
-    public Block getBlock(int numFirstRows, boolean mayReuse)
-    {
-        return currentReader.getBlock(numFirstRows, mayReuse);
-    }
-
-    @Override
     public Filter getFilter()
     {
         return directReader.getFilter();
-    }
-
-    @Override
-    public void erase(int end)
-    {
-        if (currentReader == null) {
-            // This will be called before the first batch of data, so
-            // check for currentReader being set.
-            return;
-        }
-        currentReader.erase(end);
-    }
-
-    @Override
-    public void compactValues(int[] positions, int base, int numPositions)
-    {
-        currentReader.compactValues(positions, base, numPositions);
-    }
-
-    @Override
-    public int getPosition()
-    {
-        return currentReader.getPosition();
-    }
-
-    @Override
-    public int getResultSizeInBytes()
-    {
-        if (currentReader == null) {
-            return 0;
-        }
-        return currentReader.getResultSizeInBytes();
     }
 
     @Override
@@ -197,25 +122,6 @@ public class MapStreamReader
             return INITIAL_SIZE_GUESS;
         }
         return currentReader.getAverageResultSize();
-    }
-
-    @Override
-    public int getNumValues()
-    {
-        return currentReader.getNumValues();
-    }
-
-    @Override
-    public void setResultSizeBudget(long bytes)
-    {
-        currentReader.setResultSizeBudget(bytes);
-    }
-
-    @Override
-    public void scan()
-            throws IOException
-    {
-        currentReader.scan();
     }
 
     @Override

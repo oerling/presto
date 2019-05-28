@@ -81,7 +81,7 @@ public class StructStreamReader
     private Type[] fieldTypes;
     // Number of values in field readers. Differs from numValues if there are null structs.
     private int fieldBlockSize;
-    private int[] fieldBlockOffset;
+    private int[] fieldBlockOffset = new int[1];
     private int[] fieldSurviving;
     // Copy of inputQualifyingSet.
     private QualifyingSet inputCopy;
@@ -109,7 +109,7 @@ public class StructStreamReader
             PathElement immediateSubfield = pathElements.get(depth + 1);
             checkArgument(immediateSubfield instanceof NestedField, "Unsupported subfield type: " + immediateSubfield.getClass().getSimpleName());
             String fieldName = ((NestedField) immediateSubfield).getName();
-            referencedFields.add(fieldName);
+            referencedFields.add(fieldName.toLowerCase(Locale.ENGLISH));
             StreamReader fieldReader = structFields.get(fieldName);
             if (fieldReader instanceof StructStreamReader || fieldReader instanceof MapStreamReader || fieldReader instanceof ListStreamReader) {
                 if (pathElements.size() > depth + 1) {
@@ -435,8 +435,8 @@ public class StructStreamReader
     @Override
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
-        if (outputChannelSet && numValues > 0) {
-            check();
+        if (outputChannelSet) {
+            // check();
             if (fieldSurviving == null || fieldSurviving.length < numSurviving) {
                 fieldSurviving = newIntArrayForReuse(numSurviving);
             }
@@ -461,7 +461,7 @@ public class StructStreamReader
             fieldBlockSize = base + numSurviving;
             reader.compactValues(fieldSurviving, initialFieldBase, numFieldSurviving);
             numValues = base + numSurviving;
-            check();
+            // check();
         }
         compactQualifyingSet(surviving, numSurviving);
     }
@@ -522,8 +522,8 @@ public class StructStreamReader
         reader.setQualifyingSets(innerQualifyingSet, outputQualifyingSet);
         if (innerQualifyingSet.getPositionCount() > 0) {
             reader.advance();
-            innerPosInRowGroup = innerQualifyingSet.getEnd();
         }
+        innerPosInRowGroup = innerQualifyingSet.getEnd();
         ensureOutput(numInnerRows + numNullsToAdd);
         // The outputQualifyingSet is written by advance.
         if (outputChannelSet) {
@@ -551,7 +551,7 @@ public class StructStreamReader
             fieldBlockSize = numValues + numResults;
         }
         endScan(presentStream);
-        check();
+        // check();
     }
 
     void addStructResult()

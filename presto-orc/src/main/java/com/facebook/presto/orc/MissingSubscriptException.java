@@ -16,13 +16,9 @@ package com.facebook.presto.orc;
 public class MissingSubscriptException
         extends RuntimeException
 {
-    private String context = "";
+    private final String context;
 
-    public MissingSubscriptException()
-    {
-    }
-
-        public MissingSubscriptException(String context)
+    public MissingSubscriptException(String context)
     {
         this.context = context;
     }

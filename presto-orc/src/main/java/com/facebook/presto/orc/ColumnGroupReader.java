@@ -296,8 +296,10 @@ public class ColumnGroupReader
     }
 
     // Divides the space available in the result Page between the
-    // streams at firstStreamIdx and to the right of at.
-    private void makeResultBudget()
+    // streams. May truncate the input QualifyingSet if it looks like
+    // intermediate results will run out of space. This can only be
+    // done if the input QualifyingSet explicitly allows this.
+    private void makeResultBudget(boolean mayShorten)
     {
         int numRows = inputQualifyingSet.getPositionCount();
         if (targetResultBytes == UNLIMITED_BUDGET || !enforceMemoryBudget || numRows <= MIN_BATCH_ROWS) {
@@ -343,8 +345,8 @@ public class ColumnGroupReader
         if (available < MIN_READER_BUDGET) {
             available = MIN_READER_BUDGET * sortedStreamReaders.length;
         }
-        double grantedFraction = available < totalAsk ? (double) available / totalAsk : 1.0;
-        if (grantedFraction < 1 && inputQualifyingSet.mayTruncate() && reduceInputToFraction(grantedFraction)) {
+        double grantedFraction = (double) available / totalAsk;
+        if (grantedFraction < 1 && mayShorten && inputQualifyingSet.mayTruncate() && reduceInputToFraction(grantedFraction)) {
             return;
         }
         for (int i = 0; i < sortedStreamReaders.length; i++) {
@@ -363,7 +365,7 @@ public class ColumnGroupReader
         int numInput = inputQualifyingSet.getPositionCount();
         if (numInput <= MIN_BATCH_ROWS) {
             targetResultBytes = UNLIMITED_BUDGET;
-            makeResultBudget();
+            makeResultBudget(false);
             return true;
         }
         int newNumInput = Math.max(MIN_BATCH_ROWS, (int) (numInput * fraction));
@@ -375,7 +377,7 @@ public class ColumnGroupReader
         if (newNumInput <= MIN_BATCH_ROWS) {
             targetResultBytes = UNLIMITED_BUDGET;
         }
-        makeResultBudget();
+        makeResultBudget(false);
         return true;
     }
 
@@ -435,7 +437,7 @@ public class ColumnGroupReader
             alignResultsAndRemoveFromQualifyingSet(numAdded, -1);
             return;
         }
-        makeResultBudget();
+        makeResultBudget(true);
         QualifyingSet qualifyingSet = inputQualifyingSet;
         int numStreams = sortedStreamReaders.length;
         for (int streamIdx = 0; streamIdx < numStreams; ++streamIdx) {

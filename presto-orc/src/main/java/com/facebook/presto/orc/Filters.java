@@ -608,6 +608,39 @@ public class Filters
         }
 
         @Override
+        public boolean testFloat(float value)
+        {
+            for (Filter filter : filters) {
+                if (filter.testFloat(value)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public boolean testDecimal(long valueLow, long valueHigh)
+        {
+            for (Filter filter : filters) {
+                if (filter.testDecimal(valueLow, valueHigh)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public boolean testBoolean(boolean value)
+        {
+            for (Filter filter : filters) {
+                if (filter.testBoolean(value)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
         public boolean testBytes(byte[] buffer, int offset, int length)
         {
             for (Filter filter : filters) {

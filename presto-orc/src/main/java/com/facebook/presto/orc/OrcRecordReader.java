@@ -153,7 +153,14 @@ public class OrcRecordReader
     private Block[] constantBlocks;
     private List<FilterFunction> nonDeterministicConstantFilters;
     private ScanInfo scanInfo;
+
     private long lastAdaptationTime;
+    // Read at least this many rows before considering larger batch.
+    private int numRowsBeforeAdjustBatch;
+
+
+    public static long minSplitOffset;
+    public static long maxSplitOffset = Long.MAX_VALUE;
 
     public OrcRecordReader(
             Map<Integer, Type> includedColumns,
@@ -244,7 +251,7 @@ public class OrcRecordReader
             // select stripes that start within the specified split
             for (StripeInfo info : stripeInfos) {
                 StripeInformation stripe = info.getStripe();
-                if (splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
+                if (splitOffset >= minSplitOffset && splitOffset < maxSplitOffset && splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
                     stripes.add(stripe);
                     stripeFilePositions.add(fileRowCount);
                     totalRowCount += stripe.getNumberOfRows();
@@ -916,10 +923,13 @@ public class OrcRecordReader
                 // If we are at minimum batch size we must also have unlimited budget. Check that this path is not taken with minimum batch size.
                 int batchSize = qualifyingSet.getEnd() - qualifyingSet.getPositions()[0];
                 verify(batchSize > MIN_BATCH_ROWS, "Running out of unlimited budget with minimum batch size");
+                if (numRowsBeforeAdjustBatch < batchSize) {
+                    numRowsBeforeAdjustBatch = batchSize;
+                }
                 reader.compactValues(new int[0], numResultsBeforeAdvance, 0);
-                ariaBatchRows = Math.max(MIN_BATCH_ROWS, ariaBatchRows / BATCH_HARD_SHRINK_FACTOR);
+                ariaBatchRows = Math.max(MIN_BATCH_ROWS, batchSize / BATCH_HARD_SHRINK_FACTOR);
                 int[] rows = qualifyingSet.getPositions();
-                log.warn("Retry due batch too large. Batch size from " + batchSize + "to " + ariaBatchRows);
+                log.warn("Retry due to batch too large. Batch size from " + batchSize + " to " + ariaBatchRows + " at " + rows[0] + " / " + currentGroupRowCount + " in RG " + currentRowGroup);
                 int numRows = Math.min(ariaBatchRows, batchSize);
                 qualifyingSet.setPositionCount(numRows);
                 // The first row not in scope is 1 above the last in scope.
@@ -947,11 +957,15 @@ public class OrcRecordReader
         long bytesInLastBatch = readerBytes - bytesBeforeAdvance;
         numAriaBytes += bytesInLastBatch;
         numAriaRows += numResults - numResultsBeforeAdvance;
+        if (numRowsBeforeAdjustBatch > 0) {
+            int rowsInLastBatch = qualifyingSet.getEnd() - qualifyingSet.getPositions()[0];
+            numRowsBeforeAdjustBatch = Math.max(0, numRowsBeforeAdjustBatch - rowsInLastBatch);
+        }
         if (bytesInLastBatch > targetResultBytes && ariaBatchRows > MIN_BATCH_ROWS) {
             // Make batch smaller if not already at minimum.
             ariaBatchRows = Math.max(ariaBatchRows / BATCH_SOFT_SHRINK_FACTOR, MIN_BATCH_ROWS);
         }
-        else if (bytesInLastBatch == 0 && numAriaRows > 0) {
+        else if (bytesInLastBatch == 0 && numAriaRows > 0 && numRowsBeforeAdjustBatch == 0) {
             // If skipping over no hits, do not make the batch
             // size too much larger than the number of hits that
             // fit in a batch so as to avoid a retry.
@@ -959,7 +973,7 @@ public class OrcRecordReader
             int averageNumHitsInBatch = toIntExact(targetResultBytes / (1 + averageRowSize));
             ariaBatchRows = Math.min(averageNumHitsInBatch * 2, ariaBatchRows * BATCH_SOFT_SHRINK_FACTOR);
         }
-        else if (bytesInLastBatch < targetResultBytes / 8) {
+        else if (bytesInLastBatch < targetResultBytes / 8 && numRowsBeforeAdjustBatch == 0) {
             // If filled less than 1/8 of the quota, can have
             // larger batch next time.
             ariaBatchRows = Math.min(ariaBatchRows * BATCH_GROW_FACTOR, currentGroupRowCount);

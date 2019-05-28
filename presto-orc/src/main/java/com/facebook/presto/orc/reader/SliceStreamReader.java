@@ -46,14 +46,13 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
 public class SliceStreamReader
-        implements StreamReader
+        extends VariantStreamReader
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(SliceStreamReader.class).instanceSize();
 
     private final StreamDescriptor streamDescriptor;
     private final SliceDirectStreamReader directReader;
     private final SliceDictionaryStreamReader dictionaryReader;
-    private StreamReader currentReader;
 
     public SliceStreamReader(StreamDescriptor streamDescriptor, AggregatedMemoryContext systemMemoryContext)
     {
@@ -82,6 +81,7 @@ public class SliceStreamReader
         ColumnEncodingKind columnEncodingKind = encoding.get(streamDescriptor.getStreamId())
                 .getColumnEncoding(streamDescriptor.getSequence())
                 .getColumnEncodingKind();
+        StreamReader previousReader = currentReader;
         if (columnEncodingKind == DIRECT || columnEncodingKind == DIRECT_V2 || columnEncodingKind == DWRF_DIRECT) {
             currentReader = directReader;
         }
@@ -91,45 +91,8 @@ public class SliceStreamReader
         else {
             throw new IllegalArgumentException("Unsupported encoding " + columnEncodingKind);
         }
-
+        readerChanged(previousReader);
         currentReader.startStripe(dictionaryStreamSources, encoding);
-    }
-
-    @Override
-    public void startRowGroup(InputStreamSources dataStreamSources)
-            throws IOException
-    {
-        currentReader.startRowGroup(dataStreamSources);
-    }
-
-    @Override
-    public void setInputQualifyingSet(QualifyingSet qualifyingSet)
-    {
-        currentReader.setInputQualifyingSet(qualifyingSet);
-    }
-
-    @Override
-    public QualifyingSet getInputQualifyingSet()
-    {
-        return currentReader.getInputQualifyingSet();
-    }
-
-    @Override
-    public QualifyingSet getOutputQualifyingSet()
-    {
-        return currentReader.getOutputQualifyingSet();
-    }
-
-    @Override
-    public void setOutputQualifyingSet(QualifyingSet set)
-    {
-        currentReader.setOutputQualifyingSet(set);
-    }
-
-    @Override
-    public QualifyingSet getOrCreateOutputQualifyingSet()
-    {
-        return currentReader.getOrCreateOutputQualifyingSet();
     }
 
     @Override
@@ -146,45 +109,9 @@ public class SliceStreamReader
     }
 
     @Override
-    public Block getBlock(int numFirstRows, boolean mayReuse)
-    {
-        return currentReader.getBlock(numFirstRows, mayReuse);
-    }
-
-    @Override
     public Filter getFilter()
     {
         return directReader.getFilter();
-    }
-
-    @Override
-    public void erase(int end)
-    {
-        if (currentReader == null) {
-            return;
-        }
-        currentReader.erase(end);
-    }
-
-    @Override
-    public void compactValues(int[] positions, int base, int numPositions)
-    {
-        currentReader.compactValues(positions, base, numPositions);
-    }
-
-    @Override
-    public int getPosition()
-    {
-        return currentReader.getPosition();
-    }
-
-    @Override
-    public int getResultSizeInBytes()
-    {
-        if (currentReader == null) {
-            return 0;
-        }
-        return currentReader.getResultSizeInBytes();
     }
 
     @Override
@@ -194,25 +121,6 @@ public class SliceStreamReader
             return 16;
         }
         return currentReader.getAverageResultSize();
-    }
-
-    @Override
-        public int getNumValues()
-    {
-        return currentReader.getNumValues();
-    }
-
-    @Override
-    public void setResultSizeBudget(long bytes)
-    {
-        currentReader.setResultSizeBudget(bytes);
-    }
-
-    @Override
-    public void scan()
-            throws IOException
-    {
-        currentReader.scan();
     }
 
     @Override
@@ -266,12 +174,6 @@ public class SliceStreamReader
     public long getRetainedSizeInBytes()
     {
         return INSTANCE_SIZE + directReader.getRetainedSizeInBytes() + dictionaryReader.getRetainedSizeInBytes();
-    }
-
-    @Override
-    public boolean mustExtractValuesBeforeScan(boolean isNewStripe)
-    {
-        return currentReader.mustExtractValuesBeforeScan(isNewStripe);
     }
 
     StreamReader getCurrentReader()

@@ -442,6 +442,7 @@ public class SliceDictionaryStreamReader
             inDictionaryStream.getSetBits(input.getPositions(), numInput, begin, end - begin, inDictionaryFlags);
         }
 
+        numInnerResults = 0;
         if (numInput > 0) {
             if (filter != null) {
                 resultsProcessor.reset();

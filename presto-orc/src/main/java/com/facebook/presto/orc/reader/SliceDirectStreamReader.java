@@ -411,7 +411,7 @@ public class SliceDirectStreamReader
                     break;
                 }
                 nextActive = inputPositions[activeIdx];
-                if (bytesToGo <= 0) {
+                if (outputChannelSet && bytesToGo <= 0) {
                     throw batchTooLarge();
                 }
                 continue;

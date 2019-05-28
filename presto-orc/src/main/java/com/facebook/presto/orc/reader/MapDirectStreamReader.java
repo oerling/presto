@@ -67,6 +67,9 @@ import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.StreamReaders.createStreamReader;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.facebook.presto.spi.SubfieldPath.allSubscripts;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.toIntExact;
@@ -95,6 +98,7 @@ public class MapDirectStreamReader
 
     private Type keyType;
     private Type valueType;
+    private boolean hasStringKey;
     private Set<Long> longSubscripts;
     private Set<Slice> sliceSubscripts;
     private boolean mayPruneKey;
@@ -102,7 +106,7 @@ public class MapDirectStreamReader
     private Filters.PositionalFilter positionalFilter;
     private Filter[] elementFilters;
     // For each map in the inputQualifyingSet, the number of element
-    // filters that whose key exists.
+    // filters whose key exists.
     private int[] numElementFilters;
     // Count of elements at the beginning of current call to scan().
     private int initialNumElements;
@@ -270,7 +274,7 @@ public class MapDirectStreamReader
 
     boolean canPruneKeys(Block keys)
     {
-        return longSubscripts != null || sliceSubscripts != null;
+        return false;
     }
 
     private boolean keyIsPruned(Block keys, int position)
@@ -422,8 +426,17 @@ public class MapDirectStreamReader
 
     private void setupFilterAndChannel()
     {
+        MapType mapType = (MapType) type;
+        keyType = mapType.getKeyType();
+        valueType = mapType.getValueType();
+        hasStringKey = isVarcharType(keyType);
         if (filter == Filters.isNull()) {
+            keyStreamReader.setFilterAndChannel(null, 0, -1, keyType);
+            valueStreamReader.setFilterAndChannel(null, 0, -1, valueType);
             return;
+        }
+        if (!outputChannelSet) {
+            mayPruneKey = true;
         }
         ImmutableSet.Builder<Slice> newSliceSubscripts = ImmutableSet.builder();
         ImmutableSet.Builder<Long> newLongSubscripts = ImmutableSet.builder();
@@ -445,25 +458,24 @@ public class MapDirectStreamReader
             int ordinal = structFilter.getOrdinal();
             Map<PathElement, Filter> filters = structFilter.getFilters();
             for (Map.Entry<PathElement, Filter> entry : filters.entrySet()) {
-                boolean isStringKey = entry.getKey() instanceof StringSubscript;
-                String field = isStringKey ? ((StringSubscript) entry.getKey()).getIndex() : null;
-                long subscript = isStringKey ? 0 : ((LongSubscript) entry.getKey()).getIndex();
+                String field = hasStringKey ? ((StringSubscript) entry.getKey()).getIndex() : null;
+                long subscript = hasStringKey ? 0 : ((LongSubscript) entry.getKey()).getIndex();
                 Filter valueFilter = entry.getValue();
                 positionalFilter.addChild(valueFilter);
                 if (longKeyToFilter[ordinal] == null) {
                     longKeyToFilter[ordinal] = new Long2ObjectOpenHashMap();
-                    if (isStringKey) {
+                    if (hasStringKey) {
                         sliceKeyToFilter[ordinal] = new HashMap();
                     }
                 }
-                if (isStringKey) {
+                if (hasStringKey) {
                     sliceKeyToFilter[ordinal].put(Slices.copiedBuffer(field, UTF_8), valueFilter);
                 }
                 else {
                     longKeyToFilter[ordinal].put(subscript, valueFilter);
                 }
                 globalNumFilters++;
-                if (isStringKey && mayPruneKey) {
+                if (hasStringKey && mayPruneKey) {
                     newSliceSubscripts.add(Slices.copiedBuffer(field, UTF_8));
                 }
                 else if (mayPruneKey) {
@@ -475,20 +487,24 @@ public class MapDirectStreamReader
         valueStreamReader.setFilterAndChannel(elementFilter, outputChannel, -1, type.getTypeParameters().get(1));
         if (mayPruneKey) {
             List<Filter> filters = null;
-            if (longSubscripts != null) {
-                newLongSubscripts.addAll(longSubscripts);
-                longSubscripts = newLongSubscripts.build();
-                filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
-            }
-            else if (sliceSubscripts != null) {
-                newSliceSubscripts.addAll(sliceSubscripts);
-                sliceSubscripts = newSliceSubscripts.build();
+            if (hasStringKey) {
+                if (sliceSubscripts != null) {
+                    newSliceSubscripts.addAll(sliceSubscripts);
+                }
+                    sliceSubscripts = newSliceSubscripts.build();
                 filters = sliceSubscripts.stream()
                     .map(subscript -> {
-                        byte[] bytes = new byte[subscript.length()];
-                        subscript.getBytes(0, bytes);
-                        return new Filters.BytesRange(bytes, true, bytes, true, false); })
+                            byte[] bytes = new byte[subscript.length()];
+                            subscript.getBytes(0, bytes);
+                            return new Filters.BytesRange(bytes, true, bytes, true, false); })
                     .collect(toList());
+            }
+            else {
+                if (longSubscripts != null) {
+                    newLongSubscripts.addAll(longSubscripts);
+                }
+                    longSubscripts = newLongSubscripts.build();
+                filters = longSubscripts.stream().map(subscript -> { return new Filters.BigintRange(subscript, subscript, false); }).collect(toList());
             }
             Filter filter = null;
             if (filters != null && filters.size() == 1) {
@@ -497,22 +513,23 @@ public class MapDirectStreamReader
             else if (filters != null && filters.size() > 1) {
                 filter = Filters.createMultiRange(filters, false);
             }
-            keyStreamReader.setFilterAndChannel(filter, 0, -1, type.getTypeParameters().get(0));
+            keyStreamReader.setFilterAndChannel(filter, 0, -1, keyType);
         }
         else {
-            keyStreamReader.setFilterAndChannel(null, 0, -1, type.getTypeParameters().get(0));
+            keyStreamReader.setFilterAndChannel(null, 0, -1, keyType);
         }
         filterIsSetup = true;
     }
 
     private void setupPositionalFilter(int[] keyInputNumbers)
     {
-        int numInput = inputQualifyingSet.getPositionCount();
+        int numInputWithNulls = inputQualifyingSet.getPositionCount();
+        int numInput = numQualifyingOuter;
         int numKeys = keyQualifyingSet.getPositionCount();
-        if (numElementFilters == null || numElementFilters.length < numInput) {
-            numElementFilters = newIntArrayForReuse(numInput);
+        if (numElementFilters == null || numElementFilters.length < numInputWithNulls) {
+            numElementFilters = newIntArrayForReuse(numInputWithNulls);
         }
-        Arrays.fill(numElementFilters, 0, numInput, 0);
+        Arrays.fill(numElementFilters, 0, numInputWithNulls, 0);
         if (elementFilters == null || elementFilters.length < numKeys) {
             elementFilters = new Filter[roundupSize(numKeys)];
         }
@@ -520,26 +537,30 @@ public class MapDirectStreamReader
             Arrays.fill(elementFilters, 0, numKeys, null);
         }
         if (hasPositionalFilter) {
-            if (localNumFilters == null || localNumFilters.length < numInput) {
-                localNumFilters = newIntArrayForReuse(numInput);
+            if (localNumFilters == null || localNumFilters.length < numInputWithNulls) {
+                localNumFilters = newIntArrayForReuse(numInputWithNulls);
             }
             else {
-                Arrays.fill(localNumFilters, 0, numInput, 0);
+                Arrays.fill(localNumFilters, 0, numInputWithNulls, 0);
             }
         }
         boolean useDictionary = setupKeyIdToFilterMapping();
-        boolean isLongKey = keyBlock instanceof LongArrayBlock || keyBlock instanceof IntArrayBlock;
         int keyIndex = 0;
+        // Loop over non-null maps. Find the filter that aplies to
+        // each. Put the filters inside the StructFilter corresponding
+        // to each map at the positions indicated by the keys in each
+        // map.
         for (int i = 0; i < numInput; i++) {
             Filter thisFilter = filter.nextFilter();
             if (thisFilter == null || thisFilter == Filters.isNotNull()) {
                 continue;
             }
+            int currentInputNumber = qualifyingOuter[i];
             StructFilter mapFilter = (StructFilter) thisFilter;
             int length = 0;
             int startKeyIndex = keyIndex;
             for (; keyIndex < numKeys; keyIndex++) {
-                if (keyInputNumbers[keyIndex] != i) {
+                if (keyInputNumbers[keyIndex] != currentInputNumber) {
                     break;
                 }
                 length++;
@@ -547,7 +568,7 @@ public class MapDirectStreamReader
             int ordinal = mapFilter.getOrdinal();
             int filterCount = 0;
             int numDefinedFilters = 0;
-            if (isLongKey) {
+            if (!hasStringKey) {
                 Long2ObjectOpenHashMap<Filter> keyToFilter = longKeyToFilter[ordinal];
                 numDefinedFilters = keyToFilter.size();
                 for (int key = startKeyIndex; key < keyIndex; key++) {
@@ -581,9 +602,9 @@ public class MapDirectStreamReader
                     }
                 }
             }
-            numElementFilters[i] = filterCount;
+            numElementFilters[currentInputNumber] = filterCount;
             if (hasPositionalFilter) {
-                localNumFilters[i] = numDefinedFilters;
+                localNumFilters[currentInputNumber] = numDefinedFilters;
             }
         }
         positionalFilter.setFilters(keyQualifyingSet, elementFilters);
@@ -717,8 +738,8 @@ public class MapDirectStreamReader
             numInnerSurviving = 0;
             int outputIndex = 0;
             numInnerResults = 0;
-            for (int i = 0; i < numInput; i++) {
-                outputIndex = processFilterHits(i, outputIndex, resultRows, resultInputNumbers, numValueResults);
+            for (int i = 0; i < numQualifyingOuter; i++) {
+                outputIndex = processFilterHits(qualifyingOuter[i], outputIndex, resultRows, resultInputNumbers, numValueResults);
             }
             valueStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
             if (filter != null) {
@@ -746,6 +767,9 @@ public class MapDirectStreamReader
 
     private void checkBudget()
     {
+        if (!outputChannelSet || resultSizeBudget == UNLIMITED_BUDGET) {
+            return;
+        }
         // If the value reader is a repeated reader that has no data,
         // we do not do this check. This reader will already jave
         // reported a large size so the input batch should be small
@@ -756,7 +780,7 @@ public class MapDirectStreamReader
         int numInput = inputQualifyingSet.getPositionCount();
         int numInner = innerQualifyingSet.getPositionCount();
         double keysPerMap = (double) numInner / (double) numInput;
-        double numKeys = longSubscripts != null ? (double) longSubscripts.size() : sliceSubscripts != null ? (double) sliceSubscripts.size() : keysPerMap;
+        double numKeys = mayPruneKey ? (hasStringKey ? (double) sliceSubscripts.size() : (double) longSubscripts.size()) : keysPerMap;
         long keySize = keyStreamReader.getAverageResultSize();
         double keySelectivity = keysPerMap / numKeys;
         double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
@@ -776,9 +800,6 @@ public class MapDirectStreamReader
         int filterHits = 0;
         int count = 0;
         int initialOutputIndex = outputIndex;
-        if (presentStream != null && !present[inputQualifyingSet.getPositions()[inputIndex] - posInRowGroup]) {
-            return outputIndex;
-        }
         int[] inputNumbers = keyQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the map corresponding to inputIndex.
         while (outputIndex < numValueResults && inputNumbers[resultInputNumbers[outputIndex]] == inputIndex) {
@@ -792,9 +813,13 @@ public class MapDirectStreamReader
             // Some filter did not hit.
             return outputIndex;
         }
+        int numDefinedFilters = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
+        boolean missingIsNull = true;
+        if (missingIsNull && numElementFilters[inputIndex] < numDefinedFilters) {
+            return outputIndex;
+        }
         outputQualifyingSet.append(inputQualifyingSet.getPositions()[inputIndex], inputIndex);
         addMapToResult(inputIndex, initialOutputIndex, outputIndex);
-        int numDefinedFilters = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < numDefinedFilters) {
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
             errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException(this.toString()));
@@ -828,9 +853,7 @@ public class MapDirectStreamReader
         Block keys;
         Block values;
         if (innerFirstRows == 0) {
-            Type keyType = type.getTypeParameters().get(0);
             keys = keyType.createBlockBuilder(null, 0).build();
-            Type valueType = type.getTypeParameters().get(0);
             values = valueType.createBlockBuilder(null, 0).build();
         }
         else {
