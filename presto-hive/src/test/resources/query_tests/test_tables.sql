@@ -203,3 +203,145 @@ SELECT
 FROM tpch.tiny.lineitem
 WHERE orderkey < 100000
 ;
+--table: cust_order_line 
+SELECT
+    c_custkey,
+    MAX(c_name) AS c_name,
+    MAX(c_address) AS c_address,
+    MAX(c_nationkey) AS c_nationkey,
+    MAX(c_phone) AS c_phone,
+    MAX(c_acctbal) AS c_acctbal,
+    MAX(c_mktsegment) AS c_mktsegment,
+    MAX(c_comment) AS c_comment,
+    ARRAY_AGG(
+        CAST(
+            ROW (
+                o_orderkey,
+                o_orderstatus,
+                o_totalprice,
+                o_orderdate,
+                o_orderpriority,
+                o_shippriority,
+                o_clerk,
+                o_comment,
+                LINES
+            ) AS ROW(
+                o_orderkey BIGINT,
+                o_orderstatus VARCHAR,
+                o_totalprice DOUBLE,
+                o_orderdate DATE,
+                o_orderpriority VARCHAR,
+                o_shippriority VARCHAR,
+                o_clerk VARCHAR,
+                o_comment VARCHAR,
+                o_lines ARRAY (
+                    ROW (
+                        l_partkey BIGINT,
+                        l_suppkey BIGINT,
+                        l_linenumber INTEGER,
+                        l_quantity DOUBLE,
+                        l_extendedprice DOUBLE,
+                        l_discount DOUBLE,
+                        l_tax DOUBLE,
+                        l_returnflag VARCHAR(1),
+                        l_linestatus VARCHAR(1),
+                        l_shipdate DATE,
+                        l_commitdate DATE,
+                        l_receiptdate DATE,
+                        l_shipinstruct VARCHAR(25),
+                        l_shipmode VARCHAR(10),
+                        l_comment VARCHAR(44)
+                    )
+                )
+            )
+        )
+    ) AS c_orders
+FROM (
+    SELECT
+        c_custkey AS c_custkey,
+        o_orderkey,
+        MAX(c_name) AS c_name,
+        MAX(c_address) AS c_address,
+        MAX(c_nationkey) AS c_nationkey,
+        MAX(c_phone) AS c_phone,
+        MAX(c_acctbal) AS c_acctbal,
+        MAX(c_mktsegment) AS c_mktsegment,
+        MAX(c_comment) AS c_comment,
+        MAX(o_orderstatus) AS o_orderstatus,
+        MAX(o_totalprice) AS o_totalprice,
+        MAX(o_orderdate) AS o_orderdate,
+        MAX(o_orderpriority) AS o_orderpriority,
+        MAX(o_clerk) AS o_clerk,
+        MAX(o_shippriority) AS o_shippriority,
+        MAX(o_comment) AS o_comment,
+        ARRAY_AGG(
+            CAST(
+                ROW(
+                    l.partkey,
+                    l.suppkey,
+                    l.linenumber,
+                    l.quantity,
+                    l.extendedprice,
+                    l.discount,
+                    l.tax,
+                    l.returnflag,
+                    l.linestatus,
+                    l.shipdate,
+                    l.commitdate,
+                    l.receiptdate,
+                    l.shipinstruct,
+                    l.shipmode,
+                    l.comment
+                ) AS ROW (
+                    l_partkey BIGINT,
+                    l_suppkey BIGINT,
+                    l_linenumber INTEGER,
+                    l_quantity DOUBLE,
+                    l_extendedprice DOUBLE,
+                    l_discount DOUBLE,
+                    l_tax DOUBLE,
+                    l_returnflag VARCHAR(1),
+                    l_linestatus VARCHAR(1),
+                    l_shipdate DATE,
+                    l_commitdate DATE,
+                    l_receiptdate DATE,
+                    sl_hipinstruct VARCHAR(25),
+                    l_shipmode VARCHAR(10),
+                    l_comment VARCHAR(44)
+                )
+            )
+        ) AS LINES
+    FROM tpch.tiny.lineitem l,
+        (
+        SELECT
+            c.custkey AS c_custkey,
+            name AS c_name,
+            address AS c_address,
+            nationkey AS c_nationkey,
+            phone AS c_phone,
+            acctbal AS c_acctbal,
+            mktsegment AS c_mktsegment,
+            c.comment AS c_comment,
+            orderkey AS o_orderkey,
+            orderstatus AS o_orderstatus,
+            totalprice AS o_totalprice,
+            orderdate AS o_orderdate,
+            orderpriority AS o_orderpriority,
+            clerk AS o_clerk,
+            shippriority AS o_shippriority,
+            o.comment AS o_comment
+        FROM tpch.tiny.orders o,
+            tpch.tiny.customer c
+        WHERE
+            o.custkey = c.custkey
+            AND c.custkey BETWEEN 0 AND 2000000
+    )
+    WHERE
+        o_orderkey = l.orderkey
+    GROUP BY
+        c_custkey,
+        o_orderkey
+)
+GROUP BY
+    c_custkey
+    ;
