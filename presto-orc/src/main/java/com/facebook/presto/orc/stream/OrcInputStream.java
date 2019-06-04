@@ -49,6 +49,7 @@ public final class OrcInputStream
     private int currentCompressedBlockOffset;
 
     private byte[] buffer;
+    private byte[] decompressionResultBuffer;
     private int position;
     private int length;
 
@@ -283,7 +284,6 @@ public final class OrcInputStream
         if (chunkLength < 0 || chunkLength > compressedSliceInput.remaining()) {
             throw new OrcCorruptionException(orcDataSourceId, "The chunkLength (%s) must not be negative or greater than remaining size (%s)", chunkLength, compressedSliceInput.remaining());
         }
-
         Slice chunk = compressedSliceInput.readSlice(chunkLength);
 
         if (bufferContainer == null) {
@@ -295,6 +295,7 @@ public final class OrcInputStream
             length = toIntExact(position + chunk.length());
         }
         else {
+            buffer = decompressionResultBuffer;
             OrcDecompressor.OutputBuffer output = new OrcDecompressor.OutputBuffer()
             {
                 @Override
@@ -320,6 +321,7 @@ public final class OrcInputStream
                 }
             };
             length = decompressor.get().decompress((byte[]) chunk.getBase(), (int) (chunk.getAddress() - ARRAY_BYTE_BASE_OFFSET), chunk.length(), output);
+            decompressionResultBuffer = buffer;
             position = 0;
         }
         uncompressedOffset = position;
