@@ -83,6 +83,7 @@ public class StripeReader
     private final OrcPredicate predicate;
     private final MetadataReader metadataReader;
     private final Optional<OrcWriteValidation> writeValidation;
+    boolean invalidCheckpoint;
 
     public StripeReader(OrcDataSource orcDataSource,
             Optional<OrcDecompressor> decompressor,
@@ -138,7 +139,7 @@ public class StripeReader
         }
 
         // handle stripes with more than one row group or a dictionary
-        boolean invalidCheckPoint = false;
+        invalidCheckpoint = false;
         if ((stripe.getNumberOfRows() > rowsInRowGroup) || alwaysUseCheckpoints || hasRowGroupDictionary) {
             // determine ranges of the stripe to read
             Map<StreamId, DiskRange> diskRanges = getDiskRanges(stripeFooter.getStreams());
@@ -191,7 +192,7 @@ public class StripeReader
                 if (hasRowGroupDictionary) {
                     throw new OrcCorruptionException(e, orcDataSource.getId(), "Checkpoints are corrupt");
                 }
-                invalidCheckPoint = true;
+                invalidCheckpoint = true;
             }
         }
 
@@ -212,7 +213,7 @@ public class StripeReader
         for (Entry<StreamId, Stream> entry : streams.entrySet()) {
             if (entry.getKey().getStreamKind() == ROW_INDEX) {
                 List<RowGroupIndex> rowGroupIndexes = metadataReader.readRowIndexes(hiveWriterVersion, streamsData.get(entry.getKey()));
-                checkState(rowGroupIndexes.size() == 1 || invalidCheckPoint, "expect a single row group or an invalid check point");
+                checkState(rowGroupIndexes.size() == 1 || invalidCheckpoint, "expect a single row group or an invalid check point");
                 long totalBytes = 0;
                 long totalRows = 0;
                 for (RowGroupIndex rowGroupIndex : rowGroupIndexes) {
@@ -244,6 +245,10 @@ public class StripeReader
         return new Stripe(stripe.getNumberOfRows(), columnEncodings, ImmutableList.of(rowGroup), dictionaryStreamSources);
     }
 
+    public boolean hasInvalidCheckpoint()
+    {
+        return invalidCheckpoint;
+    }
     public Map<StreamId, OrcInputStream> readDiskRanges(long stripeOffset, Map<StreamId, DiskRange> diskRanges, AggregatedMemoryContext systemMemoryUsage)
             throws IOException
     {

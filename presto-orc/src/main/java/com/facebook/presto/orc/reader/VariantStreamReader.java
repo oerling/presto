@@ -109,7 +109,12 @@ public abstract class VariantStreamReader
         if (currentReader == null) {
             return;
         }
-        currentReader.erase(end);
+        if (mustRetrieveResultFromPreviousReader) {
+            previousReader.erase(end);
+        }
+        else {
+            currentReader.erase(end);
+        }
     }
 
     @Override

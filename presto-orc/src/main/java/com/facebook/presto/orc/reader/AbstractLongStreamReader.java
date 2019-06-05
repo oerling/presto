@@ -43,6 +43,7 @@ abstract class AbstractLongStreamReader
         if (values == null) {
             return;
         }
+        checkEnoughValues(end);
         numValues -= end;
         if (numValues > 0) {
             System.arraycopy(values, end, values, 0, numValues);

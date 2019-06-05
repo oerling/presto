@@ -291,7 +291,6 @@ public class OrcRecordReader
                 hiveWriterVersion,
                 metadataReader,
                 writeValidation);
-
         streamReaders = createStreamReaders(orcDataSource, types, hiveStorageTimeZone, presentColumnsAndTypes.build(), includedSubfields, streamReadersSystemMemoryContext);
         maxBytesPerCell = new long[streamReaders.length];
         nextBatchSize = initialBatchSize;
@@ -847,7 +846,7 @@ public class OrcRecordReader
                 constantBlocks,
                 adaptation);
         targetResultBytes = options.getTargetBytes();
-        reader.setResultSizeBudget(targetResultBytes);
+        reader.setResultSizeBudget(targetResultBytes, enforceMemoryBudget);
     }
 
     private static boolean isConstantFilterFunction(FilterFunction filter, Block[] constantBlocks)
@@ -979,11 +978,16 @@ public class OrcRecordReader
         }
         setReaderBudget();
         // The result is full if there would not be room for another
-        // batch of the same size as the last. The cap on row count
-        // causes the scan to periodically return even if it does not
-        // project out column values so that the caller can check for yield
-        // and interruptions.
-        return numResults > targetResultRows || readerBytes > targetResultBytes - bytesInLastBatch;
+        // batch of the same size as the last or if we have 4/5 of the
+        // quota. We do not want to fill the remainder of the quota
+        // with decreasing size batches because these have higher
+        // overhead and a higher chance to run out of budget when
+        // meeting unexpectedly wide rows.
+        //
+        // The cap on row count causes the scan to periodically return
+        // even if it does not project out column values so that the
+        // caller can check for yield and interruptions.
+        return numResults > targetResultRows || readerBytes > targetResultBytes - bytesInLastBatch || readerBytes > targetResultBytes * 4 / 5;
     }
 
     private void checkAdaptation()
@@ -1001,7 +1005,8 @@ public class OrcRecordReader
 
     private void setReaderBudget()
     {
-        reader.setResultSizeBudget(ariaBatchRows <= MIN_BATCH_ROWS ? UNLIMITED_BUDGET : targetResultBytes);
+        // The reader is allowed to throw BatchTooLargeException if there are no invalid checkpoints and if enforcement is enabled.
+        reader.setResultSizeBudget(targetResultBytes, enforceMemoryBudget && !stripeReader.hasInvalidCheckpoint());
     }
 
     private Page resultPage()

@@ -387,7 +387,7 @@ public class StructStreamReader
         }
         resultSizeBudget = bytes;
         if (reader != null) {
-            reader.setResultSizeBudget(bytes);
+            reader.setResultSizeBudget(bytes, true);
         }
     }
 

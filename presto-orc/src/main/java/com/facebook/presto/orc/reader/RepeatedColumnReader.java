@@ -195,7 +195,11 @@ abstract class RepeatedColumnReader
     @Override
     public void erase(int end)
     {
-        if (outputChannel == -1 || numValues == 0) {
+        if (!outputChannelSet || numValues == 0) {
+            return;
+        }
+        checkEnoughValues(end);
+        if (numValues == 0) {
             return;
         }
         int innerEnd = getInnerPosition(end);

@@ -56,7 +56,7 @@ public class ColumnGroupReader
     private QualifyingSet outputQualifyingSet;
 
     private boolean reorderFilters;
-    private final boolean enforceMemoryBudget;
+    private boolean enforceMemoryBudget;
 
     private Block[] reusedPageBlocks;
 
@@ -126,8 +126,9 @@ public class ColumnGroupReader
         outputQualifyingSet = output;
     }
 
-    public void setResultSizeBudget(long bytes)
+    public void setResultSizeBudget(long bytes, boolean enforce)
     {
+        enforceMemoryBudget = enforce && bytes != UNLIMITED_BUDGET;
         targetResultBytes = bytes;
     }
 
@@ -302,13 +303,8 @@ public class ColumnGroupReader
     private void makeResultBudget(boolean mayShorten)
     {
         int numRows = inputQualifyingSet.getPositionCount();
-        if (targetResultBytes == UNLIMITED_BUDGET || !enforceMemoryBudget || numRows <= MIN_BATCH_ROWS) {
-            for (int i = 0; i < sortedStreamReaders.length; i++) {
-                StreamReader reader = sortedStreamReaders[i];
-                if (reader.getChannel() != -1) {
-                    reader.setResultSizeBudget(UNLIMITED_BUDGET);
-                }
-            }
+        if (numRows <= MIN_BATCH_ROWS) {
+            setUnlimitedBudget();
             return;
         }
         long bytesSoFar = 0;
@@ -349,6 +345,11 @@ public class ColumnGroupReader
         if (grantedFraction < 1 && mayShorten && inputQualifyingSet.mayTruncate() && reduceInputToFraction(grantedFraction)) {
             return;
         }
+        // We have applied a soft restriction. So if no enforcement, set reader budgets to unlimited.
+        if (!enforceMemoryBudget) {
+            setUnlimitedBudget();
+            return;
+        }
         for (int i = 0; i < sortedStreamReaders.length; i++) {
             StreamReader reader = sortedStreamReaders[i];
             if (reader.getChannel() != -1) {
@@ -360,12 +361,21 @@ public class ColumnGroupReader
         }
     }
 
+    private void setUnlimitedBudget()
+    {
+        for (int i = 0; i < sortedStreamReaders.length; i++) {
+            StreamReader reader = sortedStreamReaders[i];
+            if (reader.getChannel() != -1) {
+                reader.setResultSizeBudget(UNLIMITED_BUDGET);
+            }
+        }
+    }
+
     private boolean reduceInputToFraction(double fraction)
     {
         int numInput = inputQualifyingSet.getPositionCount();
         if (numInput <= MIN_BATCH_ROWS) {
-            targetResultBytes = UNLIMITED_BUDGET;
-            makeResultBudget(false);
+            setUnlimitedBudget();
             return true;
         }
         int newNumInput = Math.max(MIN_BATCH_ROWS, (int) (numInput * fraction));
@@ -374,9 +384,6 @@ public class ColumnGroupReader
         }
         inputQualifyingSet.setEnd(inputQualifyingSet.getPositions()[newNumInput]);
         inputQualifyingSet.setPositionCount(newNumInput);
-        if (newNumInput <= MIN_BATCH_ROWS) {
-            targetResultBytes = UNLIMITED_BUDGET;
-        }
         makeResultBudget(false);
         return true;
     }
