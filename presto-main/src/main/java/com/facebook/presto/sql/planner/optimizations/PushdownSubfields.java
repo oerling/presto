@@ -261,7 +261,10 @@ public class PushdownSubfields
             protected Void visitSubscriptExpression(SubscriptExpression node, Context context)
             {
                 if (processBaseExpression(node.getBase(), context)) {
-                    context.subfieldPaths.accept(deferenceOrSubscriptExpressionToPath(node));
+                    SubfieldPath path = deferenceOrSubscriptExpressionToPath(node);
+                    if (path != null) {
+                        context.subfieldPaths.accept(path);
+                    }
                 }
                 return null;
             }
@@ -270,8 +273,11 @@ public class PushdownSubfields
             protected Void visitDereferenceExpression(DereferenceExpression node, Context context)
             {
                 if (processBaseExpression(node.getBase(), context)) {
-                    context.subfieldPaths.accept(deferenceOrSubscriptExpressionToPath(node));
-                }
+                    SubfieldPath path = deferenceOrSubscriptExpressionToPath(node);
+                    if (path != null) {
+                        context.subfieldPaths.accept(path);
+                    }
+                    }
                 return null;
             }
 
