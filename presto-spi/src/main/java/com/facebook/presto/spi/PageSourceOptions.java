@@ -13,7 +13,11 @@
  */
 package com.facebook.presto.spi;
 
+import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.type.Type;
+
 import java.util.Arrays;
+import java.util.function.Function;
 
 import static java.util.Objects.requireNonNull;
 
@@ -25,6 +29,9 @@ public class PageSourceOptions
     private final FilterFunction[] filterFunctions;
     private final int targetBytes;
     private final ScanInfo scanInfo;
+    private final Object[] prefilledValues;
+    private final Type[] types;
+    private final Function<Block, Block>[] coercers;
 
     public abstract static class AdaptationStats
     {
@@ -217,7 +224,10 @@ public class PageSourceOptions
                              boolean reusePages,
                              FilterFunction[] filterFunctions,
                              int targetBytes,
-                             ScanInfo scanInfo)
+                             ScanInfo scanInfo,
+                             Object[] prefilledValues,
+                             Type[] types,
+                             Function<Block, Block>[] coercers)
     {
         this.internalChannels = requireNonNull(internalChannels, "internalChannels is null");
         this.outputChannels = requireNonNull(outputChannels, "outputChannels is null");
@@ -225,6 +235,9 @@ public class PageSourceOptions
         this.filterFunctions = requireNonNull(filterFunctions, "filterFunctions is null");
         this.targetBytes = targetBytes;
         this.scanInfo = requireNonNull(scanInfo, "scanInfo is null");
+        this.prefilledValues = prefilledValues;
+        this.types = types;
+        this.coercers = coercers;
     }
 
     public PageSourceOptions(int[] internalChannels,
@@ -233,7 +246,7 @@ public class PageSourceOptions
                              FilterFunction[] filterFunctions,
                                  int targetBytes)
     {
-        this(internalChannels, outputChannels, reusePages, filterFunctions, targetBytes, new ScanInfo());
+        this(internalChannels, outputChannels, reusePages, filterFunctions, targetBytes, new ScanInfo(), null, null, null);
     }
 
     public int[] getInternalChannels()
@@ -263,5 +276,20 @@ public class PageSourceOptions
     public ScanInfo getScanInfo()
     {
         return scanInfo;
+    }
+
+    public Object[] getPrefilledValues()
+    {
+        return prefilledValues;
+    }
+
+    public Type[] getTypes()
+    {
+        return types;
+    }
+
+    public Function<Block, Block>[] getCoercers()
+    {
+        return coercers;
     }
 }

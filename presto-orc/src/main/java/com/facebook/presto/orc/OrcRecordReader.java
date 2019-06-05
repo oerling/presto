@@ -36,6 +36,7 @@ import com.facebook.presto.spi.PageSourceOptions.ScanInfo;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.RunLengthEncodedBlock;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
@@ -781,10 +782,10 @@ public class OrcRecordReader
         }
     }
 
-    public void pushdownFilterAndProjection(PageSourceOptions options, int[] channelColumns, List<Type> types, Block[] constantBlocks)
+    public void pushdownFilterAndProjection(PageSourceOptions options, int[] channelColumns, List<Type> types, Block[] splitConstantBlocks)
     {
         reuseBlocks = options.getReusePages();
-        this.constantBlocks = requireNonNull(constantBlocks, "constantBlocks is null");
+        constantBlocks = makeCombinedConstantBlocks(options, splitConstantBlocks);
         verify(currentRowGroup == -1, "Should not call pushdownFilterAndProjection() after getNextPage()");
         Map<Integer, Filter> filters = predicate.getFilters();
         for (int i = 0; i < channelColumns.length; i++) {
@@ -1025,6 +1026,28 @@ public class OrcRecordReader
         for (FilterFunction filter : nonDeterministicConstantFilters) {
             evaluateConstantFilterFunction(filter, constantBlocks, qualifyingSet);
         }
+    }
+
+    private Block[] makeCombinedConstantBlocks(PageSourceOptions options, Block[] constantBlocks)
+    {
+        requireNonNull(constantBlocks, "constantBlocks is null");
+        Object[] prefilledValues = options.getPrefilledValues();
+        if (prefilledValues == null || prefilledValues.length <= constantBlocks.length) {
+            return constantBlocks;
+        }
+        // We append RLE Blocks for all prefilled columns to
+        // constantBlocks. The prefilled values are always to the
+        // right of any values from the reader.
+        Block[] newConstantBlocks = Arrays.copyOf(constantBlocks, prefilledValues.length);
+        for (int i = 0; i < constantBlocks.length; i++) {
+            checkArgument(prefilledValues[i] == null, "All prefilled values must be to the right of columns from the OrcPageSource");
+            checkArgument(options.getCoercers()[i] == null, "Coercers are not supported");
+        }
+        for (int i = constantBlocks.length; i < prefilledValues.length; i++) {
+            newConstantBlocks[i] = RunLengthEncodedBlock.create(options.getTypes()[i], prefilledValues[i], 1);
+            checkArgument(options.getCoercers()[i] == null, "Coercers are not supported");
+        }
+        return newConstantBlocks;
     }
 
     private void updateAdaptation()

@@ -416,7 +416,7 @@ public class ScanFilterAndProjectOperator
                 reusePages,
                 filters,
                 mergingOutput.getMinPageSizeInBytes(),
-                scanInfo);
+                scanInfo, null, null, null);
 
         boolean filterPushedDown = pageSource.pushdownFilterAndProjection(options);
         if (filterPushedDown && projectionPushedDown) {

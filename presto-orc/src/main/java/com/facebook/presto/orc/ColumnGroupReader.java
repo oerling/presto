@@ -410,8 +410,8 @@ public class ColumnGroupReader
             if (channel == -1) {
                 continue;
             }
-            if (constantBlocks[channel] != null) {
-                blocks[channel] = new RunLengthEncodedBlock(constantBlocks[channel].getRegion(0, 1), numFirstRows);
+            if (constantBlocks[i] != null) {
+                blocks[channel] = new RunLengthEncodedBlock(constantBlocks[i].getRegion(0, 1), numFirstRows);
                 continue;
             }
             StreamReader reader = channelToStreamReader.get(i);

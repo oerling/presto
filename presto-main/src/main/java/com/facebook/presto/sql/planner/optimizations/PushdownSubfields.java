@@ -277,7 +277,7 @@ public class PushdownSubfields
                     if (path != null) {
                         context.subfieldPaths.accept(path);
                     }
-                    }
+                }
                 return null;
             }
 
