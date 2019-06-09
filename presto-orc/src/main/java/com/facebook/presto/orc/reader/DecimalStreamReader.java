@@ -398,6 +398,9 @@ public class DecimalStreamReader
     @Override
     protected void ensureValuesCapacity(int capacity, boolean includeNulls)
     {
+        if (!outputChannelSet) {
+            return;
+        }
         int scaledCapacity = capacity * numLongsPerValue;
         if (values == null || values.length < scaledCapacity) {
             values = resize(values, scaledCapacity);

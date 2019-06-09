@@ -23,6 +23,16 @@ public abstract class VariantStreamReader
         implements StreamReader
 {
     protected StreamReader currentReader;
+
+    // Readers may alternate between variants, e.g. direct vs
+    // dictionary. When the change takes place,
+    // mustRetrieveResultFromPreviousReader is set. This is tested
+    // before beginning with a new row
+    // group. resultFromPreviousReaderRetrieved is set when the rows
+    // are erased. The next scan finally clears both flags. Note that
+    // there can be a reader that accumulates values but is not
+    // projected out. These do not fetch the values when returning a
+    // Page but are still erased at the start of the next batch.
     private StreamReader previousReader;
     private boolean mustRetrieveResultFromPreviousReader;
     private boolean resultFromPreviousReaderRetrieved;
@@ -48,7 +58,6 @@ public abstract class VariantStreamReader
     public final Block getBlock(int numFirstRows, boolean mayReuse)
     {
         if (mustRetrieveResultFromPreviousReader) {
-            resultFromPreviousReaderRetrieved = true;
             return previousReader.getBlock(numFirstRows, mayReuse);
         }
         return currentReader.getBlock(numFirstRows, mayReuse);
@@ -59,7 +68,7 @@ public abstract class VariantStreamReader
             throws IOException
     {
         if (mustRetrieveResultFromPreviousReader && !resultFromPreviousReaderRetrieved) {
-            throw new UnsupportedOperationException("Must retrieve result from a previous reader before starting with the next");
+            throw new UnsupportedOperationException("Must retrieve result from a previous reader before starting with the next, previous = " + previousReader.toString() + " current = " + currentReader.toString());
         }
         mustRetrieveResultFromPreviousReader = false;
         resultFromPreviousReaderRetrieved = false;
@@ -110,6 +119,7 @@ public abstract class VariantStreamReader
             return;
         }
         if (mustRetrieveResultFromPreviousReader) {
+            resultFromPreviousReaderRetrieved = true;
             previousReader.erase(end);
         }
         else {

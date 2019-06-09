@@ -314,6 +314,9 @@ public class DoubleStreamReader
     @Override
     protected void ensureValuesCapacity(int capacity, boolean includeNulls)
     {
+        if (!outputChannelSet) {
+            return;
+        }
         if (values == null || values.length < capacity) {
             values = resize(values, capacity);
             if (valueIsNull != null) {
