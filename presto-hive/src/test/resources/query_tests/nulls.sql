@@ -120,7 +120,7 @@ select string_map['shipinstruct'] from lineitem_aria_nulls
 where string_map is null and string_map['shipmode'] = 'AIR'
 ;
 select count (*) from lineitem_aria_nulls
-where string_map['shipmode'] is null and string_map is not null;
+where string_map['shipmode'] is null and string_map is not null
 ;
 select count (*) from lineitem_aria_nulls
 where string_map['shipmode'] is null
