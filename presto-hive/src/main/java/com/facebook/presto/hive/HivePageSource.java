@@ -113,6 +113,7 @@ public class HivePageSource
         implements ConnectorPageSource
 {
     private final List<ColumnMapping> columnMappings;
+    private final int[] hiveColumnIndices;
     private final Optional<BucketAdapter> bucketAdapter;
     private final Object[] prefilledValues;
     private final Type[] types;
@@ -137,7 +138,7 @@ public class HivePageSource
         this.bucketAdapter = bucketAdaptation.map(BucketAdapter::new);
 
         int size = columnMappings.size();
-
+        hiveColumnIndices = new int[size];
         prefilledValues = new Object[size];
         types = new Type[size];
         coercers = new Function[size];
@@ -145,13 +146,10 @@ public class HivePageSource
         for (int columnIndex = 0; columnIndex < size; columnIndex++) {
             ColumnMapping columnMapping = columnMappings.get(columnIndex);
             HiveColumnHandle column = columnMapping.getHiveColumnHandle();
-            if ((columnMapping.getKind() == REGULAR || columnMapping.getKind() == INTERIM) && columnMapping.getIndex() != columnIndex) {
-                throw new IllegalArgumentException("ColumnMapping specifies an index different from its ordinal position");
-            }
             String name = column.getName();
             Type type = typeManager.getType(column.getTypeSignature());
             types[columnIndex] = type;
-
+            hiveColumnIndices[columnIndex] = column.getHiveColumnIndex();
             if (columnMapping.getCoercionFrom().isPresent()) {
                 coercers[columnIndex] = createCoercer(typeManager, columnMapping.getCoercionFrom().get(), columnMapping.getHiveColumnHandle().getHiveType());
             }
@@ -239,6 +237,7 @@ public class HivePageSource
             }
 
             if (filterAndProjectPushedDown) {
+                verify(!bucketAdapter.isPresent());
                 return dataPage;
             }
             if (bucketAdapter.isPresent()) {
@@ -737,6 +736,7 @@ public class HivePageSource
                 options.getFilterFunctions(),
                 options.getTargetBytes(),
                 options.getScanInfo(),
+                hiveColumnIndices,
                 prefilledValues,
                 types,
                                      coercers);

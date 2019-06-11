@@ -29,6 +29,10 @@ public class PageSourceOptions
     private final FilterFunction[] filterFunctions;
     private final int targetBytes;
     private final ScanInfo scanInfo;
+    // The ordinal of the column in the table. Can be negative for a
+    // column not physically in the table, e.g. prefilled. Corresponds
+    // pairwise to internalChannels, prefilledValues, types and coercers.
+    private final int[] columnIndices;
     private final Object[] prefilledValues;
     private final Type[] types;
     private final Function<Block, Block>[] coercers;
@@ -225,6 +229,7 @@ public class PageSourceOptions
                              FilterFunction[] filterFunctions,
                              int targetBytes,
                              ScanInfo scanInfo,
+                             int[] columnIndices,
                              Object[] prefilledValues,
                              Type[] types,
                              Function<Block, Block>[] coercers)
@@ -235,6 +240,7 @@ public class PageSourceOptions
         this.filterFunctions = requireNonNull(filterFunctions, "filterFunctions is null");
         this.targetBytes = targetBytes;
         this.scanInfo = requireNonNull(scanInfo, "scanInfo is null");
+        this.columnIndices = columnIndices;
         this.prefilledValues = prefilledValues;
         this.types = types;
         this.coercers = coercers;
@@ -246,7 +252,7 @@ public class PageSourceOptions
                              FilterFunction[] filterFunctions,
                                  int targetBytes)
     {
-        this(internalChannels, outputChannels, reusePages, filterFunctions, targetBytes, new ScanInfo(), null, null, null);
+        this(internalChannels, outputChannels, reusePages, filterFunctions, targetBytes, new ScanInfo(), null, null, null, null);
     }
 
     public int[] getInternalChannels()
@@ -276,6 +282,11 @@ public class PageSourceOptions
     public ScanInfo getScanInfo()
     {
         return scanInfo;
+    }
+
+    public int[] getColumnIndices()
+    {
+        return columnIndices;
     }
 
     public Object[] getPrefilledValues()

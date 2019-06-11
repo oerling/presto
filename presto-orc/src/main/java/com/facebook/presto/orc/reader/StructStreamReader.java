@@ -60,6 +60,7 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static com.google.common.collect.Iterables.toArray;
 import static java.util.Objects.requireNonNull;
 
 public class StructStreamReader
@@ -347,7 +348,7 @@ public class StructStreamReader
         reader = new ColumnGroupReader(streamReaders,
                                        null,
                                        channelColumns,
-                                       rowType.getTypeParameters(),
+                                       toArray(rowType.getTypeParameters(), Type.class),
                                        fieldColumns,
                                        fieldColumns,
                                        filters,
@@ -603,7 +604,7 @@ public class StructStreamReader
             if (fieldBlockOffset[i] != innerFirstRows) {
                 throw new IllegalArgumentException("Struct nulls and block field indices inconsistent");
             }
-            if (presentStream == null || !valueIsNull[i]) {
+            if (present == null || !valueIsNull[i]) {
                 innerFirstRows++;
             }
         }
@@ -613,7 +614,7 @@ public class StructStreamReader
         Block[] blocks = reader.getBlocks(innerFirstRows, mayReuse, true);
         blocks = fillUnreferencedWithNulls(blocks, innerFirstRows);
         int[] offsets = mayReuse ? fieldBlockOffset : Arrays.copyOf(fieldBlockOffset, numFirstRows + 1);
-        boolean[] nulls = presentStream == null ? null
+        boolean[] nulls = valueIsNull == null ? null
             : mayReuse ? valueIsNull : Arrays.copyOf(valueIsNull, numFirstRows);
         return RowBlock.createRowBlockInternal(0, numFirstRows, nulls, offsets, blocks);
     }

@@ -512,7 +512,6 @@ public class OrcRecordReader
         if (currentRowGroupObject.getMinAverageRowBytes() > 0) {
             maxBatchSize = toIntExact(min(maxBatchSize, max(1, maxBlockBytes / currentRowGroupObject.getMinAverageRowBytes())));
         }
-
         setReadersToCurrentRowGroup();
         return true;
     }
@@ -782,21 +781,25 @@ public class OrcRecordReader
         }
     }
 
-    public void pushdownFilterAndProjection(PageSourceOptions options, int[] channelColumns, List<Type> types, Block[] splitConstantBlocks)
+    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> types, Block[] splitConstantBlocks)
     {
         reuseBlocks = options.getReusePages();
-        constantBlocks = makeCombinedConstantBlocks(options, splitConstantBlocks);
+        constantBlocks = makeCombinedConstantBlocks(options, splitColumnIndices, splitConstantBlocks);
         verify(currentRowGroup == -1, "Should not call pushdownFilterAndProjection() after getNextPage()");
         Map<Integer, Filter> filters = predicate.getFilters();
-        for (int i = 0; i < channelColumns.length; i++) {
-            Filter filter = filters.get(channelColumns[i]);
+        for (int i = 0; i < splitColumnIndices.length; i++) {
+            // There may be simple filters on missing columns. Simple
+            // filters on prefilled columns, i.e. columns that have no
+            // physical column in the table are evaluated at split
+            // selection.
+            Filter filter = filters.get(splitColumnIndices[i]);
             if (filter == Filters.alwaysFalse()) {
                 constantFilterIsFalse = true;
                 return;
             }
-            if (constantBlocks[i] != null) {
+            if (splitConstantBlocks[i] != null) {
                 if (filter != null) {
-                    verify(constantBlocks[i].isNull(0), "Non-null constant blocks are not supported");
+                    verify(splitConstantBlocks[i].isNull(0), "Non-null constant blocks are not supported");
                     if (!filter.testNull()) {
                         constantFilterIsFalse = true;
                         return;
@@ -837,8 +840,8 @@ public class OrcRecordReader
         reader = new ColumnGroupReader(
                 streamReaders,
                 presentColumns,
-                channelColumns,
-                types,
+                splitColumnIndices,
+                options.getTypes(),
                 options.getInternalChannels(),
                 options.getOutputChannels(),
                 filters,
@@ -1028,24 +1031,27 @@ public class OrcRecordReader
         }
     }
 
-    private Block[] makeCombinedConstantBlocks(PageSourceOptions options, Block[] constantBlocks)
+    private Block[] makeCombinedConstantBlocks(PageSourceOptions options, int[] splitColumnIndices, Block[] constantBlocks)
     {
         requireNonNull(constantBlocks, "constantBlocks is null");
+        int[] hiveColumnIndices = options.getColumnIndices();
         Object[] prefilledValues = options.getPrefilledValues();
-        if (prefilledValues == null || prefilledValues.length <= constantBlocks.length) {
+        if (prefilledValues == null) {
             return constantBlocks;
         }
-        // We append RLE Blocks for all prefilled columns to
-        // constantBlocks. The prefilled values are always to the
-        // right of any values from the reader.
-        Block[] newConstantBlocks = Arrays.copyOf(constantBlocks, prefilledValues.length);
-        for (int i = 0; i < constantBlocks.length; i++) {
-            checkArgument(prefilledValues[i] == null, "All prefilled values must be to the right of columns from the OrcPageSource");
+        // We add RLE Blocks for all prefilled and absent columns to
+        // constantBlocks.
+        Block[] newConstantBlocks = new Block[hiveColumnIndices.length];
+        int splitColumnIndex = 0;
+        for (int i = 0; i < prefilledValues.length; i++) {
             checkArgument(options.getCoercers()[i] == null, "Coercers are not supported");
-        }
-        for (int i = constantBlocks.length; i < prefilledValues.length; i++) {
-            newConstantBlocks[i] = RunLengthEncodedBlock.create(options.getTypes()[i], prefilledValues[i], 1);
-            checkArgument(options.getCoercers()[i] == null, "Coercers are not supported");
+            if (hiveColumnIndices[i] < 0) {
+                newConstantBlocks[i] = RunLengthEncodedBlock.create(options.getTypes()[i], prefilledValues[i], 1);
+            }
+            else {
+                newConstantBlocks[i] = constantBlocks[splitColumnIndex];
+                splitColumnIndex++;
+            }
         }
         return newConstantBlocks;
     }

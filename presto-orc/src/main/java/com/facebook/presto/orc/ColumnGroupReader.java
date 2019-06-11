@@ -24,13 +24,13 @@ import com.facebook.presto.spi.type.Type;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static com.facebook.presto.orc.OrcRecordReader.MIN_BATCH_ROWS;
 import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
+import static com.google.common.base.Verify.verify;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
@@ -76,8 +76,8 @@ public class ColumnGroupReader
     public ColumnGroupReader(
             StreamReader[] streamReaders,
             Set<Integer> presentColumns,
-            int[] channelColumns,
-            List<Type> types,
+            int[] columnIndices,
+            Type[] types,
             int[] internalChannels,
             int[] outputChannels,
             Map<Integer, Filter> filters,
@@ -92,12 +92,17 @@ public class ColumnGroupReader
         this.outputChannels = requireNonNull(outputChannels, "outputChannels is null");
         this.constantBlocks = requireNonNull(constantBlocks, "constantBlocks is null");
         channelToStreamReader = new HashMap();
-        for (int i = 0; i < channelColumns.length; i++) {
-            int columnIndex = channelColumns[i];
-            if (presentColumns != null && !presentColumns.contains(columnIndex)) {
+        for (int i = 0; i < columnIndices.length; i++) {
+            int columnIndex = columnIndices[i];
+            if (columnIndex < 0) {
+                verify(constantBlocks[i] != null, "constantBlocks not set for a non-regular column");
                 continue;
             }
-            int internalChannel = i < internalChannels.length ? internalChannels[i] : -1;
+            if (presentColumns != null && !presentColumns.contains(columnIndex)) {
+                verify(constantBlocks[i] != null, "constantBlocks not set for a non-present column");
+                continue;
+            }
+            int internalChannel = i < internalChannels.length && internalChannels[i] != -1 ? internalChannels[i] : -1;
             Filter filter = filters.get(columnIndex);
             if (internalChannel == -1 && filter == null) {
                 if (streamReaders[columnIndex] != null) {
@@ -106,7 +111,7 @@ public class ColumnGroupReader
                 continue;
             }
             StreamReader streamReader = streamReaders[columnIndex];
-            streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, types.get(i));
+            streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, types[i]);
             if (internalChannel != -1) {
                 channelToStreamReader.put(internalChannel, streamReader);
             }
