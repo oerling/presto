@@ -345,3 +345,9 @@ FROM (
 GROUP BY
     c_custkey
     ;
+
+--table: lineitem_partitioned_bucketed
+select  orderkey, linenumber, partkey, suppkey, quantity, discount, comment,
+  shipdate, receiptdate,
+cast(year(shipdate) as varchar), cast(quarter(shipdate)as int) from tpch.tiny.lineitem
+;
