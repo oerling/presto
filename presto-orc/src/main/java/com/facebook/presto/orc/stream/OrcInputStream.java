@@ -198,7 +198,8 @@ public final class OrcInputStream
             return createInputStreamCheckpoint(toIntExact(compressedSliceInput.position()), 0);
         }
         // otherwise return a checkpoint at the last compressed block read and the current position in the buffer
-        return createInputStreamCheckpoint(currentCompressedBlockOffset, toIntExact(position));
+        // If we have uncompressed data uncompressedOffset is not included in the offset.
+        return createInputStreamCheckpoint(currentCompressedBlockOffset, toIntExact(position - uncompressedOffset));
     }
 
     public boolean seekToCheckpoint(long checkpoint)
