@@ -72,6 +72,7 @@ import static com.facebook.presto.orc.OrcWriteValidation.WriteChecksumBuilder.cr
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_USER_ERROR;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.Iterables.toArray;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.multiplyExact;
@@ -781,7 +782,7 @@ public class OrcRecordReader
         }
     }
 
-    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> types, Block[] splitConstantBlocks)
+    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks)
     {
         reuseBlocks = options.getReusePages();
         constantBlocks = makeCombinedConstantBlocks(options, splitColumnIndices, splitConstantBlocks);
@@ -841,7 +842,7 @@ public class OrcRecordReader
                 streamReaders,
                 presentColumns,
                 splitColumnIndices,
-                options.getTypes(),
+                toArray(splitColumnTypes, Type.class),
                 options.getInternalChannels(),
                 options.getOutputChannels(),
                 filters,
