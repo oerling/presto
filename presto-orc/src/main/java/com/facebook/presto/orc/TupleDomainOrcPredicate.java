@@ -394,6 +394,9 @@ public class TupleDomainOrcPredicate<C>
                 else if (ranges.size() == 1) {
                     filter = createRangeFilter(type, ranges.get(0), nullAllowed);
                 }
+                else if (isBooleanNotEquals(type, ranges)) {
+                    filter = booleanNotEqualsToFilter(ranges, nullAllowed);
+                }
                 else {
                     List<Filter> rangeFilters = ranges.stream()
                             .map(r -> createRangeFilter(type, r, false))
@@ -439,8 +442,9 @@ public class TupleDomainOrcPredicate<C>
             return longDecimalRangeToFilter(range, nullAllowed);
         }
         if (type == BOOLEAN) {
+            checkArgument(range.isSingleValue());
             boolean booleanValue = ((Boolean) range.getSingleValue()).booleanValue();
-            return range.isSingleValue() ? new Filters.BooleanValue(booleanValue, nullAllowed) : null;
+            return  new Filters.BooleanValue(booleanValue, nullAllowed);
         }
 
         throw new UnsupportedOperationException("Unsupported type: " + type.getDisplayName());
@@ -607,5 +611,32 @@ public class TupleDomainOrcPredicate<C>
                 lowerBound == Marker.Bound.EXACTLY,
                 upperValue == null ? null : upperValue.getBytes(),
                                       upperBound == Marker.Bound.EXACTLY, nullAllowed);
+    }
+
+    private static boolean isBooleanNotEquals(Type type, List<Range> ranges)
+    {
+        return type == BOOLEAN && ranges.size() == 2 && !ranges.get(0).isSingleValue();
+    }
+
+    private static Filter booleanNotEqualsToFilter(List<Range> ranges, boolean nullAllowed)
+    {
+        // A boolean with more than one value means <> true or <> false.
+        checkArgument(ranges.size() == 2);
+        Object value;
+        Range range1 = ranges.get(0);
+        Range range2 = ranges.get(1);
+        Marker low1 = range1.getLow();
+        Marker high1 = range1.getHigh();
+        Marker low2 = range2.getLow();
+        Marker high2 = range2.getHigh();
+        if (low1.getValueBlock().isPresent()) {
+            value = (Boolean)low1.getValue();
+            checkState(value.equals(high2.getValue()));
+        }
+        else {
+            value = high1.getValue();
+            checkState(value.equals(low2.getValue()));
+        }
+        return new Filters.BooleanValue(!((Boolean)value).booleanValue(), nullAllowed);
     }
 }
