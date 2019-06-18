@@ -18,6 +18,7 @@ import com.facebook.presto.orc.stream.InputStreamSources;
 import com.google.common.collect.ImmutableList;
 
 import java.util.List;
+import java.util.Map;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
@@ -28,13 +29,15 @@ public class Stripe
     private final List<ColumnEncoding> columnEncodings;
     private final List<RowGroup> rowGroups;
     private final InputStreamSources dictionaryStreamSources;
+    private final Map<Integer, Long> topLevelColumnSizes;
 
-    public Stripe(long rowCount, List<ColumnEncoding> columnEncodings, List<RowGroup> rowGroups, InputStreamSources dictionaryStreamSources)
+    public Stripe(long rowCount, List<ColumnEncoding> columnEncodings, List<RowGroup> rowGroups, InputStreamSources dictionaryStreamSources, Map<Integer, Long> topLevelColumnSizes)
     {
         this.rowCount = rowCount;
         this.columnEncodings = requireNonNull(columnEncodings, "columnEncodings is null");
         this.rowGroups = ImmutableList.copyOf(requireNonNull(rowGroups, "rowGroups is null"));
         this.dictionaryStreamSources = requireNonNull(dictionaryStreamSources, "dictionaryStreamSources is null");
+        this.topLevelColumnSizes = requireNonNull(topLevelColumnSizes, "TopLevelColumnSizes is null");
     }
 
     public long getRowCount()
@@ -55,6 +58,11 @@ public class Stripe
     public InputStreamSources getDictionaryStreamSources()
     {
         return dictionaryStreamSources;
+    }
+
+    public Map<Integer, Long> getTopLevelColumnSizes()
+    {
+        return topLevelColumnSizes;
     }
 
     @Override

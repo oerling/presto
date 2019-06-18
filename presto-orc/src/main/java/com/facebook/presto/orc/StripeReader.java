@@ -83,7 +83,8 @@ public class StripeReader
     private final OrcPredicate predicate;
     private final MetadataReader metadataReader;
     private final Optional<OrcWriteValidation> writeValidation;
-    boolean invalidCheckpoint;
+    private boolean invalidCheckpoint;
+    private Map<Integer, Integer> columnToTopLevelColumn;
 
     public StripeReader(OrcDataSource orcDataSource,
             Optional<OrcDecompressor> decompressor,
@@ -98,7 +99,8 @@ public class StripeReader
         this.orcDataSource = requireNonNull(orcDataSource, "orcDataSource is null");
         this.decompressor = requireNonNull(decompressor, "decompressor is null");
         this.types = ImmutableList.copyOf(requireNonNull(types, "types is null"));
-        this.includedOrcColumns = getIncludedOrcColumns(types, requireNonNull(includedColumns, "includedColumns is null"));
+        columnToTopLevelColumn = new HashMap();
+        this.includedOrcColumns = getIncludedOrcColumns(types, requireNonNull(includedColumns, "includedColumns is null"), columnToTopLevelColumn);
         this.rowsInRowGroup = rowsInRowGroup;
         this.predicate = requireNonNull(predicate, "predicate is null");
         this.hiveWriterVersion = requireNonNull(hiveWriterVersion, "hiveWriterVersion is null");
@@ -144,7 +146,7 @@ public class StripeReader
             // determine ranges of the stripe to read
             Map<StreamId, DiskRange> diskRanges = getDiskRanges(stripeFooter.getStreams());
             diskRanges = Maps.filterKeys(diskRanges, Predicates.in(streams.keySet()));
-
+            Map<Integer, Long> topLevelColumnSizes = calculateTopLevelColumnSizes(diskRanges);
             // read the file regions
             Map<StreamId, OrcInputStream> streamsData = readDiskRanges(stripe.getOffset(), diskRanges, systemMemoryUsage);
 
@@ -183,7 +185,7 @@ public class StripeReader
                         selectedRowGroups,
                         columnEncodings);
 
-                return new Stripe(stripe.getNumberOfRows(), columnEncodings, rowGroups, dictionaryStreamSources);
+                return new Stripe(stripe.getNumberOfRows(), columnEncodings, rowGroups, dictionaryStreamSources, topLevelColumnSizes);
             }
             catch (InvalidCheckpointException e) {
                 // The ORC file contains a corrupt checkpoint stream
@@ -205,7 +207,6 @@ public class StripeReader
             }
         }
         ImmutableMap<StreamId, DiskRange> diskRanges = diskRangesBuilder.build();
-
         // read the file regions
         Map<StreamId, OrcInputStream> streamsData = readDiskRanges(stripe.getOffset(), diskRanges, systemMemoryUsage);
 
@@ -242,7 +243,20 @@ public class StripeReader
         }
         RowGroup rowGroup = new RowGroup(0, 0, stripe.getNumberOfRows(), minAverageRowBytes, new InputStreamSources(builder.build()));
 
-        return new Stripe(stripe.getNumberOfRows(), columnEncodings, ImmutableList.of(rowGroup), dictionaryStreamSources);
+        return new Stripe(stripe.getNumberOfRows(), columnEncodings, ImmutableList.of(rowGroup), dictionaryStreamSources, calculateTopLevelColumnSizes(diskRanges));
+    }
+
+    private Map<Integer, Long> calculateTopLevelColumnSizes(Map<StreamId, DiskRange> diskRanges)
+    {
+        Map<Integer, Long> columnBytes = new HashMap();
+        for (Map.Entry<StreamId, DiskRange> entry : diskRanges.entrySet()) {
+            int column = entry.getKey().getColumn();
+            long length = entry.getValue().getLength();
+            Integer topLevelColumn = columnToTopLevelColumn.get(column);
+            Long bytes = columnBytes.get(topLevelColumn);
+            columnBytes.put(topLevelColumn, bytes == null ? length : bytes.longValue() + length);
+        }
+        return columnBytes;
     }
 
     public boolean hasInvalidCheckpoint()
@@ -506,25 +520,26 @@ public class StripeReader
         return streamDiskRanges.build();
     }
 
-    private static Set<Integer> getIncludedOrcColumns(List<OrcType> types, Set<Integer> includedColumns)
+    private static Set<Integer> getIncludedOrcColumns(List<OrcType> types, Set<Integer> includedColumns, Map<Integer, Integer> columnToTopLevelColumn)
     {
         Set<Integer> includes = new LinkedHashSet<>();
 
         OrcType root = types.get(0);
         for (int includedColumn : includedColumns) {
-            includeOrcColumnsRecursive(types, includes, root.getFieldTypeIndex(includedColumn));
+            includeOrcColumnsRecursive(types, includes, root.getFieldTypeIndex(includedColumn), includedColumn, columnToTopLevelColumn);
         }
 
         return includes;
     }
 
-    private static void includeOrcColumnsRecursive(List<OrcType> types, Set<Integer> result, int typeId)
+    private static void includeOrcColumnsRecursive(List<OrcType> types, Set<Integer> result, int typeId, int topLevelColumnIndex, Map<Integer, Integer> columnToTopLevelColumn)
     {
         result.add(typeId);
+        columnToTopLevelColumn.put(typeId, topLevelColumnIndex);
         OrcType type = types.get(typeId);
         int children = type.getFieldCount();
         for (int i = 0; i < children; ++i) {
-            includeOrcColumnsRecursive(types, result, type.getFieldTypeIndex(i));
+            includeOrcColumnsRecursive(types, result, type.getFieldTypeIndex(i), topLevelColumnIndex, columnToTopLevelColumn);
         }
     }
 

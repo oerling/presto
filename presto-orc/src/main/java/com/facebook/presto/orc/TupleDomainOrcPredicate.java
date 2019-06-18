@@ -444,7 +444,7 @@ public class TupleDomainOrcPredicate<C>
         if (type == BOOLEAN) {
             checkArgument(range.isSingleValue());
             boolean booleanValue = ((Boolean) range.getSingleValue()).booleanValue();
-            return  new Filters.BooleanValue(booleanValue, nullAllowed);
+            return new Filters.BooleanValue(booleanValue, nullAllowed);
         }
 
         throw new UnsupportedOperationException("Unsupported type: " + type.getDisplayName());
@@ -630,13 +630,13 @@ public class TupleDomainOrcPredicate<C>
         Marker low2 = range2.getLow();
         Marker high2 = range2.getHigh();
         if (low1.getValueBlock().isPresent()) {
-            value = (Boolean)low1.getValue();
+            value = (Boolean) low1.getValue();
             checkState(value.equals(high2.getValue()));
         }
         else {
             value = high1.getValue();
             checkState(value.equals(low2.getValue()));
         }
-        return new Filters.BooleanValue(!((Boolean)value).booleanValue(), nullAllowed);
+        return new Filters.BooleanValue(!((Boolean) value).booleanValue(), nullAllowed);
     }
 }

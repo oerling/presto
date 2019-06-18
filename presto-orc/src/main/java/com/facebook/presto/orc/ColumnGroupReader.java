@@ -30,6 +30,7 @@ import java.util.Set;
 import static com.facebook.presto.orc.OrcRecordReader.MIN_BATCH_ROWS;
 import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
+import static com.facebook.presto.orc.reader.RepeatedColumnReader.INITIAL_SIZE_GUESS;
 import static com.google.common.base.Verify.verify;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -72,6 +73,7 @@ public class ColumnGroupReader
     private int[] filterResults;
     private Map<Integer, StreamReader> channelToStreamReader;
     private final OrcAdaptationStats adaptation;
+    private Stripe stripe;
 
     public ColumnGroupReader(
             StreamReader[] streamReaders,
@@ -323,7 +325,7 @@ public class ColumnGroupReader
                 selectivity *= Math.max(HIGH_SELECTIVITY, filter.getSelectivity());
             }
             if (reader.getChannel() != -1) {
-                readerBudget[i] = Math.max(MIN_READER_BUDGET, (long) (numRows * selectivity * reader.getAverageResultSize()));
+                readerBudget[i] = Math.max(MIN_READER_BUDGET, (long) (numRows * selectivity * getColumnSize(reader)));
                 totalAsk += readerBudget[i];
                 // A filter function can only be at the position
                 // of a reader with a channel since they are
@@ -811,6 +813,41 @@ public class ColumnGroupReader
             }
         }
         return false;
+    }
+
+    private long getColumnSize(StreamReader reader)
+    {
+        // Repeated columns, if these have not been read, are guessed
+        // to be very wide. This protects against running out of
+        // budget. But this also forces a small initial batch size
+        // which destroys performance if we skip over a large number
+        // of rows before reading the first actual occurrence of the
+        // repeated column. We use the compressed size of disk
+        // segments associated with the top level column as a proxy
+        // for the size until we get an actual read of the nested
+        // data. If we are inside a StructReader we do not have the
+        // stribe but the budget has been set according to the top
+        // level size. In this case we guess the repeated column to be
+        // a third of the width of the struct.
+        long size = reader.getAverageResultSize();
+        if (size == INITIAL_SIZE_GUESS && reader.getResultSizeInBytes() == 0) {
+            if (stripe != null) {
+                Long stripeSize = stripe.getTopLevelColumnSizes().get(reader.getColumnIndex());
+                if (stripeSize == null) {
+                    return size;
+                }
+                return 3 * stripeSize.longValue() / stripe.getRowCount();
+            }
+            else {
+                return targetResultBytes / inputQualifyingSet.getPositionCount() / 3;
+            }
+        }
+        return size;
+    }
+
+    public void setStripe(Stripe stripe)
+    {
+        this.stripe = stripe;
     }
 
     public String toString()

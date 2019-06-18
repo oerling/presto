@@ -125,4 +125,6 @@ where string_map['shipmode'] is null and string_map is not null
 select count (*) from lineitem_aria_nulls
 where string_map['shipmode'] is null
 ;
+select orderkey, linenumber from lineitem_aria_nulls where linenumber < 4 and string_map is not null and order_part_supp_array is not null
+;
 

@@ -570,7 +570,9 @@ public class OrcRecordReader
                     column.startStripe(dictionaryStreamSources, columnEncodings);
                 }
             }
-
+            if (reader != null) {
+                reader.setStripe(stripe);
+            }
             rowGroups = stripe.getRowGroups().iterator();
         }
     }
@@ -945,13 +947,13 @@ public class OrcRecordReader
                 continue;
             }
             scanInfo.incrementScannedRows(qualifyingSet.getEnd() - firstPosition);
-            if (adjustAndCheckIfFullBatch(numResultsBeforeAdvance, bytesBeforeAdvance)) {
+            if (adjustAndCheckIfFullBatch(firstPosition, numResultsBeforeAdvance, bytesBeforeAdvance)) {
                 return resultPage();
             }
         }
     }
 
-    private boolean adjustAndCheckIfFullBatch(int numResultsBeforeAdvance, long bytesBeforeAdvance)
+    private boolean adjustAndCheckIfFullBatch(int firstPosition, int numResultsBeforeAdvance, long bytesBeforeAdvance)
     {
         checkAdaptation();
         numResults = reader.getNumResults();
@@ -960,8 +962,9 @@ public class OrcRecordReader
         long bytesInLastBatch = readerBytes - bytesBeforeAdvance;
         numAriaBytes += bytesInLastBatch;
         numAriaRows += numResults - numResultsBeforeAdvance;
+        int rowsInLastBatch = qualifyingSet.getEnd() - firstPosition;
+        ariaBatchRows = rowsInLastBatch;
         if (numRowsBeforeAdjustBatch > 0) {
-            int rowsInLastBatch = qualifyingSet.getEnd() - qualifyingSet.getPositions()[0];
             numRowsBeforeAdjustBatch = Math.max(0, numRowsBeforeAdjustBatch - rowsInLastBatch);
         }
         if (bytesInLastBatch > targetResultBytes && ariaBatchRows > MIN_BATCH_ROWS) {

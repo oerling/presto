@@ -22,7 +22,7 @@ import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.resize;
 import static com.google.common.base.Verify.verify;
 
-abstract class RepeatedColumnReader
+public abstract class RepeatedColumnReader
         extends NullWrappingColumnReader
 {
     // Guess a large size to force a small initial batch.
@@ -265,7 +265,7 @@ abstract class RepeatedColumnReader
             int[] inputNumbers = inputQualifyingSet.getInputNumbers();
             for (int i = 0; i < numQualifyingOuter; i++) {
                 int activeIndex = qualifyingOuter[i];
-                outputQualifyingSet.append(rows[activeIndex], inputNumbers[activeIndex]);
+                outputQualifyingSet.append(rows[activeIndex], activeIndex);
             }
         }
         if (outputChannelSet) {
