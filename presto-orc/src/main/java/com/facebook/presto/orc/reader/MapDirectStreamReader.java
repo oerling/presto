@@ -769,7 +769,7 @@ public class MapDirectStreamReader
             return;
         }
         // If the value reader is a repeated reader that has no data,
-        // we do not do this check. This reader will already jave
+        // we do not do this check. This reader will already have
         // reported a large size so the input batch should be small
         // enough.
         if (valueStreamReader instanceof RepeatedColumnReader && ((RepeatedColumnReader) valueStreamReader).numContainerRowsRead == 0) {
@@ -780,7 +780,7 @@ public class MapDirectStreamReader
         double keysPerMap = (double) numInner / (double) numInput;
         double numKeys = mayPruneKey ? (hasStringKey ? (double) sliceSubscripts.size() : (double) longSubscripts.size()) : keysPerMap;
         long keySize = keyStreamReader.getAverageResultSize();
-        double keySelectivity = keysPerMap / numKeys;
+        double keySelectivity =  numKeys / (1 + keysPerMap);
         double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
         long valueSize = valueStreamReader.getAverageResultSize();
         if ((keySize + valueSize) * valueSelectivity * keySelectivity > resultSizeBudget) {
