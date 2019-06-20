@@ -76,6 +76,21 @@ public class ByteArrayUtils
         return Integer.compare(length1, length2);
     }
 
+    public static long hash(byte[] bytes, int offset, int length)
+    {
+        final long M = 0xc6a4a7935bd1e995L;
+        long seed = M;
+        int i = 0;
+        for (; i + 8 <= length; i += 8) {
+            seed = (seed * unsafe.getLong(bytes, ARRAY_BYTE_BASE_OFFSET + offset + i)) ^ (seed >> 27);
+        }
+        long lastWord = 0;
+        for (; i < length; i++) {
+            lastWord = bytes[offset + i] | (lastWord << 8);
+        }
+        return (seed * lastWord) ^ (seed << 27);
+    }
+    
     private static int compareUnsignedBytes(byte thisByte, byte thatByte)
     {
         return unsignedByteToInt(thisByte) - unsignedByteToInt(thatByte);

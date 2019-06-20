@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static com.facebook.presto.spi.block.ByteArrayUtils.hash;
 import static com.facebook.presto.spi.block.ByteArrayUtils.memcmp;
 import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
 import static com.google.common.base.MoreObjects.toStringHelper;
@@ -451,6 +452,11 @@ public class Filters
             isEqual = upperInclusive && lowerInclusive && Arrays.equals(upper, lower);
         }
 
+        public byte[] getLower()
+        {
+            return lower;
+        }
+
         @Override
         public boolean testBytes(byte[] buffer, int offset, int length)
         {
@@ -773,6 +779,118 @@ public class Filters
         }
     }
 
+    public static class BytesValues
+            extends Filter
+    {
+        private static final long M = 0xc6a4a7935bd1e995L;
+
+        private final byte[][] originalValues;
+        private final byte[][] values;
+        private final int size;
+        long[] bloom;
+        int bloomSize;
+        
+        public BytesValues(byte[][] valueSet, boolean nullAllowed)
+        {
+            super(nullAllowed);
+            originalValues = valueSet;
+            size = Integer.highestOneBit(valueSet.length * 5);
+            values = new byte[size][];
+            bloomSize = (size + 1) / 8;
+            bloom = new long[bloomSize];
+            for (byte[] value : valueSet) {
+                long hashCode = hash(value, 0, value.length);
+                addBloom(hashCode);
+                int pos = (int) (hashCode & (size - 1));
+                for (int i = pos; i < pos + size; i++) {
+                    int idx = i & (size - 1);
+                    if (values[idx] == null) {
+                        values[idx] = value;
+                            break;
+                        }
+                    if (memcmp(value, 0, value.length, values[idx], 0, values[idx].length) == 0) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        @Override
+        public boolean testBytes(byte[] value, int offset, int length)
+        {
+            long hashCode = hash(value, offset, length);
+            if (!testBloom(hashCode)) {
+                return false;
+            }
+            int pos = (int) (hashCode & (size - 1));
+            for (int i = pos; i < pos + size; i++) {
+                int idx = i & (size - 1);
+                byte[] entry = values[idx];
+                if (entry == null) {
+                    return false;
+                }
+                if (memcmp(value, offset, length, entry, 0, entry.length) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static long bloomMask(long hashCode)
+        {
+            return (1L << ((hashCode >> 22) & 63)) |  (1L << ((hashCode >> 30) & 63)) | (1L << ((hashCode >> 38) & 63));
+        }
+
+        private int bloomIndex(long hashCode)
+        {
+            return (int) ((hashCode >> 47) & (bloomSize - 1));
+        }
+
+        private void addBloom(long hashCode)
+        {
+            bloom[bloomIndex(hashCode)] |= bloomMask(hashCode);
+        }
+        
+        private boolean testBloom(long hashCode)
+        {
+            long mask = bloomMask(hashCode);
+            int index = bloomIndex(hashCode);
+            return mask == (bloom[index] & mask);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) {
+                return true;
+            }
+
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            BytesValues that = (BytesValues) o;
+            return size == that.size &&
+                    Arrays.equals(values, that.values) &&
+                    nullAllowed == that.nullAllowed;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(size, originalValues, nullAllowed);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                    .add("values", originalValues)
+                    .add("nullAllowed", nullAllowed)
+                    .toString();
+        }
+    }
+    
     public static Filter createMultiRange(List<Filter> filters, boolean nullAllowed)
     {
         requireNonNull(filters, "filters is null");
@@ -780,6 +898,10 @@ public class Filters
         if (filters.get(0) instanceof BigintRange && filters.stream().allMatch(Filter::isEquality)) {
             return new BingintValues(filters.stream().mapToLong(filter -> ((BigintRange) filter).getLower()).toArray(), nullAllowed);
         }
+        else         if (filters.get(0) instanceof BytesRange && filters.stream().allMatch(Filter::isEquality)) {
+            return new BytesValues(filters.stream().map(filter -> ((BytesRange) filter).getLower()).toArray(c -> new byte[c][]), nullAllowed);
+        }
+
         else {
             return new MultiRange(filters, nullAllowed);
         }
