@@ -691,6 +691,6 @@ public class LookupJoinOperator
     @Override
     public boolean retainsInputPages()
     {
-        return true;
+        return false;
     }
 }

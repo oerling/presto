@@ -89,7 +89,8 @@ public class Driver
     private TaskSource currentTaskSource;
 
     private final AtomicReference<SettableFuture<?>> driverBlockedFuture = new AtomicReference<>();
-
+    private boolean recyclePages;
+    
     private enum State
     {
         ALIVE, NEED_DESTRUCTION, DESTROYED
@@ -127,7 +128,7 @@ public class Driver
 
         Optional<SourceOperator> sourceOperator = Optional.empty();
         Optional<DeleteOperator> deleteOperator = Optional.empty();
-        boolean recyclePages = SystemSessionProperties.enableAriaReusePages(driverContext.getSession());
+        recyclePages = SystemSessionProperties.enableAriaReusePages(driverContext.getSession());
         for (Operator operator : operators) {
             if (operator instanceof SourceOperator) {
                 checkArgument(!sourceOperator.isPresent(), "There must be at most one SourceOperator");
@@ -384,7 +385,7 @@ public class Driver
                 }
 
                 // if the current operator is not finished and next operator isn't blocked and needs input...
-                if (!current.isFinished() && !getBlockedFuture(next).isPresent() && next.needsInput()) {
+                if (!current.isFinished() && !getBlockedFuture(next).isPresent() && next.needsInput() && mayRecyclePage(i)) {
                     // get an output page from current operator
                     Page page = current.getOutput();
                     current.getOperatorContext().recordGetOutput(operationTimer, page);
@@ -475,6 +476,19 @@ public class Driver
         }
     }
 
+    private boolean mayRecyclePage(int currentIndex)
+    {
+        if (!recyclePages) {
+            return true;
+        }
+        for (int i = currentIndex + 2; i < activeOperators.size(); i++) {
+            if (!activeOperators.get(i).needsInput()) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
     @GuardedBy("exclusiveLock")
     private void handleMemoryRevoke()
     {
