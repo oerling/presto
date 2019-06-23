@@ -82,7 +82,7 @@ public class ByteArrayUtils
         long seed = M;
         int i = 0;
         for (; i + 8 <= length; i += 8) {
-            seed = (seed * unsafe.getLong(bytes, ARRAY_BYTE_BASE_OFFSET + offset + i)) ^ (seed >> 27);
+            seed = (seed * unsafe.getLong(bytes, (long) ARRAY_BYTE_BASE_OFFSET + offset + i)) ^ (seed >> 27);
         }
         long lastWord = 0;
         for (; i < length; i++) {
