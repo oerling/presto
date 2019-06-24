@@ -89,6 +89,7 @@ public class LongStreamReader
     @Override
     public void setFilterAndChannel(Filter filter, int channel, int columnIndex, Type type)
     {
+        this.columnIndex = columnIndex;
         directReader.setFilterAndChannel(filter, channel, columnIndex, type);
         dictionaryReader.setFilterAndChannel(filter, channel, columnIndex, type);
     }

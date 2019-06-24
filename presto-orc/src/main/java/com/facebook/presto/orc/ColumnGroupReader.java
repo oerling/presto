@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import static com.facebook.presto.orc.OrcRecordReader.MIN_BATCH_ROWS;
 import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
@@ -44,7 +45,7 @@ public class ColumnGroupReader
     private final FilterFunction[] filterFunctions;
     private final int[] outputChannels;
     private final Block[] constantBlocks;
-
+    private final Function<Block, Block>[] coercers;
     // Number of complete rows in result Blocks in StreamReaders.
     private int numRowsInResult;
 
@@ -75,6 +76,14 @@ public class ColumnGroupReader
     private final OrcAdaptationStats adaptation;
     private Stripe stripe;
 
+    // Keeps track of the batch size and number of pre-existing
+    // results for budget calculation. If these do not change,
+    // there is no need to recalculate the budget. This is a 4x
+    // performance win for very selective scans of very wide
+    // tables.
+    private int previousNumRowsInResult = -1;
+    int previousNumInputRows;
+
     public ColumnGroupReader(
             StreamReader[] streamReaders,
             Set<Integer> presentColumns,
@@ -86,6 +95,7 @@ public class ColumnGroupReader
             FilterFunction[] filterFunctions,
             boolean enforceMemoryBudget,
             Block[] constantBlocks,
+            Function<Block, Block>[] coercers,
             OrcAdaptationStats adaptation)
     {
         this.adaptation = adaptation;
@@ -93,6 +103,7 @@ public class ColumnGroupReader
         this.enforceMemoryBudget = enforceMemoryBudget;
         this.outputChannels = requireNonNull(outputChannels, "outputChannels is null");
         this.constantBlocks = requireNonNull(constantBlocks, "constantBlocks is null");
+        this.coercers = coercers;
         channelToStreamReader = new HashMap();
         for (int i = 0; i < columnIndices.length; i++) {
             int columnIndex = columnIndices[i];
@@ -101,7 +112,9 @@ public class ColumnGroupReader
                 continue;
             }
             if (presentColumns != null && !presentColumns.contains(columnIndex)) {
-                verify(constantBlocks[i] != null, "constantBlocks not set for a non-present column");
+                if (i < internalChannels.length) {
+                    verify(constantBlocks[i] != null, "constantBlocks not set for a non-present column");
+                }
                 continue;
             }
             int internalChannel = i < internalChannels.length && internalChannels[i] != -1 ? internalChannels[i] : -1;
@@ -299,6 +312,7 @@ public class ColumnGroupReader
         if (!reorder && !reorderFunctions) {
             return;
         }
+        previousNumRowsInResult = -1;
         Arrays.sort(sortedStreamReaders, 0, numFilters, (StreamReader a, StreamReader b) -> compareReaders(a, b));
         setupFilterFunctions();
     }
@@ -309,7 +323,13 @@ public class ColumnGroupReader
     // done if the input QualifyingSet explicitly allows this.
     private void makeResultBudget(boolean mayShorten)
     {
+        // If no new results were produced and we have the same number of rows to scan, no need to reconsider the budget.
         int numRows = inputQualifyingSet.getPositionCount();
+        if (numRowsInResult == previousNumRowsInResult && numRows == previousNumInputRows) {
+            return;
+        }
+        previousNumRowsInResult = numRowsInResult;
+        previousNumInputRows = numRows;
         if (numRows <= MIN_BATCH_ROWS) {
             setUnlimitedBudget();
             return;
@@ -594,6 +614,14 @@ public class ColumnGroupReader
             }
         }
         throw new IllegalArgumentException("Filter function input channel not found");
+    }
+
+    Block coerceIfNeeded(Block input, int channel)
+    {
+        if (coercers[channel] != null) {
+            return coercers[channel].apply(input);
+        }
+        return input;
     }
 
     // Returns true if the reader at operandIdx should add a row

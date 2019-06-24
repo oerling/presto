@@ -16,6 +16,7 @@ package com.facebook.presto.orc.reader;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.IntArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
+import com.facebook.presto.spi.block.ShortArrayBlock;
 
 import java.util.Arrays;
 import java.util.Optional;
@@ -23,7 +24,9 @@ import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.resize;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 
 abstract class AbstractLongStreamReader
@@ -31,6 +34,7 @@ abstract class AbstractLongStreamReader
 {
     protected long[] values;
     protected int[] intValues;
+    protected short[] shortValues;
 
     AbstractLongStreamReader()
     {
@@ -89,7 +93,21 @@ abstract class AbstractLongStreamReader
                 }
                 return new IntArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), intValues);
             }
-            return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
+            else if (type == BIGINT) {
+                return new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
+            }
+            else if (type == SMALLINT) {
+                if (shortValues == null || shortValues.length < numValues) {
+                    shortValues = new short[numValues];
+                }
+                for (int i = 0; i < numFirstRows; i++) {
+                    shortValues[i] = (short) values[i];
+                }
+                return new ShortArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), shortValues);
+            }
+            else {
+                throw new IllegalArgumentException("Type not supported in LongStreamReader");
+            }
         }
         if (type == INTEGER) {
             int[] ints = new int[numFirstRows];
@@ -97,19 +115,32 @@ abstract class AbstractLongStreamReader
                 ints[i] = (int) values[i];
             }
             return new IntArrayBlock(numFirstRows,
-                                      valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)), ints);
+                                     valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)), ints);
         }
-        if (numFirstRows < numValues || values.length > (int) (numFirstRows * 1.2)) {
-            return new LongArrayBlock(numFirstRows,
-                                      valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)),
-                                      Arrays.copyOf(values, numFirstRows));
+        else if (type == BIGINT) {
+            if (numFirstRows < numValues || values.length > (int) (numFirstRows * 1.2)) {
+                return new LongArrayBlock(numFirstRows,
+                                          valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)),
+                                          Arrays.copyOf(values, numFirstRows));
+            }
+            Block block = new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
+            values = null;
+            valueIsNull = null;
+            numValues = 0;
+            return block;
         }
-        Block block = new LongArrayBlock(numFirstRows, valueIsNull == null ? Optional.empty() : Optional.of(valueIsNull), values);
-        values = null;
-        valueIsNull = null;
-        numValues = 0;
-        return block;
-    }
+        else if (type == SMALLINT) {
+            short[] shorts = new short[numFirstRows];
+            for (int i = 0; i < numFirstRows; i++) {
+                shorts[i] = (short) values[i];
+            }
+            return new ShortArrayBlock(numFirstRows,
+                                       valueIsNull == null ? Optional.empty() : Optional.of(Arrays.copyOf(valueIsNull, numFirstRows)), shorts);
+        }
+        else {
+            throw new IllegalArgumentException("Type not supported by LongStreamReader");
+        }
+    }            
 
     protected void ensureValuesCapacity()
     {

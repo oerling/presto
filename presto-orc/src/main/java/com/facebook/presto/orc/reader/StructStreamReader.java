@@ -355,6 +355,7 @@ public class StructStreamReader
                                        new FilterFunction[0],
                                        true,
                                        constantBlocks,
+                                       null,
                                        null);
     }
 

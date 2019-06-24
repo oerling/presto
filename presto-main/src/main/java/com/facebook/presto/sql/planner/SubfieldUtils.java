@@ -14,6 +14,10 @@
 package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.spi.SubfieldPath;
+import com.facebook.presto.spi.type.ArrayType;
+import com.facebook.presto.spi.type.MapType;
+import com.facebook.presto.spi.type.RowType;
+import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.DereferenceExpression;
@@ -25,6 +29,10 @@ import com.facebook.presto.sql.tree.StringLiteral;
 import com.facebook.presto.sql.tree.SubscriptExpression;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.google.common.collect.ImmutableList;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 
@@ -104,4 +112,43 @@ public class SubfieldUtils
             }
         }
     }
+
+    public static Type getType(SubfieldPath path, TypeProvider types)
+    {
+        List<SubfieldPath.PathElement> elements = path.getPathElements();
+        SubfieldPath.NestedField head = (SubfieldPath.NestedField) elements.get(0);
+        Type type = types.get(new Symbol(head.getName()));
+        for (int i = 1; i < elements.size(); i++) {
+            SubfieldPath.PathElement element = elements.get(i);
+            if (element instanceof SubfieldPath.LongSubscript || element instanceof SubfieldPath.StringSubscript || element instanceof SubfieldPath.AllSubscripts) {
+                if (type instanceof MapType) {
+                    type = type.getTypeParameters().get(1);
+                }
+                else {
+                    type = type.getTypeParameters().get(0);
+                }
+            }
+            else {
+                List<RowType.Field> fields = ((RowType) type).getFields();
+                SubfieldPath.NestedField nestedField = (SubfieldPath.NestedField) element;
+                boolean found = false;
+                String referenceName = nestedField.getName().toLowerCase(Locale.ENGLISH);
+                for (RowType.Field field : fields) {
+                    Optional<String> name = field.getName();
+                    if (!name.isPresent()) {
+                        continue;
+                    }
+                    if (name.get().toLowerCase(Locale.ENGLISH).equals(referenceName)) {
+                        type = field.getType();
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw new IllegalArgumentException("No field " + nestedField.getName());
+                }
+            }
+        }
+        return type;
+}
 }

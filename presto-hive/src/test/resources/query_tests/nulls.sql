@@ -54,6 +54,22 @@ select json_format(cast(order_part_supp_array as json))
 from lineitem_aria_nulls
 where order_part_supp_array is not null
 ;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_array) > 1 and order_part_supp_array[2] is null
+;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_array) > 1 and order_part_supp_array[2] is not null
+;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_array) > 1 and order_part_supp_array[2] is not null and order_part_supp_array[3] is null
+;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_array) > 1 and order_part_supp_array[2] is not null and order_part_supp_array[3] < 100
+;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_array) > 1 and order_part_supp_array[2] is null and order_part_supp_array[3] is null
+;
+
 select json_format(cast(order_part_supp_map as json))
 from lineitem_aria_nulls
 where linenumber = 1
@@ -83,6 +99,13 @@ where cardinality(order_part_supp_map) > 1
 select count(*) from lineitem_aria_nulls
 where cardinality(order_part_supp_map) > 1
 ;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_map) > 1 and order_part_supp_map[2] is null
+;
+select count(*) from lineitem_aria_nulls
+where cardinality(order_part_supp_map) > 1 and order_part_supp_map[2] is not null
+;
+
 select json_format(cast(string_map as json))
 from lineitem_aria_nulls
 where linenumber = 1

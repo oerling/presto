@@ -506,6 +506,11 @@ public class Filters
             super(false);
         }
 
+        public void setNullAllowed(boolean nullAllowed)
+        {
+            this.nullAllowed = nullAllowed;
+        }
+
         public Filter getMember(SubfieldPath.PathElement member)
         {
             return filters.get(member);

@@ -163,11 +163,11 @@ public class PageSourceOptions
 
         public void clear()
         {
-            positionCount = 0;
             if (errors != null) {
                 // Drop the references, errors may be large.
-                Arrays.fill(errors, null);
+                Arrays.fill(errors, 0, positionCount, null);
             }
+            positionCount = 0;
         }
 
         public void erase(int end)
@@ -177,6 +177,7 @@ public class PageSourceOptions
                 return;
             }
             System.arraycopy(errors, end, errors, 0, positionCount - end);
+            Arrays.fill(errors, end, positionCount, null);
             positionCount -= end;
         }
 

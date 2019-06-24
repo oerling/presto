@@ -36,7 +36,8 @@ public abstract class VariantStreamReader
     private StreamReader previousReader;
     private boolean mustRetrieveResultFromPreviousReader;
     private boolean resultFromPreviousReaderRetrieved;
-
+    protected int columnIndex;
+    
     protected void readerChanged(StreamReader previousReader)
     {
         this.previousReader = previousReader;
@@ -63,6 +64,11 @@ public abstract class VariantStreamReader
         return currentReader.getBlock(numFirstRows, mayReuse);
     }
 
+    public final int getColumnIndex()
+    {
+        return columnIndex;
+    }
+    
     @Override
     public final void scan()
             throws IOException

@@ -134,6 +134,9 @@ public class QualifyingSet
     {
         ensureCapacity(capacity);
         positionCount = 0;
+        if (errorSet != null) {
+            errorSet.clear();
+        }
     }
 
     public void ensureCapacity(int capacity)
@@ -167,23 +170,35 @@ public class QualifyingSet
 
     public void insert(int[] newPositions, int[] newInputIndexes, int newCount)
     {
+        RuntimeException[] errors = errorSet != null ? errorSet.getErrors() : null;
         int originalIndex = positionCount - 1;
         int newIndex = newCount - 1;
 
         positionCount += newCount;
         ensureCapacity(positionCount);
-
+        if (errors != null && errors.length < positionCount) {
+            errors = Arrays.copyOf(errors, positionCount);
+        }
         for (int i = positionCount - 1; i >= 0; i--) {
             if (newIndex == -1 || (originalIndex != -1 && positions[originalIndex] > newPositions[newIndex])) {
                 positions[i] = positions[originalIndex];
                 inputNumbers[i] = inputNumbers[originalIndex];
+                if (errors != null) {
+                    errors[i] = errors[originalIndex];
+                }
                 originalIndex--;
             }
             else {
                 positions[i] = newPositions[newIndex];
                 inputNumbers[i] = newInputIndexes[newIndex];
+                if (errors != null) {
+                    errors[i] = null;
+                }
                 newIndex--;
             }
+        }
+        if (errors != null) {
+            errorSet.setErrors(errors, positionCount);
         }
     }
 
@@ -339,6 +354,7 @@ public class QualifyingSet
                     lastError = i;
                 }
             }
+            Arrays.fill(errors, lastError + 1, numErrors, null);
             errorSet.setErrors(errors, lastError + 1);
         }
     }

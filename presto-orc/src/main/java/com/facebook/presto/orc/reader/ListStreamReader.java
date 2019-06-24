@@ -446,6 +446,7 @@ public class ListStreamReader
             }
             elementStreamReader.compactValues(innerSurviving, initialNumElements, numInnerSurviving);
             numContainerRowsRead += numInnerResults;
+            ckError(numInnerResults, false);
         }
         else {
             numInnerResults = numQualifyingOuter;
@@ -458,10 +459,27 @@ public class ListStreamReader
         addNullsAfterScan(filter != null ? outputQualifyingSet : inputQualifyingSet, inputQualifyingSet.getEnd());
         if (addedNulls > 0 && outputChannelSet) {
             fixupOffsetsAfterNulls(lastElementOffset);
+            ckError(numResults, true);
         }
         endScan(presentStream);
     }
 
+    private void ckError(int added, boolean afterNulls)
+    {
+        if (outputQualifyingSet == null || outputQualifyingSet.getErrorSet() == null) {
+            return;
+        }
+        RuntimeException[] errors = outputQualifyingSet.getErrorSet().getErrors();
+        for (int i = numValues; i < numValues + added; i++) {
+            int length = elementOffset[i + 1] - elementOffset[i];
+            if (errors[i - numValues] != null && length > 1) {
+                verify(false);
+            }
+        }
+    }
+
+    int trapInputIndex = 1000000;
+    
     // Counts how many hits one array has. Adds the array to surviving
     // if all hit and all filters existed. Adds array to errors if all
     // hit but not all subscripts existed. Else the array did not
@@ -471,6 +489,9 @@ public class ListStreamReader
     {
         int filterHits = 0;
         int initialOutputIndex = outputIndex;
+        if (inputIndex > trapInputIndex) {
+            System.out.println("bing");
+        }
         int[] inputNumbers = innerQualifyingSet.getInputNumbers();
         // Count rows and filter hits from the array corresponding to inputIndex.
         int startOfArray = elementStart[inputIndex];
@@ -490,6 +511,7 @@ public class ListStreamReader
         addArrayToResult(inputIndex, initialOutputIndex, outputIndex);
         int total = localNumFilters != null ? localNumFilters[inputIndex] : globalNumFilters;
         if (numElementFilters[inputIndex] < total) {
+            if (elementLength[inputIndex] > 2) { verify(false); }
             ErrorSet errorSet = outputQualifyingSet.getOrCreateErrorSet();
             errorSet.addError(outputQualifyingSet.getPositionCount() - 1, inputQualifyingSet.getPositionCount(), new MissingSubscriptException(toString()));
         }

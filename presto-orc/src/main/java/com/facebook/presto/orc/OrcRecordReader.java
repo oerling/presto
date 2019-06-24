@@ -158,7 +158,7 @@ public class OrcRecordReader
 
     private long lastAdaptationTime;
     // Read at least this many rows before considering larger batch.
-    private int numRowsBeforeAdjustBatch;
+    private int numRowsUntilNextAdjust;
 
     public static long minSplitOffset;
     public static long maxSplitOffset = Long.MAX_VALUE;
@@ -851,6 +851,7 @@ public class OrcRecordReader
                 anyConstantFilterFunctions ? Arrays.stream(filterFunctions).filter(f -> !isConstantFilterFunction(f, constantBlocks)).toArray(FilterFunction[]::new) : filterFunctions,
                 enforceMemoryBudget,
                 constantBlocks,
+                options.getCoercers(),
                 adaptation);
         targetResultBytes = options.getTargetBytes();
         reader.setResultSizeBudget(targetResultBytes, enforceMemoryBudget);
@@ -917,8 +918,14 @@ public class OrcRecordReader
                 continue;
             }
             int firstPosition = qualifyingSet.getPositions()[0];
+            int initialEnd = qualifyingSet.getEnd();
             try {
                 reader.advance();
+                if (qualifyingSet.getEnd() != initialEnd) {
+                    // The reader decreased the batch size. Wait before increasing this.
+                    numRowsUntilNextAdjust = (qualifyingSet.getEnd() - firstPosition) * 4;
+                    
+                }
             }
             catch (BatchTooLargeException e) {
                 // The reader ran out of budget. Retry with a smaller
@@ -928,8 +935,8 @@ public class OrcRecordReader
                 // If we are at minimum batch size we must also have unlimited budget. Check that this path is not taken with minimum batch size.
                 int batchSize = qualifyingSet.getEnd() - qualifyingSet.getPositions()[0];
                 verify(batchSize > MIN_BATCH_ROWS, "Running out of unlimited budget with minimum batch size");
-                if (numRowsBeforeAdjustBatch < batchSize) {
-                    numRowsBeforeAdjustBatch = batchSize;
+                if (numRowsUntilNextAdjust < batchSize) {
+                    numRowsUntilNextAdjust = batchSize * 2;
                 }
                 reader.compactValues(new int[0], numResultsBeforeAdvance, 0);
                 ariaBatchRows = Math.max(MIN_BATCH_ROWS, batchSize / BATCH_HARD_SHRINK_FACTOR);
@@ -964,14 +971,14 @@ public class OrcRecordReader
         numAriaRows += numResults - numResultsBeforeAdvance;
         int rowsInLastBatch = qualifyingSet.getEnd() - firstPosition;
         ariaBatchRows = rowsInLastBatch;
-        if (numRowsBeforeAdjustBatch > 0) {
-            numRowsBeforeAdjustBatch = Math.max(0, numRowsBeforeAdjustBatch - rowsInLastBatch);
+        if (numRowsUntilNextAdjust > 0) {
+            numRowsUntilNextAdjust = Math.max(0, numRowsUntilNextAdjust - rowsInLastBatch);
         }
         if (bytesInLastBatch > targetResultBytes && ariaBatchRows > MIN_BATCH_ROWS) {
             // Make batch smaller if not already at minimum.
             ariaBatchRows = Math.max(ariaBatchRows / BATCH_SOFT_SHRINK_FACTOR, MIN_BATCH_ROWS);
         }
-        else if (bytesInLastBatch == 0 && numAriaRows > 0 && numRowsBeforeAdjustBatch == 0) {
+        else if (bytesInLastBatch == 0 && numAriaRows > 0 && numRowsUntilNextAdjust == 0) {
             // If skipping over no hits, do not make the batch
             // size too much larger than the number of hits that
             // fit in a batch so as to avoid a retry.
@@ -979,7 +986,7 @@ public class OrcRecordReader
             int averageNumHitsInBatch = toIntExact(targetResultBytes / (1 + averageRowSize));
             ariaBatchRows = Math.min(averageNumHitsInBatch * 2, ariaBatchRows * BATCH_SOFT_SHRINK_FACTOR);
         }
-        else if (bytesInLastBatch < targetResultBytes / 8 && numRowsBeforeAdjustBatch == 0) {
+        else if (bytesInLastBatch < targetResultBytes / 8 && numRowsUntilNextAdjust == 0) {
             // If filled less than 1/8 of the quota, can have
             // larger batch next time.
             ariaBatchRows = Math.min(ariaBatchRows * BATCH_GROW_FACTOR, currentGroupRowCount);
@@ -1048,7 +1055,6 @@ public class OrcRecordReader
         Block[] newConstantBlocks = new Block[hiveColumnIndices.length];
         int splitColumnIndex = 0;
         for (int i = 0; i < prefilledValues.length; i++) {
-            checkArgument(options.getCoercers()[i] == null, "Coercers are not supported");
             if (hiveColumnIndices[i] < 0) {
                 newConstantBlocks[i] = RunLengthEncodedBlock.create(options.getTypes()[i], prefilledValues[i], 1);
             }

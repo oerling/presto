@@ -33,6 +33,9 @@ import com.facebook.presto.spi.predicate.SortedRangeSet;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.predicate.Utils;
 import com.facebook.presto.spi.predicate.ValueSet;
+import com.facebook.presto.spi.type.ArrayType;
+import com.facebook.presto.spi.type.MapType;
+import com.facebook.presto.spi.type.RowType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.ExpressionUtils;
 import com.facebook.presto.sql.InterpretedFunctionInvoker;
@@ -69,6 +72,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.facebook.presto.SystemSessionProperties.isAriaScanEnabled;
 import static com.facebook.presto.metadata.CastType.CAST;
 import static com.facebook.presto.metadata.CastType.SATURATED_FLOOR_CAST;
 import static com.facebook.presto.sql.ExpressionUtils.and;
@@ -451,6 +455,10 @@ public final class ExpressionDomainTranslator
                 Symbol symbol = Symbol.from(symbolExpression);
                 NullableValue value = normalized.getValue();
                 Type type = value.getType(); // common type for symbol and value
+                if (isAriaScanEnabled(session) && (type instanceof ArrayType || type instanceof MapType || type instanceof RowType)) {
+                    // Aria filters do not support complex values on the column.
+                    return super.visitComparisonExpression(node, complement);
+                }
                 return createComparisonExtractionResult(normalized.getComparisonOperator(), symbol, type, value.getValue(), complement);
             }
 
@@ -781,6 +789,17 @@ public final class ExpressionDomainTranslator
         @Override
         protected ExtractionResult visitIsNullPredicate(IsNullPredicate node, Boolean complement)
         {
+            if (includeSubfields && isDereferenceOrSubscriptExpression(node.getValue())) {
+                SubfieldPath path = deferenceOrSubscriptExpressionToPath(node.getValue());
+                if (path == null) {
+                    return super.visitIsNullPredicate(node, complement);
+                }
+                Type pathType = SubfieldUtils.getType(path, types);
+                Domain domain = complementIfNecessary(Domain.onlyNull(pathType), complement);
+                return new ExtractionResult(
+                                            TupleDomain.withColumnDomains(ImmutableMap.of(new SymbolWithSubfieldPath(path), domain)),
+                                            TRUE_LITERAL);
+            }
             if (!(node.getValue() instanceof SymbolReference)) {
                 return super.visitIsNullPredicate(node, complement);
             }
@@ -796,6 +815,17 @@ public final class ExpressionDomainTranslator
         @Override
         protected ExtractionResult visitIsNotNullPredicate(IsNotNullPredicate node, Boolean complement)
         {
+            if (includeSubfields && isDereferenceOrSubscriptExpression(node.getValue())) {
+                SubfieldPath path = deferenceOrSubscriptExpressionToPath(node.getValue());
+                if (path == null) {
+                    return super.visitIsNotNullPredicate(node, complement);
+                }
+                Type pathType = SubfieldUtils.getType(path, types);
+                Domain domain = complementIfNecessary(Domain.notNull(pathType), complement);
+                return new ExtractionResult(
+                                            TupleDomain.withColumnDomains(ImmutableMap.of(new SymbolWithSubfieldPath(path), domain)),
+                                            TRUE_LITERAL);
+            }
             if (!(node.getValue() instanceof SymbolReference)) {
                 return super.visitIsNotNullPredicate(node, complement);
             }

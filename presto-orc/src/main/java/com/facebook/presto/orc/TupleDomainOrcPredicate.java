@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.orc;
 
+import com.facebook.presto.orc.Filters.StructFilter;
 import com.facebook.presto.orc.metadata.statistics.BooleanStatistics;
 import com.facebook.presto.orc.metadata.statistics.ColumnStatistics;
 import com.facebook.presto.orc.metadata.statistics.HiveBloomFilter;
@@ -452,12 +453,29 @@ public class TupleDomainOrcPredicate<C>
 
     private static void addFilter(Integer ordinal, SubfieldPath subfield, Filter filter, Map<Integer, Filter> filters)
     {
+        Filter topFilter = filters.get(ordinal);
+        if (subfield == null && topFilter != null) {
+            if (topFilter instanceof StructFilter) {
+                StructFilter structFilter = (StructFilter) topFilter;
+                if (filter == Filters.isNotNull()) {
+                    ((StructFilter) topFilter).setNullAllowed(false);
+                    return;
+                }
+                if (filter == Filters.isNull()) {
+                    if (structFilter.testNull() == false) {
+                        filters.put(ordinal, Filters.alwaysFalse());
+                        return;
+                    }
+                    filters.put(ordinal, Filters.isNull());
+                    return;
+                }
+            }
+            throw new IllegalArgumentException("Should not set top level filters twice " + topFilter.toString() + " and " + filter.toString());
+        }
         if (subfield == null) {
             filters.put(ordinal, filter);
             return;
         }
-
-        Filter topFilter = filters.get(ordinal);
         Filter newFilter = combineFilter(topFilter, filter);
         if (newFilter != topFilter) {
             filters.put(ordinal, newFilter);
@@ -509,14 +527,20 @@ public class TupleDomainOrcPredicate<C>
     }
 
     // A struct can have IsNull, IsNotNull or a StructFilter.
-    // AlwaysFalse + anything is AlwaysFalse
-    // IsNotNull + anything = StructFilter.
-    // IsNull + IsNull is unchanged. Isnull otherwise is AlwaysFalse.
-    // StructFilter + IsNull is always false if StructFilter contains anything except is null
+    // AlwaysFalse + anything is AlwaysFalse StructFilter + is null on
+    // fields allows null structs if all member filters are is null.
+    // IsNotNull + anything = StructFilter.  IsNull + IsNull is
+    // unchanged. Isnull otherwise is AlwaysFalse.  StructFilter +
+    // IsNull is always false if StructFilter contains anything except
+    // is null
     private static Filter combineFilter(Filter structFilter, Filter memberFilter)
     {
         if (structFilter == null) {
-            return new Filters.StructFilter();
+            StructFilter filter = new Filters.StructFilter();
+            if (memberFilter == Filters.isNull()) {
+                filter.setNullAllowed(true);
+            }
+            return filter;
         }
         if (structFilter == Filters.alwaysFalse()) {
             return structFilter;
@@ -529,6 +553,9 @@ public class TupleDomainOrcPredicate<C>
         }
         if (structFilter == Filters.isNotNull()) {
             return new Filters.StructFilter();
+        }
+        if (memberFilter != Filters.isNull()) {
+            ((StructFilter) structFilter).setNullAllowed(false);
         }
         return structFilter;
     }
