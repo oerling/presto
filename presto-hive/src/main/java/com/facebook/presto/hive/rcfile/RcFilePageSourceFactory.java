@@ -17,6 +17,10 @@ import com.facebook.presto.hive.FileFormatDataSourceStats;
 import com.facebook.presto.hive.HdfsEnvironment;
 import com.facebook.presto.hive.HiveColumnHandle;
 import com.facebook.presto.hive.HivePageSourceFactory;
+import com.facebook.presto.orc.FilterPushdownAdapter;
+import com.facebook.presto.orc.OrcPredicate;
+import com.facebook.presto.orc.TupleDomainOrcPredicate;
+import com.facebook.presto.orc.TupleDomainOrcPredicate.ColumnReference;
 import com.facebook.presto.rcfile.AircompressorCodecFactory;
 import com.facebook.presto.rcfile.HadoopCodecFactory;
 import com.facebook.presto.rcfile.RcFileCorruptionException;
@@ -30,6 +34,7 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
@@ -52,9 +57,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 
+import static com.facebook.presto.hive.HiveColumnHandle.ColumnType.REGULAR;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_BAD_DATA;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_CANNOT_OPEN_SPLIT;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_MISSING_DATA;
+import static com.facebook.presto.hive.HiveSessionProperties.isAriaScanEnabled;
 import static com.facebook.presto.hive.HiveUtil.getDeserializerClassName;
 import static com.facebook.presto.rcfile.text.TextRcFileEncoding.DEFAULT_NULL_SEQUENCE;
 import static com.facebook.presto.rcfile.text.TextRcFileEncoding.DEFAULT_SEPARATORS;
@@ -136,7 +143,18 @@ public class RcFilePageSourceFactory
             for (HiveColumnHandle column : columns) {
                 readColumns.put(column.getHiveColumnIndex(), column.getHiveType().getType(typeManager));
             }
-
+            FilterPushdownAdapter postProcessor = null;
+            if (isAriaScanEnabled(session)) {
+                ImmutableList.Builder<ColumnReference<HiveColumnHandle>> columnReferences = ImmutableList.builder();
+                for (HiveColumnHandle column : columns) {
+                    if (column.getColumnType() == REGULAR) {
+                        Type type = typeManager.getType(column.getTypeSignature());
+                        columnReferences.add(new ColumnReference<>(column, column.getHiveColumnIndex(), type));
+                    }
+                    OrcPredicate predicate = new TupleDomainOrcPredicate<>(effectivePredicate, columnReferences.build(), false);
+                    postProcessor = new FilterPushdownAdapter(predicate);
+            }
+            
             RcFileReader rcFileReader = new RcFileReader(
                     new HdfsRcFileDataSource(path.toString(), inputStream, fileSize, stats),
                     rcFileEncoding,
@@ -150,7 +168,9 @@ public class RcFilePageSourceFactory
                     rcFileReader,
                     columns,
                     hiveStorageTimeZone,
-                    typeManager));
+                    typeManager,
+                    postProcessor));
+        }
         }
         catch (Throwable e) {
             try {
@@ -170,6 +190,7 @@ public class RcFilePageSourceFactory
             }
             throw new PrestoException(HIVE_CANNOT_OPEN_SPLIT, message, e);
         }
+        return Optional.empty();
     }
 
     private static String splitError(Throwable t, Path path, long start, long length)

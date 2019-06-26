@@ -29,6 +29,7 @@ import static com.facebook.presto.spi.type.UnscaledDecimal128Arithmetic.compare;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 public class Filters
@@ -1220,5 +1221,102 @@ public class Filters
             }
         }
         return false;
+    }
+
+    public static class CoercingFilter
+            extends Filter
+    {
+        private final Filter filter;
+        private final long minValue;
+        private final long maxValue;
+        private final boolean isToString;
+
+        public CoercingFilter(Filter filter, long minValue, long maxValue, boolean isToString, boolean nullAllowed) {
+            super(nullAllowed);
+            this.filter = filter;
+            this.minValue = minValue;
+            this.maxValue = maxValue;
+            this.isToString = isToString;
+        }
+
+        @Override
+        public boolean isDeterministic()
+        {
+            return filter.isDeterministic();
+        }
+
+        @Override
+        public boolean testNull()
+        {
+            return filter.testNull();
+        }
+
+        @Override
+        public boolean testNotNull()
+        {
+            return filter.testNotNull();
+        }
+
+        @Override
+        public boolean testLong(long value)
+        {
+            if (isToString) {
+                byte[] bytes = String.valueOf(value).getBytes(UTF_8);
+                return testBytes(bytes, 0, bytes.length);
+            }
+            if (value < minValue || value > maxValue) {
+                return testNull();
+            }
+            return filter.testLong(value);
+        }
+
+        @Override
+        public boolean testBytes(byte[] bytes, int offset, int length)
+        {
+            try {
+                long value = Long.parseLong(new String(bytes, offset, length));
+                if (minValue <= value && value <= maxValue) {
+                    return filter.testLong(value);
+                }
+                else {
+                    return filter.testNull();
+                }
+            }
+            catch (NumberFormatException e) {
+                return filter.testNull();
+            }
+        }
+
+        @Override
+        public boolean testFloat(float value)
+        {
+            return filter.testDouble((double) value);
+        }
+
+        @Override
+        public boolean testDouble(double value)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean testBoolean(boolean value)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+                @Override
+                public boolean testDecimal(long low, long high)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                .add("Coercing filter", filter.toString())
+                .toString();
+        }
     }
 }

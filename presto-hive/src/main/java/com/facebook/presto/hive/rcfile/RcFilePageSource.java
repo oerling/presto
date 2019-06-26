@@ -15,10 +15,12 @@ package com.facebook.presto.hive.rcfile;
 
 import com.facebook.presto.hive.HiveColumnHandle;
 import com.facebook.presto.hive.HiveType;
+import com.facebook.presto.orc.FilterPushdownAdapter;
 import com.facebook.presto.rcfile.RcFileCorruptionException;
 import com.facebook.presto.rcfile.RcFileReader;
 import com.facebook.presto.spi.ConnectorPageSource;
 import com.facebook.presto.spi.Page;
+import com.facebook.presto.spi.PageSourceOptions;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
@@ -54,7 +56,7 @@ public class RcFilePageSource
 
     private final Block[] constantBlocks;
     private final int[] hiveColumnIndexes;
-
+    private final FilterPushdownAdapter postProcessor;
     private int pageId;
 
     private boolean closed;
@@ -63,12 +65,14 @@ public class RcFilePageSource
             RcFileReader rcFileReader,
             List<HiveColumnHandle> columns,
             DateTimeZone hiveStorageTimeZone,
-            TypeManager typeManager)
+            TypeManager typeManager,
+            FilterPushdownAdapter postProcessor)
     {
         requireNonNull(rcFileReader, "rcReader is null");
         requireNonNull(columns, "columns is null");
         requireNonNull(hiveStorageTimeZone, "hiveStorageTimeZone is null");
         requireNonNull(typeManager, "typeManager is null");
+        this.postProcessor = postProcessor;
 
         this.rcFileReader = rcFileReader;
 
@@ -126,30 +130,38 @@ public class RcFilePageSource
     public Page getNextPage()
     {
         try {
-            // advance in the current batch
-            pageId++;
-
-            // if the batch has been consumed, read the next batch
-            int currentPageSize = rcFileReader.advance();
-            if (currentPageSize < 0) {
-                close();
-                return null;
-            }
-
-            Block[] blocks = new Block[hiveColumnIndexes.length];
-            for (int fieldId = 0; fieldId < blocks.length; fieldId++) {
-                if (constantBlocks[fieldId] != null) {
-                    blocks[fieldId] = new RunLengthEncodedBlock(constantBlocks[fieldId], currentPageSize);
+            while (true) {
+                // advance in the current batch
+                pageId++;
+                
+                // if the batch has been consumed, read the next batch
+                int currentPageSize = rcFileReader.advance();
+                if (currentPageSize < 0) {
+                    close();
+                    return null;
                 }
-                else {
-                    blocks[fieldId] = createBlock(currentPageSize, fieldId);
-                }
+                
+                Block[] blocks = new Block[hiveColumnIndexes.length];
+                for (int fieldId = 0; fieldId < blocks.length; fieldId++) {
+                    if (constantBlocks[fieldId] != null) {
+                        blocks[fieldId] = new RunLengthEncodedBlock(constantBlocks[fieldId], currentPageSize);
+                    }
+                    else {
+                        blocks[fieldId] = createBlock(currentPageSize, fieldId);
+                    }
             }
-
-            Page page = new Page(currentPageSize, blocks);
-
-            return page;
-        }
+                
+                Page page = new Page(currentPageSize, blocks);
+                if (postProcessor != null) {
+                    page = postProcessor.postProcess(page);
+                    if (page == null) {
+                        continue;
+                    }
+                    return page;
+                }
+                return page;
+            }
+            }
         catch (PrestoException e) {
             closeWithSuppression(e);
             throw e;
@@ -248,5 +260,12 @@ public class RcFilePageSource
 
             loaded = true;
         }
+    }
+
+    @Override
+    public boolean pushdownFilterAndProjection(PageSourceOptions options)
+    {
+        postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
+        return true;
     }
 }

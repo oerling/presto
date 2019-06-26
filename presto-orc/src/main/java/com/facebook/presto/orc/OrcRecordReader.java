@@ -25,6 +25,7 @@ import com.facebook.presto.orc.metadata.PostScript.HiveWriterVersion;
 import com.facebook.presto.orc.metadata.StripeInformation;
 import com.facebook.presto.orc.metadata.statistics.ColumnStatistics;
 import com.facebook.presto.orc.metadata.statistics.StripeStatistics;
+import com.facebook.presto.orc.reader.BlockStreamReader;
 import com.facebook.presto.orc.reader.StreamReader;
 import com.facebook.presto.orc.reader.StreamReaders;
 import com.facebook.presto.orc.stream.InputStreamSources;
@@ -298,6 +299,41 @@ public class OrcRecordReader
         nextBatchSize = initialBatchSize;
     }
 
+    // Constructs a dummy OrcRecordReader to be used as a wrapper
+    // ab=around a ColumnGroupReader over LazyBlocks
+    OrcRecordReader(OrcPredicate predicate,
+                    int[] hiveColumnIndices)
+    {
+        orcDataSource = null;
+        maxBytesPerCell = null;
+        totalRowCount = 0;
+        splitLength = 0;
+        presentColumns = null;
+        maxBlockBytes = 0;
+        includedColumns = null;
+        stripes = null;
+        stripeReader = null;
+        fileRowCount = 0;
+        stripeFilePositions = null;
+        userMetadata = null;
+        systemMemoryUsage = null;
+        writeValidation = null;
+        writeChecksumBuilder = null;
+        rowGroupStatisticsValidation = null;
+        stripeStatisticsValidation = null;
+        fileStatisticsValidation = null;
+
+        reorderFilters = true;
+        enforceMemoryBudget = false;
+
+        this.predicate = predicate;
+        int maxColumn = Arrays.stream(hiveColumnIndices).max().getAsInt();
+        streamReaders = new StreamReader[maxColumn + 1];
+        for (int i = 0; i < hiveColumnIndices.length; i++) {
+            streamReaders[hiveColumnIndices[i]] = new BlockStreamReader();
+        }
+    }
+    
     private static boolean splitContainsStripe(long splitOffset, long splitLength, StripeInformation stripe)
     {
         long splitEndOffset = splitOffset + splitLength;
@@ -1069,5 +1105,14 @@ public class OrcRecordReader
     private void updateAdaptation()
     {
         scanInfo.setStats(new OrcAdaptationStats(ariaBatchRows));
+    }
+
+    Page readBlockStreams(Page page)
+            throws IOException
+    {
+        int numRows = page.getBlock(0).getPositionCount();
+        qualifyingSet.setRange(0, numRows, false);
+        reader.advance();
+        return resultPage();
     }
 }

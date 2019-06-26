@@ -438,12 +438,17 @@ public class ColumnGroupReader
                 continue;
             }
             if (constantBlocks[i] != null) {
-                blocks[channel] = new RunLengthEncodedBlock(constantBlocks[i].getRegion(0, 1), numFirstRows);
+                blocks[channel] = coerceIfNeeded(i, new RunLengthEncodedBlock(constantBlocks[i].getRegion(0, 1), numFirstRows));
                 continue;
             }
             StreamReader reader = channelToStreamReader.get(i);
             if (reader != null) {
-                blocks[channel] = reader.getBlock(numFirstRows, reuseBlocks);
+                if (coercers[i] != null) {
+                    blocks[channel] = coercers[i].apply(reader.getBlock(numFirstRows, true));
+                }
+                else {
+                }
+                    blocks[channel] = reader.getBlock(numFirstRows, reuseBlocks);
             }
         }
         return blocks;
@@ -569,7 +574,8 @@ public class ColumnGroupReader
     {
         int channel = function.getInputChannels()[channelIdx];
         if (constantBlocks[channel] != null) {
-            return new RunLengthEncodedBlock(constantBlocks[channel].getRegion(0, 1), numRows);
+            Block value = coerceIfNeeded(channel, constantBlocks[channel].getRegion(0, 1));
+            return new RunLengthEncodedBlock(value, numRows);
         }
         int[][] rowNumberMaps = function.getChannelRowNumberMaps();
         boolean mustCopyMap = false;
@@ -580,9 +586,9 @@ public class ColumnGroupReader
                 Block block = reader.getBlock(reader.getNumValues(), true);
                 if (map == null) {
                     if (numRowsInResult > 0) {
-                        return block.getRegion(numRowsInResult, block.getPositionCount() - numRowsInResult);
+                        return coerceIfNeeded(channel, block.getRegion(numRowsInResult, block.getPositionCount() - numRowsInResult));
                     }
-                    return block;
+                    return coerceIfNeeded(channel, block);
                 }
                 if (numRowsInResult > 0) {
                     // Offset the map to point to values added in this batch.
@@ -593,7 +599,7 @@ public class ColumnGroupReader
                         map[i] += numRowsInResult;
                     }
                 }
-                return new DictionaryBlock(numRows, block, map);
+                return coerceIfNeeded(channel, new DictionaryBlock(numRows, block, map));
             }
             if (needRowNumberMap(operandIdx, function)) {
                 QualifyingSet filterSet = sortedStreamReaders[operandIdx].getOutputQualifyingSet();
@@ -616,9 +622,9 @@ public class ColumnGroupReader
         throw new IllegalArgumentException("Filter function input channel not found");
     }
 
-    Block coerceIfNeeded(Block input, int channel)
+    Block coerceIfNeeded(int channel, Block input)
     {
-        if (coercers[channel] != null) {
+        if (coercers != null && coercers[channel] != null) {
             return coercers[channel].apply(input);
         }
         return input;
