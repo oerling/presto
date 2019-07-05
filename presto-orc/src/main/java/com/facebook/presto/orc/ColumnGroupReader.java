@@ -13,6 +13,9 @@
  */
 package com.facebook.presto.orc;
 
+import com.facebook.presto.orc.reader.FloatStreamReader;
+import com.facebook.presto.orc.reader.LongStreamReader;
+ import com.facebook.presto.orc.reader.SliceStreamReader;
 import com.facebook.presto.orc.reader.StreamReader;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageSourceOptions.FilterFunction;
@@ -32,6 +35,13 @@ import static com.facebook.presto.orc.OrcRecordReader.MIN_BATCH_ROWS;
 import static com.facebook.presto.orc.OrcRecordReader.UNLIMITED_BUDGET;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.reader.RepeatedColumnReader.INITIAL_SIZE_GUESS;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
+import static com.facebook.presto.spi.type.TinyintType.TINYINT;
+import static com.facebook.presto.spi.type.Varchars.isVarcharType;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -87,6 +97,8 @@ public class ColumnGroupReader
     public ColumnGroupReader(
             StreamReader[] streamReaders,
             Set<Integer> presentColumns,
+            int[] splitColumnIndices,
+            Type[] splitColumnTypes,
             int[] columnIndices,
             Type[] types,
             int[] internalChannels,
@@ -125,8 +137,12 @@ public class ColumnGroupReader
                 }
                 continue;
             }
+            Type splitColumnType = splitColumnTypeForColumnIndex(splitColumnTypes, splitColumnIndices, columnIndex);
             StreamReader streamReader = streamReaders[columnIndex];
-            streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, types[i]);
+            if (filter != null) {
+                filter = createCoercingFilter(streamReader, splitColumnType, types[i], filter, coercers[i] != null);
+            }
+            streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, splitColumnType);
             if (internalChannel != -1) {
                 channelToStreamReader.put(internalChannel, streamReader);
             }
@@ -136,6 +152,60 @@ public class ColumnGroupReader
             maxOutputChannel = Math.max(maxOutputChannel, outputChannels[i]);
         }
         setupStreamOrder(streamReaders);
+    }
+
+    private static Type splitColumnTypeForColumnIndex(Type[] splitColumnTypes, int[] splitColumnIndices, int columnIndex)
+    {
+        for (int i = 0; i < splitColumnIndices.length; i++) {
+            if (splitColumnIndices[i] == columnIndex) {
+                return splitColumnTypes[i];
+            }
+        }
+        throw new IllegalArgumentException("No split column type for column index " + columnIndex);
+    }
+
+    private Filter createCoercingFilter(StreamReader streamReader, Type columnType, Type schemaType, Filter filter, boolean mustCoerce)
+    {
+        if (isIntegerType(schemaType) && streamReader instanceof SliceStreamReader) {
+            return new Filters.CoercingFilter(filter, typeMinValue(schemaType), typeMaxValue(schemaType), false, filter.testNull());
+        }
+        else if (isVarcharType(schemaType) && streamReader instanceof LongStreamReader) {
+            return new Filters.CoercingFilter(filter, Long.MIN_VALUE, Long.MAX_VALUE, true, filter.testNull());
+        }
+        else if (schemaType == DOUBLE && streamReader instanceof FloatStreamReader) {
+            return new Filters.CoercingFilter(filter, 0, 0, false, filter.testNull());
+        }
+        else if (schemaType != columnType) {
+            if (isIntegerType(schemaType) && isIntegerType(columnType)) {
+                // If both types are integers and the schema type is narrower, have a coercion: An out of range column value will be a treated as null.
+                if (typeMaxValue(schemaType) < typeMaxValue(columnType)) {
+                    return new Filters.CoercingFilter(filter, typeMinValue(schemaType), typeMaxValue(schemaType), false, filter.testNull());
+                }
+                return filter;
+            }
+            if (mustCoerce) {
+                throw new IllegalArgumentException("Cannot make coercing filter to " + schemaType.toString() + " for " + streamReader.toString());
+            }
+            return filter;
+        }
+        return filter;
+    }
+
+    boolean isIntegerType(Type type)
+    {
+        return type == BIGINT || type == INTEGER || type == SMALLINT || type == TINYINT;
+    }
+
+    long typeMaxValue(Type type)
+    {
+        checkArgument(isIntegerType(type));
+        return type == BIGINT ? Long.MAX_VALUE : type == INTEGER ? Integer.MAX_VALUE : type == SMALLINT ? Short.MAX_VALUE : Byte.MAX_VALUE;
+    }
+
+        long typeMinValue(Type type)
+    {
+        checkArgument(isIntegerType(type));
+        return type == BIGINT ? Long.MIN_VALUE : type == INTEGER ? Integer.MIN_VALUE : type == SMALLINT ? Short.MIN_VALUE : Byte.MIN_VALUE;
     }
 
     // Sets the rows active in the row group. Fully processed rows are
@@ -325,7 +395,8 @@ public class ColumnGroupReader
     {
         // If no new results were produced and we have the same number of rows to scan, no need to reconsider the budget.
         int numRows = inputQualifyingSet.getPositionCount();
-        if (numRowsInResult == previousNumRowsInResult && numRows == previousNumInputRows) {
+        if (numRowsInResult == previousNumRowsInResult && (numRows == previousNumInputRows || (mayShorten && numRows < previousNumInputRows))) {
+            // If we have a top level call and have less rows than last time, this is an end of row group and needs no new budget.
             return;
         }
         previousNumRowsInResult = numRowsInResult;
@@ -443,12 +514,12 @@ public class ColumnGroupReader
             }
             StreamReader reader = channelToStreamReader.get(i);
             if (reader != null) {
-                if (coercers[i] != null) {
+                if (coercers != null && coercers[i] != null) {
                     blocks[channel] = coercers[i].apply(reader.getBlock(numFirstRows, true));
                 }
                 else {
-                }
                     blocks[channel] = reader.getBlock(numFirstRows, reuseBlocks);
+                }
             }
         }
         return blocks;
@@ -585,10 +656,7 @@ public class ColumnGroupReader
             if (channel == reader.getChannel()) {
                 Block block = reader.getBlock(reader.getNumValues(), true);
                 if (map == null) {
-                    if (numRowsInResult > 0) {
-                        return coerceIfNeeded(channel, block.getRegion(numRowsInResult, block.getPositionCount() - numRowsInResult));
-                    }
-                    return coerceIfNeeded(channel, block);
+                    return coerceIfNeeded(channel, reader.getBlock(numRowsInResult, reader.getNumValues() - numRowsInResult, true));
                 }
                 if (numRowsInResult > 0) {
                     // Offset the map to point to values added in this batch.

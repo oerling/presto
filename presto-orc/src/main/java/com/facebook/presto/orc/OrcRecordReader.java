@@ -160,6 +160,11 @@ public class OrcRecordReader
     private long lastAdaptationTime;
     // Read at least this many rows before considering larger batch.
     private int numRowsUntilNextAdjust;
+    // Hive column indices for the non-prefilled columns.
+    private int[] splitColumnIndices;
+    // Caches reader.getResultSizeInBytes(). This is an expensive operation, so updated only when the number of results changes.
+    private long numReaderBytes;
+    private long lastBatchTooLargeTime;
 
     public static long minSplitOffset;
     public static long maxSplitOffset = Long.MAX_VALUE;
@@ -333,7 +338,7 @@ public class OrcRecordReader
             streamReaders[hiveColumnIndices[i]] = new BlockStreamReader();
         }
     }
-    
+
     private static boolean splitContainsStripe(long splitOffset, long splitLength, StripeInformation stripe)
     {
         long splitEndOffset = splitOffset + splitLength;
@@ -823,6 +828,7 @@ public class OrcRecordReader
     public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks)
     {
         reuseBlocks = options.getReusePages();
+        this.splitColumnIndices = splitColumnIndices;
         constantBlocks = makeCombinedConstantBlocks(options, splitColumnIndices, splitConstantBlocks);
         verify(currentRowGroup == -1, "Should not call pushdownFilterAndProjection() after getNextPage()");
         Map<Integer, Filter> filters = predicate.getFilters();
@@ -881,6 +887,8 @@ public class OrcRecordReader
                 presentColumns,
                 splitColumnIndices,
                 toArray(splitColumnTypes, Type.class),
+                options.getColumnIndices(),
+                options.getTypes(),
                 options.getInternalChannels(),
                 options.getOutputChannels(),
                 filters,
@@ -918,7 +926,11 @@ public class OrcRecordReader
             return null;
         }
         reader.newBatch(numResults);
+        numReaderBytes = 0;
         numResults = 0;
+        if (lastBatchTooLargeTime != 0) {
+            lastBatchTooLargeTime = System.nanoTime();
+        }
         for (; ; ) {
             if (currentRowGroup == -1 || (qualifyingSet.isEmpty() && qualifyingSet.getEnd() == currentGroupRowCount)) {
                 if (currentPosition == totalRowCount) {
@@ -945,7 +957,7 @@ public class OrcRecordReader
             if (qualifyingSet.isEmpty()) {
                 qualifyingSet.setRange(qualifyingSet.getEnd(), Math.min(qualifyingSet.getEnd() + ariaBatchRows, currentGroupRowCount), true);
             }
-            long bytesBeforeAdvance = reader.getResultSizeInBytes();
+            long bytesBeforeAdvance = numReaderBytes;
             int numResultsBeforeAdvance = reader.getNumResults();
             // Decimates qualifyingSet by any column-independent
             // nondeterministic filters.
@@ -959,8 +971,8 @@ public class OrcRecordReader
                 reader.advance();
                 if (qualifyingSet.getEnd() != initialEnd) {
                     // The reader decreased the batch size. Wait before increasing this.
-                    numRowsUntilNextAdjust = (qualifyingSet.getEnd() - firstPosition) * 4;
-                    
+                    numRowsUntilNextAdjust = (initialEnd - firstPosition) * 10;
+
                 }
             }
             catch (BatchTooLargeException e) {
@@ -971,13 +983,12 @@ public class OrcRecordReader
                 // If we are at minimum batch size we must also have unlimited budget. Check that this path is not taken with minimum batch size.
                 int batchSize = qualifyingSet.getEnd() - qualifyingSet.getPositions()[0];
                 verify(batchSize > MIN_BATCH_ROWS, "Running out of unlimited budget with minimum batch size");
-                if (numRowsUntilNextAdjust < batchSize) {
-                    numRowsUntilNextAdjust = batchSize * 2;
-                }
+                numRowsUntilNextAdjust = currentGroupRowCount;
                 reader.compactValues(new int[0], numResultsBeforeAdvance, 0);
                 ariaBatchRows = Math.max(MIN_BATCH_ROWS, batchSize / BATCH_HARD_SHRINK_FACTOR);
                 int[] rows = qualifyingSet.getPositions();
                 log.warn("Retry due to batch too large. Batch size from " + batchSize + " to " + ariaBatchRows + " at " + rows[0] + " / " + currentGroupRowCount + " in RG " + currentRowGroup);
+                lastBatchTooLargeTime = System.nanoTime();
                 int numRows = Math.min(ariaBatchRows, batchSize);
                 qualifyingSet.setPositionCount(numRows);
                 // The first row not in scope is 1 above the last in scope.
@@ -988,6 +999,10 @@ public class OrcRecordReader
                     return resultPage();
                 }
                 continue;
+            }
+            if (lastBatchTooLargeTime != 0) {
+                log.warn("Lost time for batch too long: " + ((System.nanoTime() - lastBatchTooLargeTime) / 1000));
+                lastBatchTooLargeTime = 0;
             }
             scanInfo.incrementScannedRows(qualifyingSet.getEnd() - firstPosition);
             if (adjustAndCheckIfFullBatch(firstPosition, numResultsBeforeAdvance, bytesBeforeAdvance)) {
@@ -1000,9 +1015,11 @@ public class OrcRecordReader
     {
         checkAdaptation();
         numResults = reader.getNumResults();
-        long readerBytes = reader.getResultSizeInBytes();
-        verify(numResults == 0 ? readerBytes == 0 : true, "If there are 0 results these must take 0 bytes");
-        long bytesInLastBatch = readerBytes - bytesBeforeAdvance;
+        if (numResults != numResultsBeforeAdvance) {
+            numReaderBytes = reader.getResultSizeInBytes();
+        }
+        verify(numResults == 0 ? numReaderBytes == 0 : true, "If there are 0 results these must take 0 bytes");
+        long bytesInLastBatch = numReaderBytes - bytesBeforeAdvance;
         numAriaBytes += bytesInLastBatch;
         numAriaRows += numResults - numResultsBeforeAdvance;
         int rowsInLastBatch = qualifyingSet.getEnd() - firstPosition;
@@ -1038,7 +1055,7 @@ public class OrcRecordReader
         // The cap on row count causes the scan to periodically return
         // even if it does not project out column values so that the
         // caller can check for yield and interruptions.
-        return numResults > targetResultRows || readerBytes > targetResultBytes - bytesInLastBatch || readerBytes > targetResultBytes * 4 / 5;
+        return numResults > targetResultRows || numReaderBytes > targetResultBytes - bytesInLastBatch || numReaderBytes > targetResultBytes * 4 / 5;
     }
 
     private void checkAdaptation()
@@ -1110,9 +1127,17 @@ public class OrcRecordReader
     Page readBlockStreams(Page page)
             throws IOException
     {
-        int numRows = page.getBlock(0).getPositionCount();
+        reader.newBatch(reader.getNumResults());
+        int numRows = page.getPositionCount();
+        for (int i = 0; i < splitColumnIndices.length; i++) {
+            int columnIndex = splitColumnIndices[i];
+            ((BlockStreamReader) streamReaders[columnIndex]).setBlock(page.getBlock(i));
+        }
         qualifyingSet.setRange(0, numRows, false);
+        reader.setQualifyingSets(qualifyingSet, null);
         reader.advance();
+        numResults = reader.getNumResults();
+        checkAdaptation();
         return resultPage();
     }
 }

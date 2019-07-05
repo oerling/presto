@@ -32,4 +32,14 @@ public interface ColumnHandle
     {
         return null;
     }
+
+    default boolean isSameTopLevelColumn(ColumnHandle other)
+    {
+        return false;
+    }
+
+    default boolean isPrefilledColumn()
+    {
+        return false;
+    }
 }

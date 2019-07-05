@@ -20,6 +20,7 @@ import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
 
+import io.airlift.slice.Slice;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
@@ -27,21 +28,29 @@ import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.RealType.REAL;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
+import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.base.Verify.verify;
+import static java.lang.Double.longBitsToDouble;
+import static java.lang.Float.intBitsToFloat;
+import static sun.misc.Unsafe.ARRAY_BYTE_BASE_OFFSET;
 
 public class BlockStreamReader
         extends ColumnReader
 {
     private Block block;
     int[] livePositions;
-    int numLivePositions;
 
     public BlockStreamReader()
     {
         super(OptionalInt.empty());
     }
 
-    public void setBlock(Block source)
+    public void setBlock(Block block)
     {
         this.block = block;
     }
@@ -78,18 +87,20 @@ public class BlockStreamReader
     public void compactValues(int[] surviving, int base, int numSurviving)
     {
         verify(base == 0);
-        
-        if (livePositions == null) {
-            livePositions = Arrays.copyOf(surviving, numSurviving);
-        }
-        else {
-            for (int i = 0; i < numSurviving; i++) {
-                livePositions[i] = livePositions[surviving[i]];
+        if (outputChannelSet) {
+            if (livePositions == null) {
+                livePositions = Arrays.copyOf(surviving, numSurviving);
             }
+            else {
+                for (int i = 0; i < numSurviving; i++) {
+                    livePositions[i] = livePositions[surviving[i]];
+                }
+            }
+            numValues = numSurviving;
         }
-        numLivePositions = numSurviving;
+        compactQualifyingSet(surviving, numSurviving);
     }
-    
+
     @Override
     public void scan()
             throws IOException
@@ -111,7 +122,7 @@ public class BlockStreamReader
         if (livePositions == null || livePositions.length < numPositions) {
             livePositions = newIntArrayForReuse(numPositions);
         }
-        System.arraycopy(outputQualifyingSet.getPositions(), 0, livePositions, 0, numPositions);
+        System.arraycopy(positions, 0, livePositions, 0, numPositions);
         numValues = numPositions;
     }
 
@@ -140,14 +151,56 @@ public class BlockStreamReader
         int numInput = input.getPositionCount();
         output.reset(numInput);
         int[] activeRows = input.getPositions();
-        if (type == BIGINT) {
+        if (type == BIGINT || type == INTEGER || type == SMALLINT) {
             for (int i = 0; i < numInput; i++) {
                 int position = activeRows[i];
                 if (block.isNull(position)) {
                     if (filter.testNull()) {
                         output.append(position, i);
                     }
-                    else if (filter.testLong(block.getLong(position))) {
+                }
+                else if (filter.testLong(type.getLong(block, position))) {
+                    output.append(position, i);
+                }
+            }
+        }
+        else if (type == DOUBLE) {
+            for (int i = 0; i < numInput; i++) {
+                int position = activeRows[i];
+                if (block.isNull(position)) {
+                    if (filter.testNull()) {
+                        output.append(position, i);
+                    }
+                }
+                else if (filter.testDouble(longBitsToDouble(block.getLong(position)))) {
+                    output.append(position, i);
+                }
+            }
+        }
+        else if (type == REAL) {
+            for (int i = 0; i < numInput; i++) {
+                int position = activeRows[i];
+                if (block.isNull(position)) {
+                    if (filter.testNull()) {
+                        output.append(position, i);
+                    }
+                }
+                else if (filter.testFloat(intBitsToFloat(block.getInt(position)))) {
+                    output.append(position, i);
+                }
+            }
+        }
+        else         if (isVarcharType(type)) {
+            for (int i = 0; i < numInput; i++) {
+                int position = activeRows[i];
+                if (block.isNull(position)) {
+                    if (filter.testNull()) {
+                        output.append(position, i);
+                    }
+                }
+                else {
+                    Slice slice = block.getSlice(position, 0, block.getSliceLength(position));
+                    if (filter.testBytes((byte[]) slice.getBase(), (int) slice.getAddress() - ARRAY_BYTE_BASE_OFFSET, slice.length())) {
                         output.append(position, i);
                     }
                 }
@@ -156,5 +209,23 @@ public class BlockStreamReader
         else {
             throw new UnsupportedOperationException("BlockStreamReadre of " + type.toString() + " not supported");
         }
+    }
+
+        @Override
+    public int getResultSizeInBytes()
+    {
+        if (numValues == 0) {
+            return 0;
+        }
+        return (int) block.getSizeInBytes();
+    }
+
+    @Override
+    public int getAverageResultSize()
+    {
+        // This serves for budgeting and since there is no
+        // freedp,freedom of choice for the batch, as this is set by
+        // the LazyBlock, we return a constant.
+        return 8;
     }
 }

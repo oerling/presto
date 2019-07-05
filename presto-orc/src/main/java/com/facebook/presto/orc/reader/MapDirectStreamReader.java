@@ -842,21 +842,32 @@ public class MapDirectStreamReader
     @Override
     public Block getBlock(int numFirstRows, boolean mayReuse)
     {
-        int innerFirstRows = getInnerPosition(numFirstRows);
+        return getBlock(0, numFirstRows, mayReuse);
+    }
+
+    @Override
+    public Block getBlock(int startRow, int numFirstRows, boolean mayReuse)
+    {
+        int innerBegin = getInnerPosition(startRow);
+        int innerEnd = getInnerPosition(startRow + numFirstRows);
         // offset is always new since createBlockFromKeyValue does not
         // take a length but uses offset.length.
-        int[] offsets = Arrays.copyOf(elementOffset, numFirstRows + 1);
-        boolean[] nulls = valueIsNull == null ? null
-            : mayReuse ? valueIsNull : Arrays.copyOf(valueIsNull, numFirstRows);
+        int[] offsets = new int[numFirstRows + 1];
+        System.arraycopy(elementOffset, startRow, offsets, 0, numFirstRows + 1);
+        boolean[] nulls = null;
+        if (valueIsNull != null) {
+            nulls = new boolean[numFirstRows];
+            System.arraycopy(valueIsNull, startRow, nulls, 0, numFirstRows);
+        }
         Block keys;
         Block values;
-        if (innerFirstRows == 0) {
+        if (innerEnd == innerBegin) {
             keys = keyType.createBlockBuilder(null, 0).build();
             values = valueType.createBlockBuilder(null, 0).build();
         }
         else {
-            keys = keyStreamReader.getBlock(innerFirstRows, mayReuse);
-            values = valueStreamReader.getBlock(innerFirstRows, mayReuse);
+            keys = keyStreamReader.getBlock(innerEnd, mayReuse);
+            values = valueStreamReader.getBlock(innerEnd, mayReuse);
         }
         MapType mapType = (MapType) type;
         return mapType.createBlockFromKeyValue(Optional.ofNullable(nulls), offsets, keys, values);

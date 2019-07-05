@@ -89,3 +89,10 @@ WHERE linenumber = 1
 ;
 select count(*) from lineitem_aria where order_part_supp_map[2] < 1000 and  order_part_supp_map[3] < 10
 ;
+-- Tests use of a region of a map in a filter function
+select order_part_supp_map[2], string_map['shipinstruct']
+from lineitem_aria_nulls
+where (length(string_map['comment']) > 20 or order_part_supp_map[2] > 300)
+and order_part_supp_map[3] > 30 and string_map['comment'] > 'c'
+limit 10
+;

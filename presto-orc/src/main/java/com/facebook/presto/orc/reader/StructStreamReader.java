@@ -349,6 +349,8 @@ public class StructStreamReader
                                        null,
                                        channelColumns,
                                        toArray(rowType.getTypeParameters(), Type.class),
+                                       channelColumns,
+                                       toArray(rowType.getTypeParameters(), Type.class),
                                        fieldColumns,
                                        fieldColumns,
                                        filters,

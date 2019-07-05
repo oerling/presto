@@ -78,8 +78,8 @@ public class ByteArrayUtils
 
     public static long hash(byte[] bytes, int offset, int length)
     {
-        final long M = 0xc6a4a7935bd1e995L;
-        long seed = M;
+        final long m = 0xc6a4a7935bd1e995L;
+        long seed = m;
         int i = 0;
         for (; i + 8 <= length; i += 8) {
             seed = (seed * unsafe.getLong(bytes, (long) ARRAY_BYTE_BASE_OFFSET + offset + i)) ^ (seed >> 27);
@@ -90,7 +90,7 @@ public class ByteArrayUtils
         }
         return (seed * lastWord) ^ (seed << 27);
     }
-    
+
     private static int compareUnsignedBytes(byte thisByte, byte thatByte)
     {
         return unsignedByteToInt(thisByte) - unsignedByteToInt(thatByte);

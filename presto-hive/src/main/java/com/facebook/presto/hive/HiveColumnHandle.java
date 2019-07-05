@@ -237,4 +237,20 @@ public class HiveColumnHandle
     {
         return new HiveColumnHandle(name, hiveType, typeName, hiveColumnIndex, columnType, comment, path, null);
     }
+
+    @Override
+    public boolean isSameTopLevelColumn(ColumnHandle object)
+    {
+        if (!(object instanceof HiveColumnHandle)) {
+            return false;
+        }
+        HiveColumnHandle other = (HiveColumnHandle) object;
+        return hiveColumnIndex == other.hiveColumnIndex && name.equals(other.name);
+    }
+
+    @Override
+    public boolean isPrefilledColumn()
+    {
+        return columnType == PARTITION_KEY;
+    }
 }

@@ -140,7 +140,7 @@ abstract class AbstractLongStreamReader
         else {
             throw new IllegalArgumentException("Type not supported by LongStreamReader");
         }
-    }            
+    }
 
     protected void ensureValuesCapacity()
     {

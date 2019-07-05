@@ -154,7 +154,7 @@ public class RcFilePageSourceFactory
                     OrcPredicate predicate = new TupleDomainOrcPredicate<>(effectivePredicate, columnReferences.build(), false);
                     postProcessor = new FilterPushdownAdapter(predicate);
             }
-            
+
             RcFileReader rcFileReader = new RcFileReader(
                     new HdfsRcFileDataSource(path.toString(), inputStream, fileSize, stats),
                     rcFileEncoding,

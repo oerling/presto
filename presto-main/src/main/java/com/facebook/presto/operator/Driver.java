@@ -90,7 +90,7 @@ public class Driver
 
     private final AtomicReference<SettableFuture<?>> driverBlockedFuture = new AtomicReference<>();
     private boolean recyclePages;
-    
+
     private enum State
     {
         ALIVE, NEED_DESTRUCTION, DESTROYED
@@ -488,7 +488,7 @@ public class Driver
         }
         return true;
     }
-    
+
     @GuardedBy("exclusiveLock")
     private void handleMemoryRevoke()
     {

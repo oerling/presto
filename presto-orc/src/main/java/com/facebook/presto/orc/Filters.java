@@ -795,7 +795,7 @@ public class Filters
         private final int size;
         long[] bloom;
         int bloomSize;
-        
+
         public BytesValues(byte[][] valueSet, boolean nullAllowed)
         {
             super(nullAllowed);
@@ -856,7 +856,7 @@ public class Filters
         {
             bloom[bloomIndex(hashCode)] |= bloomMask(hashCode);
         }
-        
+
         private boolean testBloom(long hashCode)
         {
             long mask = bloomMask(hashCode);
@@ -896,7 +896,7 @@ public class Filters
                     .toString();
         }
     }
-    
+
     public static Filter createMultiRange(List<Filter> filters, boolean nullAllowed)
     {
         requireNonNull(filters, "filters is null");
@@ -1262,7 +1262,7 @@ public class Filters
         {
             if (isToString) {
                 byte[] bytes = String.valueOf(value).getBytes(UTF_8);
-                return testBytes(bytes, 0, bytes.length);
+                return filter.testBytes(bytes, 0, bytes.length);
             }
             if (value < minValue || value > maxValue) {
                 return testNull();

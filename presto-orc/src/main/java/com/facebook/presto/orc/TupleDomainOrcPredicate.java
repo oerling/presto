@@ -363,7 +363,7 @@ public class TupleDomainOrcPredicate<C>
             ColumnHandle topLevelColumn = subfield == null ? columnHandle : columnHandle.createSubfieldColumnHandle(null);
             ColumnReference<C> columnReference = null;
             for (ColumnReference<C> c : columnReferences) {
-                if (c.getColumn().equals(topLevelColumn) || c.getColumn().equals(columnHandle)) {
+                if (((ColumnHandle) c.getColumn()).isSameTopLevelColumn(topLevelColumn)) {
                     columnReference = c;
                     break;
                 }
@@ -372,6 +372,9 @@ public class TupleDomainOrcPredicate<C>
             // This can happen if a column is a partition column or a synthetic $bucket column
             // Is there a way to exclude predicates on these columns at the creation time.
             if (columnReference == null) {
+                if (!columnHandle.isPrefilledColumn()) {
+                    throw new IllegalArgumentException("TupleDomain contains a column that does not exist and is not prefilled");
+                }
                 continue;
             }
             Filter filter;

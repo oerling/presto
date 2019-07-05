@@ -82,6 +82,14 @@ public interface StreamReader
         throw new UnsupportedOperationException("getBlock is not supported by " + this.getClass().getSimpleName());
     }
 
+    default Block getBlock(int startRow, int numFirstRows, boolean mayReuse)
+    {
+        if (startRow == 0) {
+            return getBlock(numFirstRows, mayReuse);
+        }
+        return getBlock(numFirstRows + startRow, mayReuse).getRegion(startRow, numFirstRows);
+    }
+
     default Filter getFilter()
     {
         return null;

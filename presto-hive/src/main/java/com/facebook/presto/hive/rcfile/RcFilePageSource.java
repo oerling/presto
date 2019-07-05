@@ -133,14 +133,14 @@ public class RcFilePageSource
             while (true) {
                 // advance in the current batch
                 pageId++;
-                
+
                 // if the batch has been consumed, read the next batch
                 int currentPageSize = rcFileReader.advance();
                 if (currentPageSize < 0) {
                     close();
                     return null;
                 }
-                
+
                 Block[] blocks = new Block[hiveColumnIndexes.length];
                 for (int fieldId = 0; fieldId < blocks.length; fieldId++) {
                     if (constantBlocks[fieldId] != null) {
@@ -150,7 +150,7 @@ public class RcFilePageSource
                         blocks[fieldId] = createBlock(currentPageSize, fieldId);
                     }
             }
-                
+
                 Page page = new Page(currentPageSize, blocks);
                 if (postProcessor != null) {
                     page = postProcessor.postProcess(page);
@@ -265,7 +265,10 @@ public class RcFilePageSource
     @Override
     public boolean pushdownFilterAndProjection(PageSourceOptions options)
     {
-        postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
-        return true;
+        if (postProcessor != null) {
+            // postProcessor can be null if this has declared type RC in the schema. postProcessor s installed if this is declared ORC but actually is RC.
+            postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
+        }
+            return true;
     }
 }
