@@ -140,7 +140,7 @@ public class ColumnGroupReader
             Type splitColumnType = splitColumnTypeForColumnIndex(splitColumnTypes, splitColumnIndices, columnIndex);
             StreamReader streamReader = streamReaders[columnIndex];
             if (filter != null) {
-                filter = createCoercingFilter(streamReader, splitColumnType, types[i], filter, coercers[i] != null);
+                filter = createCoercingFilter(streamReader, splitColumnType, types[i], filter, coercers != null && coercers[i] != null);
             }
             streamReader.setFilterAndChannel(filter, internalChannel, columnIndex, splitColumnType);
             if (internalChannel != -1) {
