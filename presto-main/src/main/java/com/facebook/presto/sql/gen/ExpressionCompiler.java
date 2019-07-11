@@ -296,13 +296,19 @@ public class ExpressionCompiler
         ImmutableList.Builder<Supplier<PageFilter>> result = ImmutableList.builder();
         SpecialFormExpression topAnd = (SpecialFormExpression) filter.get();
         Map<Set<InputReferenceExpression>, List<RowExpression>> inputsToConjuncts = new HashMap();
+        List<List<RowExpression>> conjunctLists = new ArrayList();
         for (RowExpression conjunct : allConjuncts) {
             ImmutableSet.Builder<InputReferenceExpression> inputs = ImmutableSet.builder();
             collectInputs(conjunct, inputs);
-            inputsToConjuncts.computeIfAbsent(inputs.build(), k -> new ArrayList<>()).add(conjunct);
+            Set<InputReferenceExpression> inputSet = inputs.build();
+            inputsToConjuncts.computeIfAbsent(inputs.build(),
+                    k -> { List list = new ArrayList<>();
+                        conjunctLists.add(list);
+                        return list;
+                    }).add(conjunct);
         }
 
-        for (List<RowExpression> conjuncts : inputsToConjuncts.values()) {
+        for (List<RowExpression> conjuncts : conjunctLists) {
             RowExpression firstConjunct = conjuncts.get(0);
             for (int i = 1; i < conjuncts.size(); i++) {
                 firstConjunct = new SpecialFormExpression(Form.AND, topAnd.getType(), ImmutableList.of(firstConjunct, conjuncts.get(i)));
