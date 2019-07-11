@@ -812,8 +812,8 @@ public class Filters
                     int idx = i & (size - 1);
                     if (values[idx] == null) {
                         values[idx] = value;
-                            break;
-                        }
+                        break;
+                    }
                     if (memcmp(value, 0, value.length, values[idx], 0, values[idx].length) == 0) {
                         break;
                     }
@@ -844,7 +844,7 @@ public class Filters
 
         private static long bloomMask(long hashCode)
         {
-            return (1L << ((hashCode >> 22) & 63)) |  (1L << ((hashCode >> 30) & 63)) | (1L << ((hashCode >> 38) & 63));
+            return (1L << ((hashCode >> 22) & 63)) | (1L << ((hashCode >> 30) & 63)) | (1L << ((hashCode >> 38) & 63));
         }
 
         private int bloomIndex(long hashCode)
@@ -904,7 +904,7 @@ public class Filters
         if (filters.get(0) instanceof BigintRange && filters.stream().allMatch(Filter::isEquality)) {
             return new BingintValues(filters.stream().mapToLong(filter -> ((BigintRange) filter).getLower()).toArray(), nullAllowed);
         }
-        else         if (filters.get(0) instanceof BytesRange && filters.stream().allMatch(Filter::isEquality)) {
+        else if (filters.get(0) instanceof BytesRange && filters.stream().allMatch(Filter::isEquality)) {
             return new BytesValues(filters.stream().map(filter -> ((BytesRange) filter).getLower()).toArray(c -> new byte[c][]), nullAllowed);
         }
 
@@ -1231,7 +1231,8 @@ public class Filters
         private final long maxValue;
         private final boolean isToString;
 
-        public CoercingFilter(Filter filter, long minValue, long maxValue, boolean isToString, boolean nullAllowed) {
+        public CoercingFilter(Filter filter, long minValue, long maxValue, boolean isToString, boolean nullAllowed)
+        {
             super(nullAllowed);
             this.filter = filter;
             this.minValue = minValue;
@@ -1305,8 +1306,8 @@ public class Filters
             throw new UnsupportedOperationException();
         }
 
-                @Override
-                public boolean testDecimal(long low, long high)
+        @Override
+        public boolean testDecimal(long low, long high)
         {
             throw new UnsupportedOperationException();
         }

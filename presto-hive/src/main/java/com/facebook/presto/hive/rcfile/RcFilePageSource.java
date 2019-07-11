@@ -149,7 +149,7 @@ public class RcFilePageSource
                     else {
                         blocks[fieldId] = createBlock(currentPageSize, fieldId);
                     }
-            }
+                }
 
                 Page page = new Page(currentPageSize, blocks);
                 if (postProcessor != null) {
@@ -161,7 +161,7 @@ public class RcFilePageSource
                 }
                 return page;
             }
-            }
+        }
         catch (PrestoException e) {
             closeWithSuppression(e);
             throw e;
@@ -269,6 +269,6 @@ public class RcFilePageSource
             // postProcessor can be null if this has declared type RC in the schema. postProcessor s installed if this is declared ORC but actually is RC.
             postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
         }
-            return true;
+        return true;
     }
 }

@@ -972,7 +972,6 @@ public class OrcRecordReader
                 if (qualifyingSet.getEnd() != initialEnd) {
                     // The reader decreased the batch size. Wait before increasing this.
                     numRowsUntilNextAdjust = (initialEnd - firstPosition) * 10;
-
                 }
             }
             catch (BatchTooLargeException e) {

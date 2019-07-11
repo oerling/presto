@@ -19,15 +19,14 @@ import com.facebook.presto.orc.metadata.ColumnEncoding;
 import com.facebook.presto.orc.stream.InputStreamSources;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
-
 import io.airlift.slice.Slice;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.OptionalInt;
 
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
-import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
@@ -73,7 +72,7 @@ public class BlockStreamReader
 
     @Override
     public Block readBlock(Type type)
-        throws IOException
+            throws IOException
     {
         return null;
     }
@@ -190,7 +189,7 @@ public class BlockStreamReader
                 }
             }
         }
-        else         if (isVarcharType(type)) {
+        else if (isVarcharType(type)) {
             for (int i = 0; i < numInput; i++) {
                 int position = activeRows[i];
                 if (block.isNull(position)) {
@@ -211,7 +210,7 @@ public class BlockStreamReader
         }
     }
 
-        @Override
+    @Override
     public int getResultSizeInBytes()
     {
         if (numValues == 0) {

@@ -15,7 +15,7 @@ package com.facebook.presto.orc;
 
 import com.facebook.presto.orc.reader.FloatStreamReader;
 import com.facebook.presto.orc.reader.LongStreamReader;
- import com.facebook.presto.orc.reader.SliceStreamReader;
+import com.facebook.presto.orc.reader.SliceStreamReader;
 import com.facebook.presto.orc.reader.StreamReader;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageSourceOptions.FilterFunction;
@@ -202,7 +202,7 @@ public class ColumnGroupReader
         return type == BIGINT ? Long.MAX_VALUE : type == INTEGER ? Integer.MAX_VALUE : type == SMALLINT ? Short.MAX_VALUE : Byte.MAX_VALUE;
     }
 
-        long typeMinValue(Type type)
+    long typeMinValue(Type type)
     {
         checkArgument(isIntegerType(type));
         return type == BIGINT ? Long.MIN_VALUE : type == INTEGER ? Integer.MIN_VALUE : type == SMALLINT ? Short.MIN_VALUE : Byte.MIN_VALUE;

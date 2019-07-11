@@ -780,7 +780,7 @@ public class MapDirectStreamReader
         double keysPerMap = (double) numInner / (double) numInput;
         double numKeys = mayPruneKey ? (hasStringKey ? (double) sliceSubscripts.size() : (double) longSubscripts.size()) : keysPerMap;
         long keySize = keyStreamReader.getAverageResultSize();
-        double keySelectivity =  numKeys / (1 + keysPerMap);
+        double keySelectivity = numKeys / (1 + keysPerMap);
         double valueSelectivity = valueStreamReader.getFilter() != null ? valueStreamReader.getFilter().getSelectivity() : 1;
         long valueSize = valueStreamReader.getAverageResultSize();
         if ((keySize + valueSize) * valueSelectivity * keySelectivity > resultSizeBudget) {

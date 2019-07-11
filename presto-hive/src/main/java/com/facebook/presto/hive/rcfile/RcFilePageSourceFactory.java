@@ -153,24 +153,24 @@ public class RcFilePageSourceFactory
                     }
                     OrcPredicate predicate = new TupleDomainOrcPredicate<>(effectivePredicate, columnReferences.build(), false);
                     postProcessor = new FilterPushdownAdapter(predicate);
-            }
+                }
 
-            RcFileReader rcFileReader = new RcFileReader(
-                    new HdfsRcFileDataSource(path.toString(), inputStream, fileSize, stats),
-                    rcFileEncoding,
-                    readColumns.build(),
-                    new AircompressorCodecFactory(new HadoopCodecFactory(configuration.getClassLoader())),
-                    start,
-                    length,
-                    new DataSize(8, Unit.MEGABYTE));
+                RcFileReader rcFileReader = new RcFileReader(
+                        new HdfsRcFileDataSource(path.toString(), inputStream, fileSize, stats),
+                        rcFileEncoding,
+                        readColumns.build(),
+                        new AircompressorCodecFactory(new HadoopCodecFactory(configuration.getClassLoader())),
+                        start,
+                        length,
+                        new DataSize(8, Unit.MEGABYTE));
 
-            return Optional.of(new RcFilePageSource(
+                return Optional.of(new RcFilePageSource(
                     rcFileReader,
                     columns,
                     hiveStorageTimeZone,
                     typeManager,
                     postProcessor));
-        }
+            }
         }
         catch (Throwable e) {
             try {

@@ -14,7 +14,6 @@
 package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.spi.SubfieldPath;
-import com.facebook.presto.spi.type.ArrayType;
 import com.facebook.presto.spi.type.MapType;
 import com.facebook.presto.spi.type.RowType;
 import com.facebook.presto.spi.type.Type;
@@ -150,5 +149,5 @@ public class SubfieldUtils
             }
         }
         return type;
-}
+    }
 }
