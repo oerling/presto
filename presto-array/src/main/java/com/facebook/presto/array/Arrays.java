@@ -19,8 +19,16 @@ public class Arrays
 
     public static int[] ensureCapacity(int[] buffer, int capacity)
     {
+        return ensureCapacity(buffer, capacity, false);
+    }
+
+    public static int[] ensureCapacity(int[] buffer, int capacity, boolean needsInitialization)
+    {
         if (buffer == null || buffer.length < capacity) {
             return new int[capacity];
+        }
+        else if (needsInitialization) {
+            java.util.Arrays.fill(buffer, 0);
         }
 
         return buffer;
@@ -51,5 +59,34 @@ public class Arrays
         }
 
         return buffer;
+    }
+
+    public static byte[] ensureCapacity(byte[] buffer, int capacity, float expansionFactor, boolean needsCopy)
+    {
+        checkValidExpansionFactor(expansionFactor);
+
+        int newCapacity = (int) (capacity * expansionFactor);
+
+        if (buffer == null) {
+            buffer = new byte[newCapacity];
+        }
+
+        if (buffer.length < capacity) {
+            if (needsCopy) {
+                buffer = java.util.Arrays.copyOf(buffer, newCapacity);
+            }
+            else {
+                buffer = new byte[newCapacity];
+            }
+        }
+
+        return buffer;
+    }
+
+    private static void checkValidExpansionFactor(float expansionFactor)
+    {
+        if (expansionFactor < 1) {
+            throw new IllegalArgumentException("expansionFactor should be greater than 1");
+        }
     }
 }
