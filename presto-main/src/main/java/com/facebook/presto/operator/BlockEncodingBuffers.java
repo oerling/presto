@@ -15,6 +15,7 @@ package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.ByteArrayBlock;
+import com.facebook.presto.spi.block.ColumnarArray;
 import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.block.Int128ArrayBlock;
 import com.facebook.presto.spi.block.IntArrayBlock;
@@ -121,9 +122,13 @@ public abstract class BlockEncodingBuffers
         if (decodedBlock instanceof ByteArrayBlock) {
             return new ByteArrayBlockEncodingBuffers();
         }
-
+        
         if (decodedBlock instanceof VariableWidthBlock) {
             return new VariableWidthBlockEncodingBuffers();
+        }
+
+        if (decodedBlock instanceof ColumnarArray) {
+            return new ArrayBlockEncodingBuffers(decodedBlockNode);
         }
 
         throw new IllegalArgumentException("Unsupported encoding: " + decodedBlock.getClass().getSimpleName());
@@ -176,6 +181,13 @@ public abstract class BlockEncodingBuffers
         hasEncodedNulls = false;
     }
 
+    protected void resetPositions()
+    {
+        positionsOffset = 0;
+        positionCount = 0;
+        positionsMapped = false;
+    }
+
     protected DecodedBlockNode mapPositions(DecodedBlockNode decodedBlockNode)
     {
         Object decodedObject = decodedBlockNode.getDecodedBlock();
@@ -192,13 +204,22 @@ public abstract class BlockEncodingBuffers
         }
 
         if (decodedObject instanceof RunLengthEncodedBlock) {
-            mappedPositions = ensureCapacity(mappedPositions, positionCount, true);
+            mappedPositions = ensureCapacity(mappedPositions, positionCount, 2.0f, false, true);
             positionsMapped = true;
             return decodedBlockNode.getChildren().get(0);
         }
 
         positionsMapped = false;
         return decodedBlockNode;
+    }
+
+    protected void appendPositionRange(int offset, int length)
+    {
+        positions = ensureCapacity(positions, positionCount + length, 2.0f, true, false);
+
+        for (int i = 0; i < length; i++) {
+            positions[positionCount++] = offset + i;
+        }
     }
 
     protected int[] getPositions()
@@ -216,7 +237,7 @@ public abstract class BlockEncodingBuffers
         if (decodedBlock.mayHaveNull()) {
             // Write to nullsBuffer if there is a possibility to have nulls. It is possible that the
             // decodedBlock contains nulls, but rows that go into this partition don't. Write to nullsBuffer anyway.
-            nullsBuffer = ensureCapacity(nullsBuffer, nullsBufferIndex + batchSize / BITS_IN_BYTE + 1, 2.0f, true);
+            nullsBuffer = ensureCapacity(nullsBuffer, (bufferedPositionCount + batchSize) / BITS_IN_BYTE + 1, 2.0f, true);
 
             int bufferedNullsCount = nullsBufferIndex * BITS_IN_BYTE + remainingNullsCount;
             if (bufferedPositionCount > bufferedNullsCount) {
@@ -230,7 +251,7 @@ public abstract class BlockEncodingBuffers
         else if (containsNull()) {
             // There were nulls in previously buffered rows, but for this batch there can't be any nulls.
             // Any how we need to append 0's for this batch.
-            nullsBuffer = ensureCapacity(nullsBuffer, nullsBufferIndex + batchSize / BITS_IN_BYTE + 1, 2.0f, true);
+            nullsBuffer = ensureCapacity(nullsBuffer, (bufferedPositionCount + batchSize) / BITS_IN_BYTE + 1, 2.0f, true);
             encodeNonNullsAsBits(batchSize);
         }
     }

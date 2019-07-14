@@ -14,6 +14,7 @@
 package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.ColumnarArray;
 import org.openjdk.jol.info.ClassLayout;
 
 import java.util.List;
@@ -48,6 +49,9 @@ class DecodedBlockNode
         int size = INSTANCE_SIZE;
         if (decodedBlock instanceof Block) {
             size += ((Block) decodedBlock).getRetainedSizeInBytes();
+        }
+        else if (decodedBlock instanceof ColumnarArray) {
+            size += ((ColumnarArray) decodedBlock).getRetainedSizeInBytes();
         }
 
         for (DecodedBlockNode child : children) {

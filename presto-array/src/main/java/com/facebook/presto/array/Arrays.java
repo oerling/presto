@@ -19,13 +19,24 @@ public class Arrays
 
     public static int[] ensureCapacity(int[] buffer, int capacity)
     {
-        return ensureCapacity(buffer, capacity, false);
+        return ensureCapacity(buffer, capacity, 1.0f, false, false);
     }
 
-    public static int[] ensureCapacity(int[] buffer, int capacity, boolean needsInitialization)
+    public static int[] ensureCapacity(int[] buffer, int capacity, float expansionFactor, boolean needsCopy, boolean needsInitialization)
     {
-        if (buffer == null || buffer.length < capacity) {
-            return new int[capacity];
+        int newCapacity = (int) (capacity * expansionFactor);
+
+        if (buffer == null) {
+            buffer = new int[newCapacity];
+        }
+
+        if (buffer.length < capacity) {
+            if (needsCopy) {
+                buffer = java.util.Arrays.copyOf(buffer, newCapacity);
+            }
+            else {
+                buffer = new int[newCapacity];
+            }
         }
         else if (needsInitialization) {
             java.util.Arrays.fill(buffer, 0);

@@ -443,7 +443,7 @@ public class OptimizedPartitionedOutputOperator
                 return;
             }
 
-            rowSizes = ensureCapacity(rowSizes, positionCount, true);
+            rowSizes = ensureCapacity(rowSizes, positionCount, 2.0f, false, true);
 
             for (int i : variableWidthChannels) {
                 blockEncodingBuffers[i].accumulateRowSizes(rowSizes);
