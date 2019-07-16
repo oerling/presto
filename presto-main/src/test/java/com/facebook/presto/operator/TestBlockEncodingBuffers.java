@@ -28,6 +28,7 @@ import java.util.stream.IntStream;
 import static com.facebook.presto.block.BlockAssertions.Encoding.DICTIONARY;
 import static com.facebook.presto.block.BlockAssertions.Encoding.RUN_LENGTH;
 import static com.facebook.presto.block.BlockAssertions.assertBlockEquals;
+import static com.facebook.presto.block.BlockAssertions.createIntsBlock;
 import static com.facebook.presto.block.BlockAssertions.createLongDecimalsBlock;
 import static com.facebook.presto.block.BlockAssertions.createLongsBlock;
 import static com.facebook.presto.block.BlockAssertions.createNullBlock;
@@ -38,6 +39,7 @@ import static com.facebook.presto.operator.OptimizedPartitionedOutputOperator.de
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.Decimals.MAX_SHORT_PRECISION;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.testing.TestingEnvironment.TYPE_MANAGER;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
@@ -57,6 +59,12 @@ public class TestBlockEncodingBuffers
     public void testLongDecimal()
     {
         testBlock(createDecimalType(MAX_SHORT_PRECISION + 1), createLongDecimalsBlock(POSITIONS_PER_BLOCK, true));
+    }
+
+    @Test
+    public void testInteger()
+    {
+        testBlock(INTEGER, createIntsBlock(POSITIONS_PER_BLOCK, true));
     }
 
     private void testBlock(Type type, Block block)
