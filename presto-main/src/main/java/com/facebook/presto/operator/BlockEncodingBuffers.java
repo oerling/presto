@@ -14,6 +14,7 @@
 package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.ByteArrayBlock;
 import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.block.Int128ArrayBlock;
 import com.facebook.presto.spi.block.IntArrayBlock;
@@ -114,6 +115,10 @@ public abstract class BlockEncodingBuffers
 
         if (decodedBlock instanceof ShortArrayBlock) {
             return new ShortArrayBlockEncodingBuffers();
+        }
+
+        if (decodedBlock instanceof ByteArrayBlock) {
+            return new ByteArrayBlockEncodingBuffers();
         }
 
         throw new IllegalArgumentException("Unsupported encoding: " + decodedBlock.getClass().getSimpleName());
