@@ -32,6 +32,7 @@ import static com.facebook.presto.block.BlockAssertions.createIntsBlock;
 import static com.facebook.presto.block.BlockAssertions.createLongDecimalsBlock;
 import static com.facebook.presto.block.BlockAssertions.createLongsBlock;
 import static com.facebook.presto.block.BlockAssertions.createNullBlock;
+import static com.facebook.presto.block.BlockAssertions.createSmallintsBlock;
 import static com.facebook.presto.block.BlockAssertions.wrapBlock;
 import static com.facebook.presto.block.BlockSerdeUtil.readBlock;
 import static com.facebook.presto.operator.BlockEncodingBuffers.createBlockEncodingBuffers;
@@ -40,6 +41,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.Decimals.MAX_SHORT_PRECISION;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.testing.TestingEnvironment.TYPE_MANAGER;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
@@ -65,6 +67,12 @@ public class TestBlockEncodingBuffers
     public void testInteger()
     {
         testBlock(INTEGER, createIntsBlock(POSITIONS_PER_BLOCK, true));
+    }
+
+    @Test
+    public void testSmallint()
+    {
+        testBlock(SMALLINT, createSmallintsBlock(POSITIONS_PER_BLOCK, true));
     }
 
     private void testBlock(Type type, Block block)
