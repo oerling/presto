@@ -15,6 +15,7 @@ package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.DictionaryBlock;
+import com.facebook.presto.spi.block.Int128ArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.block.RunLengthEncodedBlock;
 import io.airlift.slice.SliceOutput;
@@ -99,6 +100,10 @@ public abstract class BlockEncodingBuffers
 
         if (decodedBlock instanceof LongArrayBlock) {
             return new LongArrayBlockEncodingBuffers();
+        }
+
+        if (decodedBlock instanceof Int128ArrayBlock) {
+            return new Int128ArrayBlockEncodingBuffers();
         }
 
         throw new IllegalArgumentException("Unsupported encoding: " + decodedBlock.getClass().getSimpleName());
