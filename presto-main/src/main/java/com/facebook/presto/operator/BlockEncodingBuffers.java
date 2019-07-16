@@ -17,6 +17,7 @@ import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.ByteArrayBlock;
 import com.facebook.presto.spi.block.ColumnarArray;
 import com.facebook.presto.spi.block.ColumnarMap;
+import com.facebook.presto.spi.block.ColumnarRow;
 import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.block.Int128ArrayBlock;
 import com.facebook.presto.spi.block.IntArrayBlock;
@@ -135,7 +136,11 @@ public abstract class BlockEncodingBuffers
         if (decodedBlock instanceof ColumnarMap) {
             return new MapBlockEncodingBuffers(decodedBlockNode);
         }
-        
+
+        if (decodedBlock instanceof ColumnarRow) {
+            return new RowBlockEncodingBuffers(decodedBlockNode);
+        }
+
         throw new IllegalArgumentException("Unsupported encoding: " + decodedBlock.getClass().getSimpleName());
     }
 
