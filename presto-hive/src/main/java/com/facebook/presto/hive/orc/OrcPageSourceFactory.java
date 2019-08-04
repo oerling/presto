@@ -65,6 +65,7 @@ import static com.facebook.presto.hive.HiveSessionProperties.getOrcMaxMergeDista
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcMaxReadBlockSize;
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcStreamBufferSize;
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcTinyStripeThreshold;
+import static com.facebook.presto.hive.HiveSessionProperties.isBlockCacheEnabled;
 import static com.facebook.presto.hive.HiveSessionProperties.isFilterReorderingEnabled;
 import static com.facebook.presto.hive.HiveSessionProperties.isOrcBloomFiltersEnabled;
 import static com.facebook.presto.hive.HiveSessionProperties.isReaderBudgetEnforcementEnabled;
@@ -143,7 +144,9 @@ public class OrcPageSourceFactory
                 getOrcMaxReadBlockSize(session),
                 getOrcLazyReadSmallRanges(session),
                 isOrcBloomFiltersEnabled(session),
-                stats));
+                stats,
+                domainCompactionThreshold,
+                isBlockCacheEnabled(session)));
     }
 
     public static OrcPageSource createOrcPageSource(
@@ -168,7 +171,9 @@ public class OrcPageSourceFactory
             DataSize maxReadBlockSize,
             boolean lazyReadSmallRanges,
             boolean orcBloomFiltersEnabled,
-            FileFormatDataSourceStats stats)
+            FileFormatDataSourceStats stats,
+            int domainCompactionThreshold,
+                                                         boolean useCache)
     {
         OrcDataSource orcDataSource;
         try {
@@ -182,7 +187,8 @@ public class OrcPageSourceFactory
                     streamBufferSize,
                     lazyReadSmallRanges,
                     inputStream,
-                    stats);
+                    stats,
+                                                  useCache);
         }
         catch (Exception e) {
             if (nullToEmpty(e.getMessage()).trim().equals("Filesystem closed") ||

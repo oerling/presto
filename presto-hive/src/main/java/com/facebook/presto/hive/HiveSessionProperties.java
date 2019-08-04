@@ -88,6 +88,10 @@ public final class HiveSessionProperties
     public static final String ARIA_SCAN_ENABLED = "aria_scan_enabled";
     public static final String FILTER_REORDERING_ENABLED = "filter_reordering_enabled";
     public static final String READER_BUDGET_ENFORCEMENT_ENABLED = "reader_budget_enforcement_enabled";
+    public static final String PUSHDOWN_FILTER_ENABLED = "pushdown_filter_enabled";
+    public static final String BLOCK_CACHE_ENABLED = "block_cache_enabled";
+    public static final String VIRTUAL_BUCKET_COUNT = "virtual_bucket_count";
+    public static final String MAX_BUCKETS_FOR_GROUPED_EXECUTION = "max_buckets_for_grouped_execution";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -377,6 +381,16 @@ public final class HiveSessionProperties
                         true,
                         false),
                 booleanProperty(
+                        BLOCK_CACHE_ENABLED,
+                        "Experimental: enable file block caching",
+                        false,
+                        false),
+                integerProperty(
+                        VIRTUAL_BUCKET_COUNT,
+                        "Number of virtual bucket assigned for unbucketed tables",
+                        0,
+                        false),
+                booleanProperty(
                         READER_BUDGET_ENFORCEMENT_ENABLED,
                         "Should enforce memory budget for ORC readers",
                         true,
@@ -640,6 +654,21 @@ public final class HiveSessionProperties
         return session.getProperty(READER_BUDGET_ENFORCEMENT_ENABLED, Boolean.class);
     }
 
+    public static boolean isBlockCacheEnabled(ConnectorSession session)
+    {
+        return session.getProperty(BLOCK_CACHE_ENABLED, Boolean.class);
+    }
+
+    public static int getVirtualBucketCount(ConnectorSession session)
+    {
+        int virtualBucketCount = session.getProperty(VIRTUAL_BUCKET_COUNT, Integer.class);
+        if (virtualBucketCount < 0) {
+            throw new PrestoException(INVALID_SESSION_PROPERTY, format("%s must not be negative: %s", VIRTUAL_BUCKET_COUNT, virtualBucketCount));
+        }
+        return virtualBucketCount;
+
+    }
+    
     public static PropertyMetadata<DataSize> dataSizeSessionProperty(String name, String description, DataSize defaultValue, boolean hidden)
     {
         return new PropertyMetadata<>(

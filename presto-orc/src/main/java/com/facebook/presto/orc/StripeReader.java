@@ -85,6 +85,7 @@ public class StripeReader
     private final Optional<OrcWriteValidation> writeValidation;
     private boolean invalidCheckpoint;
     private Map<Integer, Integer> columnToTopLevelColumn;
+    private final ReadTracker tracker;
 
     public StripeReader(OrcDataSource orcDataSource,
             Optional<OrcDecompressor> decompressor,
@@ -106,6 +107,7 @@ public class StripeReader
         this.hiveWriterVersion = requireNonNull(hiveWriterVersion, "hiveWriterVersion is null");
         this.metadataReader = requireNonNull(metadataReader, "metadataReader is null");
         this.writeValidation = requireNonNull(writeValidation, "writeValidation is null");
+        this.tracker = ReadTracker.getTracker();
     }
 
     public Stripe readStripe(StripeInformation stripe, AggregatedMemoryContext systemMemoryUsage, boolean alwaysUseCheckpoints)
@@ -120,7 +122,7 @@ public class StripeReader
         boolean hasRowGroupDictionary = false;
         for (Stream stream : stripeFooter.getStreams()) {
             if (includedOrcColumns.contains(stream.getColumn())) {
-                streams.put(new StreamId(stream), stream);
+                streams.put(new StreamId(stream, getColumnName(stream.getColumn())), stream);
 
                 if (stream.getStreamKind() == StreamKind.IN_DICTIONARY) {
                     ColumnEncoding columnEncoding = columnEncodings.get(stream.getColumn());
@@ -139,7 +141,6 @@ public class StripeReader
                 }
             }
         }
-
         // handle stripes with more than one row group or a dictionary
         invalidCheckpoint = false;
         if ((stripe.getNumberOfRows() > rowsInRowGroup) || alwaysUseCheckpoints || hasRowGroupDictionary) {
@@ -263,6 +264,20 @@ public class StripeReader
     {
         return invalidCheckpoint;
     }
+
+    private String getColumnName(int column)
+    {
+        OrcType topStruct = types.get(0);
+        int i = 0;
+        List<Integer> indexes = topStruct.getFieldTypeIndexes();
+        for (; i < indexes.size(); i++) {
+            if (indexes.get(i) <= column) {
+                break;
+            }
+        }
+        return i < indexes.size() ? topStruct.getFieldName(i) : "unnamed";
+    }
+
     public Map<StreamId, OrcInputStream> readDiskRanges(long stripeOffset, Map<StreamId, DiskRange> diskRanges, AggregatedMemoryContext systemMemoryUsage)
             throws IOException
     {
@@ -277,9 +292,11 @@ public class StripeReader
             diskRangesBuilder.put(entry.getKey(), new DiskRange(stripeOffset + diskRange.getOffset(), diskRange.getLength()));
         }
         diskRanges = diskRangesBuilder.build();
-
-        // read ranges
-        Map<StreamId, OrcDataSourceInput> streamsData = orcDataSource.readFully(diskRanges);
+        if (orcDataSource.useCache()) {
+            tracker.schedulePrefetch(diskRanges, orcDataSource);
+        }
+            // read ranges
+        Map<StreamId, OrcDataSourceInput> streamsData = orcDataSource.readFully(diskRanges, tracker);
 
         // transform streams to OrcInputStream
         ImmutableMap.Builder<StreamId, OrcInputStream> streamsBuilder = ImmutableMap.builder();
@@ -397,12 +414,20 @@ public class StripeReader
     {
         long offset = stripe.getOffset() + stripe.getIndexLength() + stripe.getDataLength();
         int tailLength = toIntExact(stripe.getFooterLength());
-
         // read the footer
-        byte[] tailBuffer = new byte[tailLength];
-        orcDataSource.readFully(offset, tailBuffer);
-        try (InputStream inputStream = new OrcInputStream(orcDataSource.getId(), Slices.wrappedBuffer(tailBuffer).getInput(), decompressor, systemMemoryUsage, tailLength)) {
-            return metadataReader.readStripeFooter(types, inputStream);
+        if (orcDataSource.useCache()) {
+            try (FileCache.Entry entry = FileCache.get(orcDataSource, offset, tailLength)) {
+                try (InputStream inputStream = new OrcInputStream(orcDataSource.getId(), Slices.wrappedBuffer(entry.getBuffer(), 0, tailLength).getInput(), decompressor, systemMemoryUsage, tailLength)) {
+                    return metadataReader.readStripeFooter(types, inputStream);
+                }
+            }
+        }
+        else {
+            byte[] tailBuffer = new byte[tailLength];
+            orcDataSource.readFully(offset, tailBuffer);
+            try (InputStream inputStream = new OrcInputStream(orcDataSource.getId(), Slices.wrappedBuffer(tailBuffer).getInput(), decompressor, systemMemoryUsage, tailLength)) {
+                return metadataReader.readStripeFooter(types, inputStream);
+            }
         }
     }
 
@@ -505,7 +530,7 @@ public class StripeReader
         return stream.getStreamKind() == DICTIONARY_DATA || (stream.getStreamKind() == LENGTH && (columnEncoding == DICTIONARY || columnEncoding == DICTIONARY_V2));
     }
 
-    private static Map<StreamId, DiskRange> getDiskRanges(List<Stream> streams)
+    private Map<StreamId, DiskRange> getDiskRanges(List<Stream> streams)
     {
         ImmutableMap.Builder<StreamId, DiskRange> streamDiskRanges = ImmutableMap.builder();
         long stripeOffset = 0;
@@ -513,7 +538,7 @@ public class StripeReader
             int streamLength = toIntExact(stream.getLength());
             // ignore zero byte streams
             if (streamLength > 0) {
-                streamDiskRanges.put(new StreamId(stream), new DiskRange(stripeOffset, streamLength));
+                streamDiskRanges.put(new StreamId(stream, getColumnName(stream.getColumn())), new DiskRange(stripeOffset, streamLength));
             }
             stripeOffset += streamLength;
         }
