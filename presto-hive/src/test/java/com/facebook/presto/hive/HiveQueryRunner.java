@@ -94,10 +94,12 @@ public final class HiveQueryRunner
     {
         assertEquals(DateTimeZone.getDefault(), TIME_ZONE, "Timezone not configured correctly. Add -Duser.timezone=America/Bahia_Banderas to your JVM arguments");
         setupLogging();
+        String singleThreadEnv = System.getenv("SINGLE_THREAD");
+        boolean singleThreaded = singleThreadEnv != null && singleThreadEnv.equals("y");
 
         DistributedQueryRunner queryRunner =
                 DistributedQueryRunner.builder(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))))
-                        .setNodeCount(4)
+                        .setNodeCount(singleThreaded ? 1 : 4)
                         .setExtraProperties(extraProperties)
                         .setBaseDataDir(baseDataDir)
                         .build();
