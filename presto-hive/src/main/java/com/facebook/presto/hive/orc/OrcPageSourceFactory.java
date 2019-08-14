@@ -145,7 +145,7 @@ public class OrcPageSourceFactory
                 getOrcLazyReadSmallRanges(session),
                 isOrcBloomFiltersEnabled(session),
                 stats,
-                domainCompactionThreshold,
+                0 /*domainCompactionThreshold*/,
                 isBlockCacheEnabled(session)));
     }
 
