@@ -43,7 +43,7 @@ import static java.lang.Thread.currentThread;
 public class FileCache
 {
     private static final long MAX_PREFETCH_SIZE = 4L << 30;
-    private static final int MAX_ENTRIES = 50000;
+    private static final int MAX_ENTRIES = 200000;
     // Constant from MurMur hash.
     private static final long M = 0xc6a4a7935bd1e995L;
     private static final Logger log = Logger.get(FileCache.class);
@@ -645,6 +645,7 @@ public class FileCache
         // Finds a suitably old entry to reuse. Periodically updates stats. If no entry with the size is found, removes an equivalent amount of different size entries and makes a new buffer of the requested size. Does a dirty read of the pin counts and scores. When finding a suitable entry, synchronizes on its bucket and removes it, checking that the score and pin count are still as needed. If size is at max and nothing is reusable, returns null.
         size = byteArrayPool.getStandardSize(size);
         int numLoops = 0;
+        boolean allEntriesExist = numEntries >= MAX_ENTRIES;
         while (true) {
             int end = numEntries;
             if (numGets - numGetsForStats > end / 8) {
@@ -673,7 +674,7 @@ public class FileCache
             Entry empty = null;
             int startIndex = (clockHand & 0xffffff) % end;
             clockHand += 20;
-            boolean atCapacity = totalSize.get() > targetSize || freeMemory() < 20 << (1 << 20);
+            boolean atCapacity = totalSize.get() > targetSize || freeMemory() < 200 << (1 << 20);
             for (int i = 0; i < 20; i++, startIndex = startIndex >= end - 1 ? 0 : startIndex + 1) {
                 Entry entry = entries[startIndex];
                 if (entry.pinCount == 0 && entry.loadingFuture == null) {
@@ -701,7 +702,7 @@ public class FileCache
                 }
             }
             // If all memory used, free the oldest that does not have the size and recycle the oldest that had the size.
-            if (atCapacity) {
+            if (atCapacity || (allEntriesExist && empty == null)) {
                 boolean wasPrefetch = best != null && best.isPrefetch;
                 if (best != null && best.removeFromBucket()) {
                     sumEvictAge += now - best.accessTime;
@@ -728,8 +729,14 @@ public class FileCache
                 }
             }
             else {
-                if (numLoops > 100 && empty == null) {
+                if (numLoops > 30 && empty == null) {
                     empty = findOrMakeEmpty();
+                    if (empty != null) {
+                        // This is a new guaranteed unused empty.
+                        empty.pinCount = 1;
+                        tempEntry.replaceInBucket(empty, newBucket);
+                        return empty;
+                    }
                 }
                 if (empty != null) {
                     // Synchronize Cache-wide to see that empty is still empty.
@@ -780,11 +787,15 @@ public class FileCache
 
     private static Entry findOrMakeEmpty()
     {
+        if (numEntries >= MAX_ENTRIES) {
+            return null;
+        }
+        Entry newEntry = new Entry(0);
         synchronized (FileCache.class) {
             if (numEntries == MAX_ENTRIES) {
                 return null;
             }
-            entries[numEntries] = new Entry(0);
+            entries[numEntries] = newEntry;
             // All below numEntries must appear filled for dirty readers.
             numEntries++;
             return entries[numEntries - 1];
@@ -914,6 +925,12 @@ public class FileCache
         public long getTotalSize()
         {
             return totalSize.get();
+        }
+
+        @Managed
+        public long getNumEntries()
+        {
+            return numEntries;
         }
 
         @Managed
