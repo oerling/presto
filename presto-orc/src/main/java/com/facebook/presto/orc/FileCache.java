@@ -530,6 +530,7 @@ public class FileCache
             }
             else {
                 verify(result.loadingFuture == null && (result.isTemporary || result.pinCount > 0));
+                verify(result.buffer.length >= size);
             }
             return result;
         }
@@ -599,7 +600,7 @@ public class FileCache
         if (!entry.isTemporary) {
             int count = entry.pinCount;
             if (count != 1) {
-                log.warn("pin count after load must always be 1");
+                log.warn("pin count after load must always be 1" + count + " seen, entry.pinCount = " + entry.pinCount);
             }
         }
         entry.loadDone();
