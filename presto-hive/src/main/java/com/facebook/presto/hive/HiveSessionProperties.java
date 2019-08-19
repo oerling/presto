@@ -383,7 +383,7 @@ public final class HiveSessionProperties
                 booleanProperty(
                         BLOCK_CACHE_ENABLED,
                         "Experimental: enable file block caching",
-                        true,
+                        false,
                         false),
                 integerProperty(
                         VIRTUAL_BUCKET_COUNT,
@@ -394,6 +394,11 @@ public final class HiveSessionProperties
                         READER_BUDGET_ENFORCEMENT_ENABLED,
                         "Should enforce memory budget for ORC readers",
                         true,
+                        false),
+                booleanProperty(
+                        "bucketing_consistency_check_enabled",
+                        "No op - For compatibility with 0.225 client.",
+                        false,
                         false));
     }
 
@@ -666,9 +671,8 @@ public final class HiveSessionProperties
             throw new PrestoException(INVALID_SESSION_PROPERTY, format("%s must not be negative: %s", VIRTUAL_BUCKET_COUNT, virtualBucketCount));
         }
         return virtualBucketCount;
-
     }
-    
+
     public static PropertyMetadata<DataSize> dataSizeSessionProperty(String name, String description, DataSize defaultValue, boolean hidden)
     {
         return new PropertyMetadata<>(
