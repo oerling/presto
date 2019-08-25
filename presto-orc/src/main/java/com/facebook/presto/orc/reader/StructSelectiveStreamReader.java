@@ -45,10 +45,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.facebook.presto.array.Arrays.ensureCapacity;
 import static com.facebook.presto.orc.TupleDomainFilter.IS_NOT_NULL;
 import static com.facebook.presto.orc.TupleDomainFilter.IS_NULL;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
-import static com.facebook.presto.orc.reader.Arrays.ensureCapacity;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -410,7 +410,7 @@ public class StructSelectiveStreamReader
         outputPositionCount = positionCount;
     }
 
-    private BlockLease newLease(Block block, BlockLease...fieldBlockLeases)
+    private BlockLease newLease(Block block, BlockLease... fieldBlockLeases)
     {
         valuesInUse = true;
         return ClosingBlockLease.newLease(block, () -> {
