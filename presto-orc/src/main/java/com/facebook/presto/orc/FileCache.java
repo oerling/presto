@@ -67,6 +67,8 @@ public class FileCache
     private static int statsClockHand;
     private static long statsTime;
     private static boolean useThreshold = true;
+    // True until being at capacity for the first time.
+    private static boolean initializing = true;
 
     static {
         byteArrayPool = Caches.getByteArrayPool();
@@ -74,11 +76,11 @@ public class FileCache
             entries[numEntries++] = new Entry(0);
         }
     }
-
+    
     private static AtomicLong totalSize = new AtomicLong();
     private static AtomicLong prefetchSize = new AtomicLong();
     private static long targetSize = 20 * (1L << 30);
-
+    private static long bytesAllocated;
     private static long numGcdBuffers;
     private static long numGcdBytes;
     private static long numGets;
@@ -87,14 +89,18 @@ public class FileCache
     private static long numEvicts;
     private static long sumEvictAge;
     private static long numPrefetch;
-    private static long numPrefetchBytes;
+    private static long prefetchBytes;
+    private static long numPrefetchRead;
+    private static long prefetchReadBytes;
     private static long numLatePrefetch;
     private static long numWastedPrefetch;
-    private static long numWastedPrefetchBytes;
+    private static long wastedPrefetchBytes;
     private static long numConcurrentMiss;
     private static long numAllInUse;
     private static long prefetchMicros;
     private static long operatorReadMicros;
+    private static long numOperatorRead;
+    private static long operatorReadBytes;
     private static long readWaitMicros;
 
     private static ExecutorService prefetchExecutor;
@@ -276,6 +282,7 @@ public class FileCache
         // When finding an Entry with isTemporary set, wait for the loading future and then retry the get. A temporary entry must not be returned to a caller.
         final boolean isTemporary;
         boolean isPrefetch;
+        private byte sizeIndex;
 
         Entry(int pinCount)
         {
@@ -369,7 +376,7 @@ public class FileCache
                         bucket.remove(i);
                         if (isPrefetch) {
                             numWastedPrefetch++;
-                            numWastedPrefetchBytes += dataSize;
+                            wastedPrefetchBytes += dataSize;
                             isPrefetch = false;
                         }
                         return true;
@@ -395,6 +402,9 @@ public class FileCache
             other.isPrefetch = isPrefetch;
             other.listener = listener;
             other.retentionWeight = retentionWeight;
+            if (other.softBuffer.getBucket() != bucketIndex) {
+                verify(false, "Inserting entry with bad bucket index " + other.softBuffer.getBucket() + " into " + bucketIndex + " " + other.toString());
+            }
             synchronized (bucket) {
                 for (int i = 0; i < bucket.size(); i++) {
                     if (bucket.get(i) == this) {
@@ -417,7 +427,7 @@ public class FileCache
                 }
             }
             if (reference == null) {
-                buffer = byteArrayPool.allocate(size);
+                buffer = newBuffer(size);
                 softBuffer = new BufferReference(buffer, gcdBuffers, bucketIndex);
             }
             else {
@@ -426,7 +436,7 @@ public class FileCache
                     numGcdBuffers++;
                     numGcdBytes += bufferSize;
                     totalSize.addAndGet(-bufferSize);
-                    buffer = byteArrayPool.allocate(size);
+                    buffer = newBuffer(size);
                 }
                 softBuffer = new BufferReference(buffer, gcdBuffers, bucketIndex);
             }
@@ -515,8 +525,8 @@ public class FileCache
                     if (entry.softBuffer == null) {
                         verify(entry.loadingFuture != null);
                     }
-                    else {
-                        verify(entry.softBuffer.getBucket() == bucketIndex);
+                    else if (entry.softBuffer.getBucket() != bucketIndex) {
+                        verify(false, "Entry has bucket " + entry.softBuffer.getBucket() + " while in bucket " + bucketIndex + " " + entry.toString());
                     }
                     if (entry.matches(token, offset)) {
                         futureToWait = entry.loadingFuture;
@@ -669,9 +679,22 @@ public class FileCache
                         entry.loadDone();
                         return null;
                     }
-                    entry.buffer = byteArrayPool.allocate(size);
+                    entry.buffer = newBuffer(size);
+                }
+                long startRead = 0;
+                if (!isPrefetch) {
+                    startRead = System.nanoTime();
                 }
                 dataSource.readFully(entry.offset, entry.buffer, 0, size);
+                if (isPrefetch) {
+                    numPrefetchRead++;
+                    prefetchReadBytes += size;
+                }
+                else {
+                    numOperatorRead++;
+                    operatorReadMicros += (System.nanoTime() - startRead) / 1000;
+                    operatorReadBytes += size;
+                }
             }
             else {
                 // If an entry is requested with a greater size than last request, there may be references to the buffer. Make a new buffer and replace only after loading.
@@ -679,7 +702,7 @@ public class FileCache
                 byte[] oldBuffer = reference != null ? reference.get() : null;
                 byte[] newBuffer;
                 if (oldBuffer == null || oldBuffer.length < size) {
-                    newBuffer = byteArrayPool.allocate(size);
+                    newBuffer = newBuffer(size);
                     totalSize.addAndGet(newBuffer.length - (oldBuffer != null ? oldBuffer.length : 0));
                 }
                 else {
@@ -690,8 +713,14 @@ public class FileCache
                     startRead = System.nanoTime();
                 }
                 dataSource.readFully(entry.offset, newBuffer, 0, size);
-                if (!isPrefetch) {
+                if (isPrefetch) {
+                    numPrefetchRead++;
+                    prefetchReadBytes += size;
+                }
+                else {
+                    numOperatorRead++;
                     operatorReadMicros += (System.nanoTime() - startRead) / 1000;
+                    operatorReadBytes += size;
                 }
                 entry.buffer = newBuffer;
                 entry.bufferSize = newBuffer.length;
@@ -727,6 +756,13 @@ public class FileCache
         }
     }
 
+    private static byte[] newBuffer(int size)
+    {
+        byte[] buffer = byteArrayPool.allocate(size);
+        bytesAllocated += buffer.length;
+        return buffer;
+    }
+
     private static void trimGcd()
     {
         while (true) {
@@ -759,6 +795,11 @@ public class FileCache
         size = byteArrayPool.getStandardSize(size);
         int numLoops = 0;
         boolean allEntriesExist = numEntries >= MAX_ENTRIES;
+        long bestAge = Long.MIN_VALUE;
+        long bestAgeWithSize = Long.MIN_VALUE;
+        Entry best = null;
+        Entry bestWithSize = null;
+        Entry empty = null;
         while (true) {
             int end = numEntries;
             if (numGets - numGetsForStats > end / 8) {
@@ -779,28 +820,30 @@ public class FileCache
                 now = System.nanoTime();
                 updateEvictionThreshold(now);
             }
+            long threshold = evictionThreshold;
+            if (threshold > Long.MIN_VALUE && numLoops > 40) {
+                threshold = (long) (threshold / Math.max(1.1, (numLoops / 300.0)));
+            }
             numLoops += 20;
-            long bestAge = Long.MIN_VALUE;
-            long bestAgeWithSize = Long.MIN_VALUE;
-            Entry best = null;
-            Entry bestWithSize = null;
-            Entry empty = null;
             int startIndex = (clockHand & 0xffffff) % end;
             clockHand += 20;
-            boolean atCapacity = totalSize.get() > targetSize || freeMemory() < 200 << (1 << 20);
+            boolean atCapacity = totalSize.get() + size > targetSize || freeMemory() < 200 << (1 << 20);
+            if (initializing && atCapacity) {
+                initializing = false;
+            }
             for (int i = 0; i < 20; i++, startIndex = startIndex >= end - 1 ? 0 : startIndex + 1) {
                 Entry entry = entries[startIndex];
                 if (entry.pinCount == 0 && entry.loadingFuture == null) {
                     BufferReference reference = entry.softBuffer;
                     if (reference == null || reference.get() == null) {
                         empty = entry;
-                        if (!atCapacity) {
+                        if (initializing || (!atCapacity && numLoops > end / 2)) {
                             break;
                         }
                         continue;
                     }
                     long age = entry.age(now);
-                    if (age < evictionThreshold + (now - statsTime)) {
+                    if (numLoops < end && age < evictionThreshold + (now - statsTime)) {
                         continue;
                     }
                     if (entry.bufferSize == size && age > bestAgeWithSize) {
@@ -808,16 +851,30 @@ public class FileCache
                         bestAgeWithSize = age;
                         continue;
                     }
-                    if (age > bestAge) {
+                    if (best != null && entry.bufferSize > best.bufferSize || age > bestAge) {
                         bestAge = age;
                         best = entry;
                     }
                 }
             }
             // If all memory used, free the oldest that does not have the size and recycle the oldest that had the size.
-            if (atCapacity || (allEntriesExist && empty == null)) {
-                boolean wasPrefetch = best != null && best.isPrefetch;
-                if (best != null && best.removeFromBucket()) {
+            if (atCapacity || (allEntriesExist && empty == null) ||
+                (!initializing && numLoops < 100)) {
+                boolean wasPrefetch = bestWithSize != null && bestWithSize.isPrefetch;
+                if (bestWithSize != null && bestWithSize.removeFromBucket()) {
+                    sumEvictAge += now - bestWithSize.accessTime;
+                    numEvicts++;
+                    if (bestWithSize.listener != null) {
+                        bestWithSize.listener.evicted(bestWithSize, now, wasPrefetch);
+                    }
+                    checkState(bestWithSize.pinCount == 0);
+                    bestWithSize.pinCount = 1;
+                    bestWithSize.ensureBuffer(size, newBucket);
+                    tempEntry.replaceInBucket(bestWithSize, newBucket);
+                    return bestWithSize;
+                }
+                wasPrefetch = best != null && best.isPrefetch;
+                if (atCapacity && numLoops > end && best != null && best.removeFromBucket()) {
                     // This is safe, only one thread can successfully remove.
                     sumEvictAge += now - best.accessTime;
                     numEvicts++;
@@ -833,19 +890,7 @@ public class FileCache
                     best.softBuffer = null;
                     best.buffer = null;
                 }
-                wasPrefetch = bestWithSize != null && bestWithSize.isPrefetch;
-                if (bestWithSize != null && bestWithSize.removeFromBucket()) {
-                    sumEvictAge += now - bestWithSize.accessTime;
-                    numEvicts++;
-                    if (bestWithSize.listener != null) {
-                        bestWithSize.listener.evicted(bestWithSize, now, wasPrefetch);
-                    }
-                    checkState(bestWithSize.pinCount == 0);
-                    bestWithSize.pinCount = 1;
-                    bestWithSize.ensureBuffer(size, newBucket);
-                    tempEntry.replaceInBucket(bestWithSize, newBucket);
-                    return bestWithSize;
-                }
+
             }
             else {
                 if (numLoops > 30 && empty == null) {
@@ -948,7 +993,7 @@ public class FileCache
             String name = currentThread().getName();
             try {
                 numPrefetch++;
-                numPrefetchBytes += size;
+                prefetchBytes += size;
                 currentThread().setName("prefetch");
                 long startTime = System.nanoTime();
                 FileCache.getInternal(dataSource, offset, size, true, startTime, listener, retentionWeight);
@@ -1009,7 +1054,7 @@ public class FileCache
         @Managed
         public long getPrefetchBytes()
         {
-            return numPrefetchBytes;
+            return prefetchBytes;
         }
 
         @Managed
@@ -1027,7 +1072,7 @@ public class FileCache
         @Managed
         public long getWastedPrefetchBytes()
         {
-            return numWastedPrefetchBytes;
+            return wastedPrefetchBytes;
         }
 
         @Managed
@@ -1096,6 +1141,22 @@ public class FileCache
         }
 
         @Managed
+        public long getUsedSize()
+        {
+            long size = 0;
+            int end = numEntries;
+            for (int i = 0; i < end; i++) {
+                BufferReference reference = entries[i].softBuffer;
+                byte[] buffer = reference == null ? null : reference.get();
+                if (buffer != null) {
+                    size += entries[i].dataSize;
+                }
+            }
+            return size;
+        }
+
+
+        @Managed
         public long getPendingPrefetch()
         {
             return prefetchSize.get();
@@ -1114,15 +1175,79 @@ public class FileCache
         }
 
         @Managed
+        public long getNumPrefetchRead()
+        {
+            return numPrefetchRead;
+        }
+
+        @Managed
+        public long getPrefetchReadBytes()
+        {
+            return prefetchReadBytes;
+        }
+
+        @Managed
         public long getReadWaitMicros()
         {
             return readWaitMicros;
         }
 
         @Managed
+        public long getNumOperatorRead()
+        {
+            return numOperatorRead;
+        }
+
+        @Managed
+        public long getOperatorReadBytes()
+        {
+            return operatorReadBytes;
+        }
+
+        @Managed
         public long getOperatorReadMicros()
         {
             return operatorReadMicros;
+        }
+
+        @Managed
+        public long getBytesAllocated()
+        {
+            return bytesAllocated;
+        }
+
+        @Managed
+        public String getSizeReport()
+        {
+            int numSizes = byteArrayPool.getStandardSizes().length;
+            long[] ages = new long[numSizes];
+            long[] unhitPrefetchBytes = new long[numSizes];
+            int[] counts = new int[numSizes];
+            int end = numEntries;
+            long now = System.nanoTime();
+            for (int i = 0; i < end; i++) {
+                Entry entry = entries[i];
+                BufferReference reference = entry.softBuffer;
+                byte[] buffer = reference == null ? null : reference.get();
+                if (buffer != null) {
+                    int sizeIndex = byteArrayPool.getSizeIndex(buffer.length);
+                    ages[sizeIndex] += entry.age(now);
+                    counts[sizeIndex]++;
+                    if (entry.isPrefetch) {
+                        unhitPrefetchBytes[sizeIndex] += entry.bufferSize;
+                    }
+                }
+            }
+            String result = "Sizes:\n";
+            for (int i = 0; i < numSizes; i++) {
+                if (counts[i] > 0) {
+                    int size = byteArrayPool.getStandardSizes()[i];
+                    long percent = ((long) size * counts[i] * 100) / totalSize.get();
+                    long pendingSize = unhitPrefetchBytes[i] / 1024;
+                    result = result + (size / 1024)+ "K: " + percent + "% " + counts[i] + " Age ms: " + ages[i] / counts[i] / 1000000 + (pendingSize > 0 ? " pending use " + pendingSize + "K" : "") + "\n";
+                }
+            }
+            return result;
         }
     }
 }
