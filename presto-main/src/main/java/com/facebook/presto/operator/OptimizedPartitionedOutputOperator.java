@@ -323,7 +323,6 @@ public class OptimizedPartitionedOutputOperator
     private static class PartitionData
     {
         private static final int INSTANCE_SIZE = ClassLayout.parseClass(PartitionData.class).instanceSize();
-        private static final int INITIAL_POSITION_COUNT = 64 * 1024;
         private static final int DEFAULT_ELEMENT_SIZE_IN_BYTES = 8;
 
         private final int partition;
@@ -334,8 +333,8 @@ public class OptimizedPartitionedOutputOperator
         private final int capacity;
         private final int channelCount;
 
-        private int[] positions = new int[INITIAL_POSITION_COUNT];   // the default positions array for top level BlockEncodingBuffers
-        private int[] rowSizes = new int[INITIAL_POSITION_COUNT];
+        private int[] positions;   // the default positions array for top level BlockEncodingBuffers
+        private int[] rowSizes;
         private int positionCount;  // number of positions to be copied for this partition
         private BlockEncodingBuffers[] blockEncodingBuffers;
 
@@ -355,10 +354,7 @@ public class OptimizedPartitionedOutputOperator
 
         public void resetPositions(int positionCount)
         {
-            if (positions.length < positionCount) {
-                positions = new int[max(2 * positions.length, positionCount)];
-            }
-
+            positions = ensureCapacity(positions, positionCount);
             this.positionCount = 0;
         }
 
