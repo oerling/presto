@@ -25,6 +25,7 @@ import java.util.OptionalInt;
 import static com.facebook.presto.orc.ResizedArrays.newIntArrayForReuse;
 import static com.facebook.presto.orc.ResizedArrays.resize;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.DateType.DATE;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
@@ -84,7 +85,7 @@ abstract class AbstractLongStreamReader
     {
         checkEnoughValues(numFirstRows);
         if (mayReuse) {
-            if (type == INTEGER) {
+            if (type == INTEGER || type == DATE) {
                 if (intValues == null || intValues.length < numValues) {
                     intValues = newIntArrayForReuse(numValues);
                 }
@@ -109,7 +110,7 @@ abstract class AbstractLongStreamReader
                 throw new IllegalArgumentException("Type not supported in LongStreamReader");
             }
         }
-        if (type == INTEGER) {
+        if (type == INTEGER || type == DATE) {
             int[] ints = new int[numFirstRows];
             for (int i = 0; i < numFirstRows; i++) {
                 ints[i] = (int) values[i];
