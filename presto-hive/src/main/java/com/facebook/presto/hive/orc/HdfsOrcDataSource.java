@@ -66,7 +66,7 @@ public class HdfsOrcDataSource
             FileFormatDataSourceStats stats,
             boolean useCache)
     {
-        this( id, size, maxMergeDistance, maxReadSize, streamBufferSize, lazyReadSmallRanges, inputStream, stats, useCache, "");
+        this(id, size, maxMergeDistance, maxReadSize, streamBufferSize, lazyReadSmallRanges, inputStream, stats, useCache, "");
     }
 
     @Override

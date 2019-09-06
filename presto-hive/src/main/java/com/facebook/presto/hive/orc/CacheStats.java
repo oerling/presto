@@ -15,7 +15,6 @@ package com.facebook.presto.hive.orc;
 
 import com.facebook.presto.orc.FileCache;
 import com.facebook.presto.orc.FileCache.FileCacheStats;
-
 import org.weakref.jmx.Flatten;
 import org.weakref.jmx.Managed;
 
