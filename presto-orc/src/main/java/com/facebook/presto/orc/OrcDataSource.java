@@ -58,4 +58,10 @@ public interface OrcDataSource
     {
         return false;
     }
+
+    // Returns a string identifying the table/partition for access tracking.
+    default String getSplitLabel()
+    {
+        return "";
+    }
 }

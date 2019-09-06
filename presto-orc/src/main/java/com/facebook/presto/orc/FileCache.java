@@ -33,7 +33,9 @@ import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
@@ -44,6 +46,7 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Verify.verify;
 import static java.lang.Thread.currentThread;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
 public class FileCache
 {
     private static final long MAX_PREFETCH_SIZE = 4L << 30;
@@ -76,7 +79,7 @@ public class FileCache
             entries[numEntries++] = new Entry(0);
         }
     }
-    
+
     private static AtomicLong totalSize = new AtomicLong();
     private static AtomicLong prefetchSize = new AtomicLong();
     private static long targetSize = 20 * (1L << 30);
@@ -194,7 +197,9 @@ public class FileCache
     {
         private final String label;
         private final AtomicLong numHits = new AtomicLong();
+        private final AtomicLong hitSize = new AtomicLong();
         private final AtomicLong numMisses = new AtomicLong();
+        private final AtomicLong missSize = new AtomicLong();
         private final AtomicLong size = new AtomicLong();
 
         public Listener(String label)
@@ -205,12 +210,14 @@ public class FileCache
         public void loaded(Entry entry)
         {
             size.addAndGet(entry.dataSize);
+            missSize.addAndGet(entry.dataSize);
             numMisses.addAndGet(1);
         }
 
         public void hit(Entry entry)
         {
             numHits.addAndGet(1);
+            hitSize.addAndGet(entry.dataSize);
         }
 
         public void evicted(Entry entry, long now, boolean wasPrefetch)
@@ -222,13 +229,33 @@ public class FileCache
         {
             size.addAndGet(other.size.get());
             numHits.addAndGet(other.numHits.get());
+            hitSize.addAndGet(other.hitSize.get());
             numMisses.addAndGet(other.numMisses.get());
+            missSize.addAndGet(other.missSize.get());
+        }
+
+        // The one with the larger hitVolume comes first.
+        public int compare(Listener other)
+        {
+            return hitSize.get() > other.hitSize.get() ? -1 : 1;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return label.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            return this == other;
         }
 
         @Override
         public String toString()
         {
-            return label + " size " + size.get() + " hits " + numHits.get() + " misses " + numMisses.get();
+            return label + " size " + size.get() + " hits " + numHits.get() + " (" + (hitSize.get() / (1L << 20)) + "MB) " + " misses " + numMisses.get() + " (" + (missSize.get() / (1L << 20)) + "MB) ";
         }
     }
 
@@ -859,7 +886,7 @@ public class FileCache
             }
             // If all memory used, free the oldest that does not have the size and recycle the oldest that had the size.
             if (atCapacity || (allEntriesExist && empty == null) ||
-                (!initializing && numLoops < 100)) {
+                    (!initializing && numLoops < 100)) {
                 boolean wasPrefetch = bestWithSize != null && bestWithSize.isPrefetch;
                 if (bestWithSize != null && bestWithSize.removeFromBucket()) {
                     sumEvictAge += now - bestWithSize.accessTime;
@@ -890,7 +917,6 @@ public class FileCache
                     best.softBuffer = null;
                     best.buffer = null;
                 }
-
             }
             else {
                 if (numLoops > 30 && empty == null) {
@@ -1155,7 +1181,6 @@ public class FileCache
             return size;
         }
 
-
         @Managed
         public long getPendingPrefetch()
         {
@@ -1244,10 +1269,37 @@ public class FileCache
                     int size = byteArrayPool.getStandardSizes()[i];
                     long percent = ((long) size * counts[i] * 100) / totalSize.get();
                     long pendingSize = unhitPrefetchBytes[i] / 1024;
-                    result = result + (size / 1024)+ "K: " + percent + "% " + counts[i] + " Age ms: " + ages[i] / counts[i] / 1000000 + (pendingSize > 0 ? " pending use " + pendingSize + "K" : "") + "\n";
+                    result = result + (size / 1024) + "K: " + percent + "% " + counts[i] + " Age ms: " + ages[i] / counts[i] / 1000000 + (pendingSize > 0 ? " pending use " + pendingSize + "K" : "") + "\n";
                 }
             }
             return result;
+        }
+
+        @Managed
+        public String getHitReport()
+        {
+            Set<Listener> listeners = new HashSet();
+            int end = numEntries;
+            for (int i = 0; i < end; i++) {
+                Entry entry = entries[i];
+                BufferReference reference = entry.softBuffer;
+                byte[] buffer = reference == null ? null : reference.get();
+                if (buffer != null) {
+                    Listener listener = entry.listener;
+                    if (listener != null) {
+                        listeners.add(listener);
+                    }
+                }
+            }
+            Listener[] array = listeners.toArray(new Listener[listeners.size()]);
+            Arrays.sort(array, (Listener a, Listener b) -> a.compare(b));
+            StringBuilder result = new StringBuilder();
+            for (int i = 0; i < 100 && i < array.length; i++) {
+                Listener listener = array[i];
+                result.append(listener.toString());
+                result.append("\n");
+            }
+            return result.toString();
         }
     }
 }
