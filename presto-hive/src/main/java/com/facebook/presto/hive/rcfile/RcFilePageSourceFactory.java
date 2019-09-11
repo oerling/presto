@@ -107,7 +107,8 @@ public class RcFilePageSourceFactory
             Properties schema,
             List<HiveColumnHandle> columns,
             TupleDomain<HiveColumnHandle> effectivePredicate,
-            DateTimeZone hiveStorageTimeZone)
+            DateTimeZone hiveStorageTimeZone,
+            String splitLabel)
     {
         RcFileEncoding rcFileEncoding;
         String deserializerClassName = getDeserializerClassName(schema);

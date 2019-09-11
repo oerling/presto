@@ -110,7 +110,8 @@ public class HivePageSourceProvider
                 typeManager,
                 hiveSplit.getColumnCoercions(),
                 hiveSplit.getBucketConversion(),
-                hiveSplit.isS3SelectPushdownEnabled());
+                hiveSplit.isS3SelectPushdownEnabled(),
+                hiveSplit.getTable() + ":" + hiveSplit.getPartitionName());
         if (pageSource.isPresent()) {
             return pageSource.get();
         }
@@ -135,7 +136,8 @@ public class HivePageSourceProvider
             TypeManager typeManager,
             Map<Integer, HiveType> columnCoercions,
             Optional<BucketConversion> bucketConversion,
-            boolean s3SelectPushdownEnabled)
+            boolean s3SelectPushdownEnabled,
+            String splitLabel)
     {
         ImmutableSet.Builder<HiveColumnHandle> requiredInterimColumns = ImmutableSet.builder();
         // Add distinct top level columns from the predicate. The
@@ -179,7 +181,8 @@ public class HivePageSourceProvider
                     schema,
                     toColumnHandles(regularAndInterimColumnMappings, true),
                     effectivePredicate,
-                    hiveStorageTimeZone);
+                    hiveStorageTimeZone,
+                    splitLabel);
             if (pageSource.isPresent()) {
                 return Optional.of(
                         new HivePageSource(

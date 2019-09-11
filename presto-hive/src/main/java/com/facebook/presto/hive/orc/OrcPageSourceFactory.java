@@ -111,7 +111,8 @@ public class OrcPageSourceFactory
             Properties schema,
             List<HiveColumnHandle> columns,
             TupleDomain<HiveColumnHandle> effectivePredicate,
-            DateTimeZone hiveStorageTimeZone)
+            DateTimeZone hiveStorageTimeZone,
+            String splitLabel)
     {
         if (!isDeserializerClass(schema, OrcSerde.class)) {
             return Optional.empty();
@@ -146,7 +147,8 @@ public class OrcPageSourceFactory
                 isOrcBloomFiltersEnabled(session),
                 stats,
                 0 /*domainCompactionThreshold*/,
-                isBlockCacheEnabled(session)));
+                isBlockCacheEnabled(session),
+                splitLabel));
     }
 
     public static OrcPageSource createOrcPageSource(
@@ -173,7 +175,8 @@ public class OrcPageSourceFactory
             boolean orcBloomFiltersEnabled,
             FileFormatDataSourceStats stats,
             int domainCompactionThreshold,
-                                                         boolean useCache)
+            boolean useCache,
+            String splitLabel)
     {
         OrcDataSource orcDataSource;
         try {
@@ -188,7 +191,8 @@ public class OrcPageSourceFactory
                     lazyReadSmallRanges,
                     inputStream,
                     stats,
-                                                  useCache);
+                    useCache,
+                    splitLabel);
         }
         catch (Exception e) {
             if (nullToEmpty(e.getMessage()).trim().equals("Filesystem closed") ||

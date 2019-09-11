@@ -71,7 +71,8 @@ public class DwrfPageSourceFactory
             Properties schema,
             List<HiveColumnHandle> columns,
             TupleDomain<HiveColumnHandle> effectivePredicate,
-                                                                    DateTimeZone hiveStorageTimeZone)
+                                                                    DateTimeZone hiveStorageTimeZone,
+                                                                    String splitLabel)
     {
         if (!isDeserializerClass(schema, OrcSerde.class)) {
             return Optional.empty();
@@ -105,6 +106,7 @@ public class DwrfPageSourceFactory
                 false,
                 stats,
                 0 /*domainCompactionThreshold*/,
-                isBlockCacheEnabled(session)));
+                isBlockCacheEnabled(session),
+                splitLabel));
     }
 }
