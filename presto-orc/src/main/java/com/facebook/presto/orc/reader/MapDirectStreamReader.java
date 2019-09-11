@@ -128,6 +128,13 @@ public class MapDirectStreamReader
     private int[] localNumFilters;
     private int globalNumFilters;
     private boolean hasPositionalFilter;
+    // Remembers the last Block returned by getBlock(). getBlock() may re-return this if the same Block is used for filter
+    // functions and the same is needed again within the same batch.
+    private Block lastReturnedBlock;
+    private boolean lastReturnedReuse;
+    private int lastReturnedBegin;
+    private int lastReturnedNumRows;
+    private boolean tracePruning;
 
     public MapDirectStreamReader(StreamDescriptor streamDescriptor, DateTimeZone hiveStorageTimeZone, AggregatedMemoryContext systemMemoryContext)
     {
@@ -135,6 +142,7 @@ public class MapDirectStreamReader
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.keyStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(0), hiveStorageTimeZone, systemMemoryContext);
         this.valueStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(1), hiveStorageTimeZone, systemMemoryContext);
+        tracePruning = StreamReaders.isTrace("prune");
     }
 
     @Override
@@ -173,6 +181,9 @@ public class MapDirectStreamReader
         if (mayPruneKey) {
             this.sliceSubscripts = sliceSubscripts.build();
             this.longSubscripts = longSubscripts.build();
+        }
+        if (tracePruning) {
+            StreamReaders.trace("Map keys to get: = " + this.longSubscripts.toString());
         }
     }
 
@@ -668,6 +679,7 @@ public class MapDirectStreamReader
     public void scan()
             throws IOException
     {
+        lastReturnedBlock = null;
         if (!filterIsSetup) {
             setupFilterAndChannel();
         }
@@ -760,6 +772,11 @@ public class MapDirectStreamReader
         if (addedNulls > 0 && outputChannelSet) {
             fixupOffsetsAfterNulls(lastElementOffset);
         }
+        if (tracePruning) {
+            StreamReaders.trace("Map rows " + inputQualifyingSet.getPositionCount() + " total keys: " + innerQualifyingSet.getPositionCount() + " considered keys " + keyQualifyingSet.getPositionCount() +
+                                (positionalFilter != null ? " after value filter " + valueStreamReader.getOutputQualifyingSet().getPositionCount() : ""));
+                                
+        }
         endScan(presentStream);
     }
 
@@ -848,6 +865,9 @@ public class MapDirectStreamReader
     @Override
     public Block getBlock(int startRow, int numFirstRows, boolean mayReuse)
     {
+        if (lastReturnedBlock != null && startRow == lastReturnedBegin && mayReuse == lastReturnedReuse && numFirstRows == lastReturnedNumRows) {
+            return lastReturnedBlock;
+        }
         int innerBegin = getInnerPosition(startRow);
         int innerEnd = getInnerPosition(startRow + numFirstRows);
         // offset is always new since createBlockFromKeyValue does not
@@ -870,7 +890,11 @@ public class MapDirectStreamReader
             values = valueStreamReader.getBlock(innerEnd, mayReuse);
         }
         MapType mapType = (MapType) type;
-        return mapType.createBlockFromKeyValue(Optional.ofNullable(nulls), offsets, keys, values);
+        lastReturnedBlock = mapType.createBlockFromKeyValue(Optional.ofNullable(nulls), offsets, keys, values);
+        lastReturnedReuse = mayReuse;
+        lastReturnedBegin = startRow;
+        lastReturnedNumRows = numFirstRows;
+        return lastReturnedBlock;
     }
 
     @Override

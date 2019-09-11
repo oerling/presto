@@ -302,6 +302,8 @@ public class OrcRecordReader
         streamReaders = createStreamReaders(orcDataSource, types, hiveStorageTimeZone, presentColumnsAndTypes.build(), includedSubfields, streamReadersSystemMemoryContext);
         maxBytesPerCell = new long[streamReaders.length];
         nextBatchSize = initialBatchSize;
+        StreamReaders.readTraceSettings();
+        StreamReaders.flushTrace();
     }
 
     // Constructs a dummy OrcRecordReader to be used as a wrapper
@@ -897,7 +899,7 @@ public class OrcRecordReader
                 constantBlocks,
                 options.getCoercers(),
                 adaptation);
-        targetResultBytes = options.getTargetBytes();
+        targetResultBytes = (int) maxBlockBytes; // options.getTargetBytes();
         reader.setResultSizeBudget(targetResultBytes, enforceMemoryBudget);
     }
 
