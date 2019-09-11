@@ -393,7 +393,7 @@ public final class HiveSessionProperties
                 booleanProperty(
                         READER_BUDGET_ENFORCEMENT_ENABLED,
                         "Should enforce memory budget for ORC readers",
-                        true,
+                        false,
                         false),
                 booleanProperty(
                         "bucketing_consistency_check_enabled",
