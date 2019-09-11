@@ -654,18 +654,9 @@ public class ColumnGroupReader
         for (int operandIdx = streamIdx; operandIdx >= 0; operandIdx--) {
             StreamReader reader = sortedStreamReaders[operandIdx];
             if (channel == reader.getChannel()) {
-                Block block = reader.getBlock(reader.getNumValues(), true);
+                Block block = reader.getBlock(numRowsInResult, reader.getNumValues() - numRowsInResult, true);
                 if (map == null) {
-                    return coerceIfNeeded(channel, reader.getBlock(numRowsInResult, reader.getNumValues() - numRowsInResult, true));
-                }
-                if (numRowsInResult > 0) {
-                    // Offset the map to point to values added in this batch.
-                    if (mustCopyMap) {
-                        map = copyMap(rowNumberMaps, channelIdx, numRows, map);
-                    }
-                    for (int i = 0; i < numRows; i++) {
-                        map[i] += numRowsInResult;
-                    }
+                    return coerceIfNeeded(channel, block);
                 }
                 return coerceIfNeeded(channel, new DictionaryBlock(numRows, block, map));
             }
