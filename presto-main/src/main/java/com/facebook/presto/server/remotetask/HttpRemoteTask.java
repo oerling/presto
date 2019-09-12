@@ -28,6 +28,7 @@ import com.facebook.presto.execution.TaskStatus;
 import com.facebook.presto.execution.buffer.BufferInfo;
 import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.buffer.PageBufferInfo;
+import com.facebook.presto.execution.scheduler.ClusterState;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.operator.TaskStats;
 import com.facebook.presto.server.TaskUpdateRequest;
@@ -297,7 +298,8 @@ public final class HttpRemoteTask
                     partitionedSplitCountTracker.setPartitionedSplitCount(getPartitionedSplitCount());
                     updateSplitQueueSpace();
                 }
-            });
+                ClusterState.newStatus(newStatus);
+                });
 
             partitionedSplitCountTracker.setPartitionedSplitCount(getPartitionedSplitCount());
             updateSplitQueueSpace();
