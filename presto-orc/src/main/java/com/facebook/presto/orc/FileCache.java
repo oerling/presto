@@ -862,7 +862,7 @@ public class FileCache
                 Entry entry = entries[startIndex];
                 if (entry.pinCount == 0 && entry.loadingFuture == null) {
                     BufferReference reference = entry.softBuffer;
-                    if (reference == null || reference.get() == null) {
+                    if (reference == null) {
                         empty = entry;
                         if (initializing || (!atCapacity && numLoops > end / 2)) {
                             break;
