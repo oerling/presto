@@ -358,7 +358,8 @@ public final class HttpPageBufferClient
                                 }
                                 return null;
                             }
-                        });
+                            },
+                                new BufferingResponseListener(false));
                     }
                 }
                 catch (PrestoException e) {
