@@ -99,10 +99,12 @@ public final class HiveQueryRunner
                 .put("task.writer-count", "2")
                 .putAll(extraProperties)
                 .build();
+        String singleThreadEnv = System.getenv("SINGLE_THREAD");
+        boolean singleThreaded = singleThreadEnv != null && singleThreadEnv.equals("y");
 
         DistributedQueryRunner queryRunner =
                 DistributedQueryRunner.builder(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))))
-                        .setNodeCount(4)
+                        .setNodeCount(singleThreaded ? 1 : 4)
                         .setExtraProperties(systemProperties)
                         .setBaseDataDir(baseDataDir)
                         .build();
