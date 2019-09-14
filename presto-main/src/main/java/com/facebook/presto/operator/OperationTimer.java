@@ -127,6 +127,11 @@ class OperationTimer
             this.cpuNanos.addAndGet(cpuNanos);
         }
 
+        void recordOffThreadCpu(long cpuNanos)
+        {
+            this.cpuNanos.addAndGet(cpuNanos);
+        }
+        
         @Override
         public String toString()
         {

@@ -43,6 +43,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.facebook.presto.execution.buffer.PageCompression.UNCOMPRESSED;
@@ -78,6 +79,8 @@ public class ExchangeClient
     private final boolean acknowledgePages;
     private final HttpClient httpClient;
     private final ScheduledExecutorService scheduler;
+    private final AtomicLong offThreadCpuNanos = new AtomicLong();
+    private boolean useZeroCopy;
 
     @GuardedBy("this")
     private boolean noMoreLocations;
@@ -155,7 +158,12 @@ public class ExchangeClient
         }
     }
 
-    public synchronized void addLocation(URI location, TaskId remoteSourceTaskId)
+    public void addLocation(URI location, TaskId remoteSourceTaskId)
+    {
+        addLocation(location, remoteSourceTaskId, false);
+    }
+
+    public synchronized void addLocation(URI location, TaskId remoteSourceTaskId, boolean useZeroCopy)
     {
         requireNonNull(location, "location is null");
 
@@ -165,6 +173,7 @@ public class ExchangeClient
             return;
         }
 
+        this.useZeroCopy = useZeroCopy;
         // ignore duplicate locations
         if (allClients.containsKey(location)) {
             return;
@@ -185,7 +194,8 @@ public class ExchangeClient
                 location,
                 new ExchangeClientCallback(),
                 scheduler,
-                pageBufferClientCallbackExecutor);
+                pageBufferClientCallbackExecutor,
+                useZeroCopy);
         allClients.put(location, client);
         checkState(taskIdToLocationMap.put(remoteSourceTaskId, location) == null, "Duplicate remoteSourceTaskId: " + remoteSourceTaskId);
         queuedClients.add(client);
@@ -497,7 +507,12 @@ public class ExchangeClient
         }
     }
 
-    private static void closeQuietly(HttpPageBufferClient client)
+    public AtomicLong getOffThreadCpuNanos()
+    {
+        return offThreadCpuNanos;
+    }
+    
+        private static void closeQuietly(HttpPageBufferClient client)
     {
         try {
             client.close();

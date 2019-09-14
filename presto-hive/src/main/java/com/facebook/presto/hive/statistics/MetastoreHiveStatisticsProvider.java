@@ -365,11 +365,13 @@ public class MetastoreHiveStatisticsProvider
 
     private static void checkStatistics(boolean expression, SchemaTableName table, String partition, String column, String message, Object... args)
     {
+        /*
         if (!expression) {
             throw new PrestoException(
                     HIVE_CORRUPTED_COLUMN_STATISTICS,
                     format("Corrupted partition statistics (Table: %s Partition: [%s] Column: %s): %s", table, partition, column, format(message, args)));
         }
+        */
     }
 
     private static void checkStatistics(boolean expression, SchemaTableName table, String partition, String message, Object... args)

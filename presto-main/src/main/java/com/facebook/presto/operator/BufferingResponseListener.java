@@ -38,7 +38,8 @@ class BufferingResponseListener
 {
     private static final long BUFFER_MAX_BYTES = new DataSize(1, MEGABYTE).toBytes();
     private static final long BUFFER_MIN_BYTES = new DataSize(1, KILOBYTE).toBytes();
-
+    private InputStream result;
+    
     @GuardedBy("this")
     private byte[] currentBuffer = new byte[0];
     @GuardedBy("this")
@@ -47,9 +48,11 @@ class BufferingResponseListener
     private List<byte[]> buffers = new ArrayList<>();
     @GuardedBy("this")
     private long size;
+    private boolean usePool;
 
     public BufferingResponseListener(boolean usePool)
     {
+        this.usePool = usePool;
     }
 
     @Override
@@ -60,7 +63,7 @@ class BufferingResponseListener
 
         while (length > 0) {
             if (currentBufferPosition >= currentBuffer.length) {
-                allocateCurrentBuffer();
+                allocateCurrentBuffer(length);
             }
             int readLength = min(length, currentBuffer.length - currentBufferPosition);
             content.get(currentBuffer, currentBufferPosition, readLength);
@@ -72,13 +75,25 @@ class BufferingResponseListener
     @Override
     public synchronized InputStream onComplete()
     {
-        return new GatheringByteArrayInputStream(buffers, size);
+        if (usePool) {
+            result = new ConcatenatedByteArrayInputStream(buffers, size , null);
+        }
+        else {
+            result = new GatheringByteArrayInputStream(buffers, size);
+        }
+        return result;
     }
 
-    private synchronized void allocateCurrentBuffer()
+    public InputStream getInputStream()
+    {
+        checkState(result != null);
+        return result;
+    }
+    
+    private synchronized void allocateCurrentBuffer(int length)
     {
         checkState(currentBufferPosition >= currentBuffer.length, "there is still remaining space in currentBuffer");
-        int size = (int) min(BUFFER_MAX_BYTES, max(2 * currentBuffer.length, BUFFER_MIN_BYTES));
+        int size = (int) min(BUFFER_MAX_BYTES, max(length, max(2 * currentBuffer.length, BUFFER_MIN_BYTES)));
         currentBuffer = new byte[size];
         buffers.add(currentBuffer);
         currentBufferPosition = 0;

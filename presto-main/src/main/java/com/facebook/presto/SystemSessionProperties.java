@@ -128,7 +128,8 @@ public final class SystemSessionProperties
     public static final String DEFAULT_FILTER_FACTOR_ENABLED = "default_filter_factor_enabled";
     public static final String PUSH_LIMIT_THROUGH_OUTER_JOIN = "push_limit_through_outer_join";
     public static final String LEGACY_MAP_SUBSCRIPT = "legacy_map_subscript";
-
+    public static final String ZERO_COPY_EXCHANGE_ENABLED = "zero_copy_exchange_enabled";
+    
     private final List<PropertyMetadata<?>> sessionProperties;
 
     public SystemSessionProperties()
@@ -617,7 +618,12 @@ public final class SystemSessionProperties
                                 LEGACY_MAP_SUBSCRIPT,
                         "Treat missing map subscripts as if the value were null",
                         featuresConfig.isLegacyMapSubscript(),
-                        false));
+                                false),
+                booleanProperty(
+                                ZERO_COPY_EXCHANGE_ENABLED,
+                                "Use garbage-free ExchangeOperator.",
+                                true,
+                                false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -1048,5 +1054,10 @@ public final class SystemSessionProperties
     public static boolean isLegacyMapSubscript(Session session)
     {
         return session.getSystemProperty(LEGACY_MAP_SUBSCRIPT, Boolean.class);
+    }
+
+    public static boolean isZeroCopyExchangeEnabled(Session session)
+    {
+        return session.getSystemProperty(ZERO_COPY_EXCHANGE_ENABLED, Boolean.class);
     }
 }
