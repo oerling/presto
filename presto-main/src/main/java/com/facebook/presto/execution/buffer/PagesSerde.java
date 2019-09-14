@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.execution.buffer;
 
+import com.facebook.presto.operator.ConcatenatedByteArrayInputStream;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spiller.SpillCipher;
@@ -104,7 +105,12 @@ public class PagesSerde
     public Page deserialize(SerializedPage serializedPage)
     {
         checkArgument(serializedPage != null, "serializedPage is null");
-
+        if (!decompressor.isPresent() || COMPRESSED.isSet(serializedPage.getPageCodecMarkers())) {
+            ConcatenatedByteArrayInputStream stream = serializedPage.getStream();
+            if (stream != null) {
+                return readRawPage(serializedPage.getPositionCount(), stream, blockEncodingSerde);
+            }
+        }
         Slice slice = serializedPage.getSlice();
 
         if (ENCRYPTED.isSet(serializedPage.getPageCodecMarkers())) {

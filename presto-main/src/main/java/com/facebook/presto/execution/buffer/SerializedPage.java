@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.execution.buffer;
 
+import com.facebook.presto.operator.ConcatenatedByteArrayInputStream;
 import io.airlift.slice.Slice;
 import org.openjdk.jol.info.ClassLayout;
 
@@ -20,6 +21,7 @@ import static com.facebook.presto.execution.buffer.PageCodecMarker.COMPRESSED;
 import static com.facebook.presto.execution.buffer.PageCodecMarker.ENCRYPTED;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
 public class SerializedPage
@@ -27,6 +29,7 @@ public class SerializedPage
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(SerializedPage.class).instanceSize();
 
     private final Slice slice;
+    private final ConcatenatedByteArrayInputStream stream;
     private final int positionCount;
     private final int uncompressedSizeInBytes;
     private final byte pageCodecMarkers;
@@ -34,6 +37,7 @@ public class SerializedPage
     public SerializedPage(Slice slice, byte pageCodecMarkers, int positionCount, int uncompressedSizeInBytes)
     {
         this.slice = requireNonNull(slice, "slice is null");
+        this.stream = null;
         this.positionCount = positionCount;
         checkArgument(uncompressedSizeInBytes >= 0, "uncompressedSizeInBytes is negative");
         this.uncompressedSizeInBytes = uncompressedSizeInBytes;
@@ -49,9 +53,19 @@ public class SerializedPage
         }
     }
 
+    public SerializedPage(ConcatenatedByteArrayInputStream stream, byte pageCodecMarkers, int positionCount, int uncompressedSizeInBytes)
+    {
+        this.stream = requireNonNull(stream);
+        this.slice = null;
+        this.pageCodecMarkers = pageCodecMarkers;
+        this.positionCount = positionCount;
+        checkArgument(uncompressedSizeInBytes >= 0, "uncompressedSizeInBytes is negative");
+        this.uncompressedSizeInBytes = uncompressedSizeInBytes;
+    }
+
     public int getSizeInBytes()
     {
-        return slice.length();
+        return slice != null ? slice.length() : toIntExact(stream.length());
     }
 
     public int getUncompressedSizeInBytes()
@@ -61,7 +75,7 @@ public class SerializedPage
 
     public long getRetainedSizeInBytes()
     {
-        return INSTANCE_SIZE + slice.getRetainedSize();
+        return INSTANCE_SIZE + (slice != null ? slice.getRetainedSize() : stream.length());
     }
 
     public int getPositionCount()
@@ -72,6 +86,11 @@ public class SerializedPage
     public Slice getSlice()
     {
         return slice;
+    }
+
+    ConcatenatedByteArrayInputStream getStream()
+    {
+        return stream;
     }
 
     public byte getPageCodecMarkers()

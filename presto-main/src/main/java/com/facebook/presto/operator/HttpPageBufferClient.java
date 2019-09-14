@@ -42,6 +42,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
+import java.io.InputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -143,6 +144,7 @@ public final class HttpPageBufferClient
     private final AtomicInteger requestsFailed = new AtomicInteger();
 
     private final Executor pageBufferClientCallbackExecutor;
+    private boolean useZeroCopy;
 
     public HttpPageBufferClient(
             HttpClient httpClient,
@@ -152,9 +154,10 @@ public final class HttpPageBufferClient
             URI location,
             ClientCallback clientCallback,
             ScheduledExecutorService scheduler,
-            Executor pageBufferClientCallbackExecutor)
+            Executor pageBufferClientCallbackExecutor,
+            boolean useZeroCopy)
     {
-        this(httpClient, maxResponseSize, maxErrorDuration, acknowledgePages, location, clientCallback, scheduler, Ticker.systemTicker(), pageBufferClientCallbackExecutor);
+        this(httpClient, maxResponseSize, maxErrorDuration, acknowledgePages, location, clientCallback, scheduler, Ticker.systemTicker(), pageBufferClientCallbackExecutor, useZeroCopy);
     }
 
     public HttpPageBufferClient(
@@ -166,7 +169,8 @@ public final class HttpPageBufferClient
             ClientCallback clientCallback,
             ScheduledExecutorService scheduler,
             Ticker ticker,
-            Executor pageBufferClientCallbackExecutor)
+            Executor pageBufferClientCallbackExecutor,
+                                boolean useZeroCopy)
     {
         this.httpClient = requireNonNull(httpClient, "httpClient is null");
         this.maxResponseSize = requireNonNull(maxResponseSize, "maxResponseSize is null");
@@ -178,6 +182,7 @@ public final class HttpPageBufferClient
         requireNonNull(maxErrorDuration, "maxErrorDuration is null");
         requireNonNull(ticker, "ticker is null");
         this.backoff = new Backoff(maxErrorDuration, ticker);
+        this.useZeroCopy = useZeroCopy;
     }
 
     public synchronized PageBufferClientStatus getStatus()
@@ -297,11 +302,12 @@ public final class HttpPageBufferClient
     private synchronized void sendGetResults()
     {
         URI uri = HttpUriBuilder.uriBuilderFrom(location).appendPath(String.valueOf(token)).build();
+        BufferingResponseListener responseListener = new BufferingResponseListener(useZeroCopy);
         HttpResponseFuture<PagesResponse> resultFuture = httpClient.executeAsync(
                 prepareGet()
                         .setHeader(PRESTO_MAX_SIZE, maxResponseSize.toString())
                         .setUri(uri).build(),
-                new PageResponseHandler());
+                new PageResponseHandler(responseListener, useZeroCopy), responseListener);
 
         future = resultFuture;
         Futures.addCallback(resultFuture, new FutureCallback<PagesResponse>()
@@ -358,8 +364,7 @@ public final class HttpPageBufferClient
                                 }
                                 return null;
                             }
-                            },
-                                new BufferingResponseListener(false));
+                            });
                     }
                 }
                 catch (PrestoException e) {
@@ -540,6 +545,15 @@ public final class HttpPageBufferClient
     public static class PageResponseHandler
             implements ResponseHandler<PagesResponse, RuntimeException>
     {
+        private final BufferingResponseListener responseListener;
+        private final boolean useZeroCopy;
+
+        PageResponseHandler(BufferingResponseListener responseListener, boolean useZeroCopy)
+        {
+            this.responseListener = responseListener;
+            this.useZeroCopy = useZeroCopy;
+        }
+
         @Override
         public PagesResponse handleException(Request request, Exception exception)
         {
@@ -590,8 +604,16 @@ public final class HttpPageBufferClient
                 long nextToken = getNextToken(response);
                 boolean complete = getComplete(response);
 
-                try (SliceInput input = new InputStreamSliceInput(response.getInputStream())) {
-                    List<SerializedPage> pages = ImmutableList.copyOf(readSerializedPages(input));
+                try (InputStream input = useZeroCopy ? responseListener.getInputStream() : response.getInputStream()) {
+                    List<SerializedPage> pages;
+                    if (input instanceof ConcatenatedByteArrayInputStream) {
+                        ConcatenatedByteArrayInputStream byteArrayInput = (ConcatenatedByteArrayInputStream)input;
+                        pages = ImmutableList.copyOf(readSerializedPages(byteArrayInput));
+                        byteArrayInput.setFreeAfterSubstreamsFinish();
+                    }
+                    else {
+                        pages = ImmutableList.copyOf(readSerializedPages(new InputStreamSliceInput(input)));
+                    }
                     return createPagesResponse(taskInstanceId, token, nextToken, pages, complete);
                 }
                 catch (IOException e) {
@@ -667,7 +689,7 @@ public final class HttpPageBufferClient
         private final long nextToken;
         private final List<SerializedPage> pages;
         private final boolean clientComplete;
-
+        
         private PagesResponse(String taskInstanceId, long token, long nextToken, Iterable<SerializedPage> pages, boolean clientComplete)
         {
             this.taskInstanceId = taskInstanceId;

@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.execution.buffer;
 
+import com.facebook.presto.operator.ConcatenatedByteArrayInputStream;
+
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
@@ -69,8 +71,19 @@ public class PagesSerdeUtil
         byte codecMarker = sliceInput.readByte();
         int uncompressedSizeInBytes = sliceInput.readInt();
         int sizeInBytes = sliceInput.readInt();
-        Slice slice = sliceInput.readSlice(toIntExact((sizeInBytes)));
-        return new SerializedPage(slice, codecMarker, positionCount, uncompressedSizeInBytes);
+        if (sliceInput instanceof ConcatenatedByteArrayInputStream) {
+            ConcatenatedByteArrayInputStream byteArrayInput = (ConcatenatedByteArrayInputStream) sliceInput;
+            ConcatenatedByteArrayInputStream substream = byteArrayInput.getSubstream(byteArrayInput.position() + uncompressedSizeInBytes);
+            substream.setFreeAfterRead();
+            substream.setPosition(byteArrayInput.position());
+            SerializedPage result = new SerializedPage(substream, codecMarker, positionCount, uncompressedSizeInBytes);
+            byteArrayInput.skip(toIntExact((sizeInBytes)));
+            return result;
+        }
+        else {
+            Slice slice = sliceInput.readSlice(toIntExact((sizeInBytes)));
+            return new SerializedPage(slice, codecMarker, positionCount, uncompressedSizeInBytes);
+        }
     }
 
     public static long writeSerializedPages(SliceOutput sliceOutput, Iterable<SerializedPage> pages)

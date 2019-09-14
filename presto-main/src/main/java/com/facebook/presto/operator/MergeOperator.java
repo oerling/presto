@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 package com.facebook.presto.operator;
-
+import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.execution.buffer.PagesSerde;
 import com.facebook.presto.execution.buffer.PagesSerdeFactory;
 import com.facebook.presto.metadata.Split;
@@ -160,7 +160,7 @@ public class MergeOperator
 
         RemoteSplit remoteSplit = (RemoteSplit) split.getConnectorSplit();
         ExchangeClient exchangeClient = closer.register(taskExchangeClientManager.createExchangeClient(operatorContext.localSystemMemoryContext()));
-        exchangeClient.addLocation(remoteSplit.getLocation(), remoteSplit.getRemoteSourceTaskId());
+        exchangeClient.addLocation(remoteSplit.getLocation(), remoteSplit.getRemoteSourceTaskId(), SystemSessionProperties.isZeroCopyExchangeEnabled(operatorContext.getSession()));
         exchangeClient.noMoreLocations();
         pageProducers.add(exchangeClient.pages()
                 .map(serializedPage -> {

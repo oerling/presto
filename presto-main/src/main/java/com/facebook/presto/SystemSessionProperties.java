@@ -133,7 +133,8 @@ public final class SystemSessionProperties
     public static final String TABLE_WRITER_MERGE_OPERATOR_ENABLED = "table_writer_merge_operator_enabled";
     public static final String CONCURRENT_WRITES_TO_PARTITIONED_TABLE_ENABLED = "concurrent_writes_to_partitioned_table_enabled";
     public static final String OPTIMIZE_FULL_OUTER_JOIN_WITH_COALESCE = "optimize_full_outer_join_with_coalesce";
-
+    public static final String ZERO_COPY_EXCHANGE_ENABLED = "zero_copy_exchange_enabled";
+    
     private final List<PropertyMetadata<?>> sessionProperties;
 
     public SystemSessionProperties()
@@ -644,7 +645,12 @@ public final class SystemSessionProperties
                         OPTIMIZE_FULL_OUTER_JOIN_WITH_COALESCE,
                         "optimize partition properties for queries using COALESCE + FULL OUTER JOIN",
                         featuresConfig.isOptimizeFullOuterJoinWithCoalesce(),
-                        false));
+                        false),
+                booleanProperty(
+                                ZERO_COPY_EXCHANGE_ENABLED,
+                                "Use garbage-free ExchangeOperator.",
+                                true,
+                                false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -1095,5 +1101,10 @@ public final class SystemSessionProperties
     public static boolean isOptimizeFullOuterJoinWithCoalesce(Session session)
     {
         return session.getSystemProperty(OPTIMIZE_FULL_OUTER_JOIN_WITH_COALESCE, Boolean.class);
+    }
+
+    public static boolean isZeroCopyExchangeEnabled(Session session)
+    {
+        return session.getSystemProperty(ZERO_COPY_EXCHANGE_ENABLED, Boolean.class);
     }
 }
