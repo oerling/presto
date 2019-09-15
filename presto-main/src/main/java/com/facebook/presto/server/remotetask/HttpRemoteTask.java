@@ -284,7 +284,7 @@ public final class HttpRemoteTask
                     partitionedSplitCountTracker.setPartitionedSplitCount(getPartitionedSplitCount());
                     updateSplitQueueSpace();
                 }
-                ClusterState.newStatus(newStatus);
+                ClusterState.update(newStatus);
                 });
 
             partitionedSplitCountTracker.setPartitionedSplitCount(getPartitionedSplitCount());
