@@ -16,14 +16,18 @@ package com.facebook.presto.execution.scheduler;
 import com.facebook.presto.execution.TaskStatus;
 import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
+import com.facebook.presto.sql.planner.SubPlan;
 
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-class ClusterState
+public class ClusterState
 {
 
-    private static executor = Executors.newFixedThreadPool(1);
+    private static ExecutorService executor = Executors.newFixedThreadPool(1);
 
     private static final ClusterState instance = new ClusterState();
 
@@ -32,25 +36,28 @@ class ClusterState
     /**
      * 
      */
-    public static void update(TaskStatus state)
+    public static void update(TaskStatus status)
     {
-        executor.submit(() -> newStatus(status));
+        executor.submit(() -> instance.newStatus(status));
     }
 
     private void newStatus(TaskStatus status)
     {
+        NodeState node = nodeStates.computeIfAbsent(status.getNodeId(), id -> new NodeState(id));
     }
 
-    public List<InternalNode> assignSplitLocations(List<Split>)
+    public List<InternalNode> assignSplitLocations(List<Split> splits)
     {
         return null;
     }
 
-    public void schedule(String queryId, List<StageShape> stages)
+    public void schedule(String queryId, SubPlan subPlan)
     {
     }
 
-    public static History
+    
+    
+    public static class ReservationForecast
     {
         long initialTime;
         long[] times;
@@ -63,21 +70,32 @@ class ClusterState
 
     class NodeState
     {
-        // The sum of the final sizes of everything on this node.
-        long totalReservation;
-        Map<String, QueryState> queryStates;
+        // The sum of the forecast final sizes of everything on this node.
+        private long totalReservation;
+        private Map<String, QueryState> queryStates = new HashMap();
+        NodeState(NodeId nodeId)
+        {
+        }
+
+        long update(Status status, long now)
+        {
+            String queryId = status.getTaskId().getQueryId();
+            long delta = queryStates.computeIfAbsent(queryId, ignored -> new QueryState(queryId)).update(status);
+            totalReservation += delta;
+            return delta;
+        }
     }
 
     class QueryState
     {
-        long totalReservation;
-        Map<String, TaskReservation> taskStates;
+        private long totalReservation;
+        private Map<String, ReservationForecast> forecasts;
+        
+        long update(TaskStatus status, long now)
+        {
+            long delta = forecasts.computeIfAbsent(status.getTaskId().getId(), ignored -> new ReservationForecast(status)).update(status);
+            totalReservation += delta;
+            return delta;
+        }
     }
-
-    class TaskReservation
-    {
-        History history;
-    }
-
-
 }
