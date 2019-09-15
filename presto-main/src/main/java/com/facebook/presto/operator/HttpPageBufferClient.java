@@ -689,7 +689,7 @@ public final class HttpPageBufferClient
         private final long nextToken;
         private final List<SerializedPage> pages;
         private final boolean clientComplete;
-        
+
         private PagesResponse(String taskInstanceId, long token, long nextToken, Iterable<SerializedPage> pages, boolean clientComplete)
         {
             this.taskInstanceId = taskInstanceId;

@@ -25,7 +25,7 @@ import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
-
+import static com.google.common.base.Preconditions.checkArgument;
 import static io.airlift.slice.SizeOf.SIZE_OF_DOUBLE;
 import static io.airlift.slice.SizeOf.SIZE_OF_FLOAT;
 import static io.airlift.slice.SizeOf.SIZE_OF_INT;
@@ -73,8 +73,10 @@ public final class ConcatenatedByteArrayInputStream
         }
         totalSize = size;
         this.allocator = allocator;
-        if (totalSize <= buffersSize - buffers.get(buffers.size()  - 1).length || totalSize > buffersSize) {
-            throw new IllegalArgumentException("totalSize is not an offset that falls within the last buffer.");
+        if (size == 0) {
+            checkArgument(buffers.size() == 0, "A length of 0 implies zero buffers");
+        }
+        else {checkArgument(totalSize >= buffersSize - buffers.get(buffers.size()  - 1).length && totalSize <= buffersSize, "totalSize is not an offset that falls within the last buffer.");
         }
         position = 0;
         currentBufferIndex = -1;

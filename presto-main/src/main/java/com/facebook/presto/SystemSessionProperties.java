@@ -134,7 +134,7 @@ public final class SystemSessionProperties
     public static final String CONCURRENT_WRITES_TO_PARTITIONED_TABLE_ENABLED = "concurrent_writes_to_partitioned_table_enabled";
     public static final String OPTIMIZE_FULL_OUTER_JOIN_WITH_COALESCE = "optimize_full_outer_join_with_coalesce";
     public static final String ZERO_COPY_EXCHANGE_ENABLED = "zero_copy_exchange_enabled";
-    
+
     private final List<PropertyMetadata<?>> sessionProperties;
 
     public SystemSessionProperties()

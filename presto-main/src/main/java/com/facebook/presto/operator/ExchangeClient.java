@@ -511,7 +511,7 @@ public class ExchangeClient
     {
         return offThreadCpuNanos;
     }
-    
+
         private static void closeQuietly(HttpPageBufferClient client)
     {
         try {

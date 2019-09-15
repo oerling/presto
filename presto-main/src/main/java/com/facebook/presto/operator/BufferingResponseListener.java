@@ -39,7 +39,7 @@ class BufferingResponseListener
     private static final long BUFFER_MAX_BYTES = new DataSize(1, MEGABYTE).toBytes();
     private static final long BUFFER_MIN_BYTES = new DataSize(1, KILOBYTE).toBytes();
     private InputStream result;
-    
+
     @GuardedBy("this")
     private byte[] currentBuffer = new byte[0];
     @GuardedBy("this")
@@ -89,7 +89,7 @@ class BufferingResponseListener
         checkState(result != null);
         return result;
     }
-    
+
     private synchronized void allocateCurrentBuffer(int length)
     {
         checkState(currentBufferPosition >= currentBuffer.length, "there is still remaining space in currentBuffer");
