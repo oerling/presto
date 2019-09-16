@@ -13,12 +13,16 @@
  */
 package com.facebook.presto.execution.scheduler;
 
+import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskStatus;
 import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
+import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.sql.planner.SubPlan;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
-import java.util.List;
+    import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -26,12 +30,12 @@ import java.util.concurrent.Executors;
 
 public class ClusterState
 {
-
     private static ExecutorService executor = Executors.newFixedThreadPool(1);
 
     private static final ClusterState instance = new ClusterState();
 
-    Map<InternalNode, NodeState> nodeStates = new HashMap();
+    Map<String, NodeState> nodeStates = new HashMap();
+    
     
     /**
      * 
@@ -46,11 +50,6 @@ public class ClusterState
         NodeState node = nodeStates.computeIfAbsent(status.getNodeId(), id -> new NodeState(id));
     }
 
-    public List<InternalNode> assignSplitLocations(List<Split> splits)
-    {
-        return null;
-    }
-
     public void schedule(String queryId, SubPlan subPlan)
     {
     }
@@ -59,6 +58,7 @@ public class ClusterState
     
     public static class ReservationForecast
     {
+        TaskId taskId;
         long initialTime;
         long[] times;
         long[] values;
@@ -66,21 +66,35 @@ public class ClusterState
         long forecastTime;
         long forecastValue;
         boolean isFinal;
+
+        ReservationForecast(TaskStatus status)
+        {
+        }
+
+        public long update(TaskStatus status, long now)
+        {
+            if (numValues == 0) {
+                initialTime = now;
+            }
+            return 0;
+        }
     }
 
     class NodeState
     {
+        String nodeId;
         // The sum of the forecast final sizes of everything on this node.
         private long totalReservation;
-        private Map<String, QueryState> queryStates = new HashMap();
-        NodeState(NodeId nodeId)
+        private Map<QueryId, QueryState> queryStates = new HashMap();
+        NodeState(String nodeId)
         {
+            this.nodeId = nodeId;
         }
 
-        long update(Status status, long now)
+        long update(TaskStatus status, long now)
         {
-            String queryId = status.getTaskId().getQueryId();
-            long delta = queryStates.computeIfAbsent(queryId, ignored -> new QueryState(queryId)).update(status);
+            QueryId queryId = status.getTaskId().getQueryId();
+            long delta = queryStates.computeIfAbsent(queryId, ignored -> new QueryState(queryId)).update(status, now);
             totalReservation += delta;
             return delta;
         }
@@ -88,12 +102,18 @@ public class ClusterState
 
     class QueryState
     {
+        private QueryId queryId;
         private long totalReservation;
-        private Map<String, ReservationForecast> forecasts;
+        private Int2ObjectMap<ReservationForecast> forecasts = new Int2ObjectOpenHashMap();
         
-        long update(TaskStatus status, long now)
+        QueryState(QueryId queryId)
         {
-            long delta = forecasts.computeIfAbsent(status.getTaskId().getId(), ignored -> new ReservationForecast(status)).update(status);
+            this.queryId = queryId;
+        }
+
+        public long update(TaskStatus status, long now)
+        {
+            long delta = forecasts.computeIfAbsent(status.getTaskId().getId(), ignored -> new ReservationForecast(status)).update(status, now);
             totalReservation += delta;
             return delta;
         }
