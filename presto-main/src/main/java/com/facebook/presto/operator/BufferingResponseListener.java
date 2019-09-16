@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
-import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -78,14 +77,14 @@ class BufferingResponseListener
             length -= readLength;
             currentBufferPosition += readLength;
         }
-        callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
+        callbackCpuTime.addAndGet(Math.max(0, THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime));
     }
 
     @Override
     public synchronized InputStream onComplete()
     {
         if (usePool) {
-            result = new ConcatenatedByteArrayInputStream(buffers, size , null);
+            result = new ConcatenatedByteArrayInputStream(buffers, size, null);
         }
         else {
             result = new GatheringByteArrayInputStream(buffers, size);

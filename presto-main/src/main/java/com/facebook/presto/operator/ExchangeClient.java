@@ -513,7 +513,7 @@ public class ExchangeClient
         return callbackCpu;
     }
 
-        private static void closeQuietly(HttpPageBufferClient client)
+    private static void closeQuietly(HttpPageBufferClient client)
     {
         try {
             client.close();

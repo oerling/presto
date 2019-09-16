@@ -177,7 +177,7 @@ public class ExchangeOperator
     public Page getOutput()
     {
         SerializedPage page = exchangeClient.pollPage();
-        AtomicLong offThreadCpu = exchangeClient.getCallbackCpu(); 
+        AtomicLong offThreadCpu = exchangeClient.getCallbackCpu();
         long nanos = offThreadCpu.get();
         offThreadCpu.addAndGet(-nanos);
         operatorContext.recordOffThreadCpu(nanos);

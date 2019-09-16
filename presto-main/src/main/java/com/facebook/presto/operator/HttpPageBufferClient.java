@@ -31,7 +31,6 @@ import io.airlift.http.client.ResponseHandler;
 import io.airlift.http.client.ResponseTooLargeException;
 import io.airlift.log.Logger;
 import io.airlift.slice.InputStreamSliceInput;
-import io.airlift.slice.SliceInput;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 import org.joda.time.DateTime;
@@ -42,8 +41,8 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
-import java.io.InputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
@@ -617,7 +616,7 @@ public final class HttpPageBufferClient
                 try (InputStream input = useZeroCopy ? responseListener.getInputStream() : response.getInputStream()) {
                     List<SerializedPage> pages;
                     if (input instanceof ConcatenatedByteArrayInputStream) {
-                        ConcatenatedByteArrayInputStream byteArrayInput = (ConcatenatedByteArrayInputStream)input;
+                        ConcatenatedByteArrayInputStream byteArrayInput = (ConcatenatedByteArrayInputStream) input;
                         pages = ImmutableList.copyOf(readSerializedPages(byteArrayInput));
                         byteArrayInput.setFreeAfterSubstreamsFinish();
                     }
@@ -634,8 +633,7 @@ public final class HttpPageBufferClient
                 throw new PageTransportErrorException("Error fetching " + request.getUri().toASCIIString(), e);
             }
             finally {
-                callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
-
+                callbackCpuTime.addAndGet(Math.max(0, THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime));
             }
         }
 
