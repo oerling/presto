@@ -79,7 +79,7 @@ public class ExchangeClient
     private final boolean acknowledgePages;
     private final HttpClient httpClient;
     private final ScheduledExecutorService scheduler;
-    private final AtomicLong offThreadCpuNanos = new AtomicLong();
+    private final AtomicLong callbackCpu = new AtomicLong();
     private boolean useZeroCopy;
 
     @GuardedBy("this")
@@ -195,6 +195,7 @@ public class ExchangeClient
                 new ExchangeClientCallback(),
                 scheduler,
                 pageBufferClientCallbackExecutor,
+                callbackCpu,
                 useZeroCopy);
         allClients.put(location, client);
         checkState(taskIdToLocationMap.put(remoteSourceTaskId, location) == null, "Duplicate remoteSourceTaskId: " + remoteSourceTaskId);
@@ -507,9 +508,9 @@ public class ExchangeClient
         }
     }
 
-    public AtomicLong getOffThreadCpuNanos()
+    public AtomicLong getCallbackCpu()
     {
-        return offThreadCpuNanos;
+        return callbackCpu;
     }
 
         private static void closeQuietly(HttpPageBufferClient client)

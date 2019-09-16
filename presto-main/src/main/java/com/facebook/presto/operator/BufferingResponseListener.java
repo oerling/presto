@@ -22,9 +22,12 @@ import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.InputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
@@ -36,8 +39,10 @@ import static java.lang.Math.min;
 class BufferingResponseListener
         implements ResponseListener
 {
-    private static final long BUFFER_MAX_BYTES = new DataSize(1, MEGABYTE).toBytes();
+    private static final long BUFFER_MAX_BYTES = new DataSize(128, KILOBYTE).toBytes();
     private static final long BUFFER_MIN_BYTES = new DataSize(1, KILOBYTE).toBytes();
+    private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
+
     private InputStream result;
 
     @GuardedBy("this")
@@ -48,16 +53,19 @@ class BufferingResponseListener
     private List<byte[]> buffers = new ArrayList<>();
     @GuardedBy("this")
     private long size;
+    private final AtomicLong callbackCpuTime;
     private boolean usePool;
 
-    public BufferingResponseListener(boolean usePool)
+    public BufferingResponseListener(AtomicLong callbackCpuTime, boolean usePool)
     {
+        this.callbackCpuTime = callbackCpuTime;
         this.usePool = usePool;
     }
 
     @Override
     public synchronized void onContent(ByteBuffer content)
     {
+        long startCpuTime = THREAD_MX_BEAN.getCurrentThreadCpuTime();
         int length = content.remaining();
         size += length;
 
@@ -70,6 +78,7 @@ class BufferingResponseListener
             length -= readLength;
             currentBufferPosition += readLength;
         }
+        callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
     }
 
     @Override

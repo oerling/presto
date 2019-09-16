@@ -45,6 +45,8 @@ import java.io.Closeable;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.net.URI;
 import java.util.List;
 import java.util.OptionalInt;
@@ -90,6 +92,7 @@ public final class HttpPageBufferClient
         implements Closeable
 {
     private static final Logger log = Logger.get(HttpPageBufferClient.class);
+    private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
 
     /**
      * For each request, the addPage method will be called zero or more times,
@@ -145,6 +148,7 @@ public final class HttpPageBufferClient
 
     private final Executor pageBufferClientCallbackExecutor;
     private boolean useZeroCopy;
+    private final AtomicLong callbackCpuTime;
 
     public HttpPageBufferClient(
             HttpClient httpClient,
@@ -155,9 +159,10 @@ public final class HttpPageBufferClient
             ClientCallback clientCallback,
             ScheduledExecutorService scheduler,
             Executor pageBufferClientCallbackExecutor,
+            AtomicLong callbackCpuTime,
             boolean useZeroCopy)
     {
-        this(httpClient, maxResponseSize, maxErrorDuration, acknowledgePages, location, clientCallback, scheduler, Ticker.systemTicker(), pageBufferClientCallbackExecutor, useZeroCopy);
+        this(httpClient, maxResponseSize, maxErrorDuration, acknowledgePages, location, clientCallback, scheduler, Ticker.systemTicker(), pageBufferClientCallbackExecutor, callbackCpuTime, useZeroCopy);
     }
 
     public HttpPageBufferClient(
@@ -170,7 +175,8 @@ public final class HttpPageBufferClient
             ScheduledExecutorService scheduler,
             Ticker ticker,
             Executor pageBufferClientCallbackExecutor,
-                                boolean useZeroCopy)
+            AtomicLong callbackCpuTime,
+            boolean useZeroCopy)
     {
         this.httpClient = requireNonNull(httpClient, "httpClient is null");
         this.maxResponseSize = requireNonNull(maxResponseSize, "maxResponseSize is null");
@@ -182,6 +188,7 @@ public final class HttpPageBufferClient
         requireNonNull(maxErrorDuration, "maxErrorDuration is null");
         requireNonNull(ticker, "ticker is null");
         this.backoff = new Backoff(maxErrorDuration, ticker);
+        this.callbackCpuTime = requireNonNull(callbackCpuTime, "callbackCpuTime is null");
         this.useZeroCopy = useZeroCopy;
     }
 
@@ -302,12 +309,12 @@ public final class HttpPageBufferClient
     private synchronized void sendGetResults()
     {
         URI uri = HttpUriBuilder.uriBuilderFrom(location).appendPath(String.valueOf(token)).build();
-        BufferingResponseListener responseListener = new BufferingResponseListener(useZeroCopy);
+        BufferingResponseListener responseListener = new BufferingResponseListener(callbackCpuTime, useZeroCopy);
         HttpResponseFuture<PagesResponse> resultFuture = httpClient.executeAsync(
                 prepareGet()
                         .setHeader(PRESTO_MAX_SIZE, maxResponseSize.toString())
                         .setUri(uri).build(),
-                new PageResponseHandler(responseListener, useZeroCopy), responseListener);
+                new PageResponseHandler(responseListener, callbackCpuTime, useZeroCopy), responseListener);
 
         future = resultFuture;
         Futures.addCallback(resultFuture, new FutureCallback<PagesResponse>()
@@ -546,11 +553,13 @@ public final class HttpPageBufferClient
             implements ResponseHandler<PagesResponse, RuntimeException>
     {
         private final BufferingResponseListener responseListener;
+        private final AtomicLong callbackCpuTime;
         private final boolean useZeroCopy;
 
-        PageResponseHandler(BufferingResponseListener responseListener, boolean useZeroCopy)
+        PageResponseHandler(BufferingResponseListener responseListener, AtomicLong callbackCpuTime, boolean useZeroCopy)
         {
             this.responseListener = responseListener;
+            this.callbackCpuTime = callbackCpuTime;
             this.useZeroCopy = useZeroCopy;
         }
 
@@ -563,6 +572,7 @@ public final class HttpPageBufferClient
         @Override
         public PagesResponse handle(Request request, Response response)
         {
+            long startCpuTime = THREAD_MX_BEAN.getCurrentThreadCpuTime();
             try {
                 // no content means no content was created within the wait period, but query is still ok
                 // if job is finished, complete is set in the response
@@ -622,6 +632,10 @@ public final class HttpPageBufferClient
             }
             catch (PageTransportErrorException e) {
                 throw new PageTransportErrorException("Error fetching " + request.getUri().toASCIIString(), e);
+            }
+            finally {
+                callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
+
             }
         }
 

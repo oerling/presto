@@ -15,8 +15,8 @@
 package com.facebook.presto.operator;
 
 import io.airlift.slice.ByteArrays;
-import io.airlift.slice.Slice;
 import io.airlift.slice.FixedLengthSliceInput;
+import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import org.openjdk.jol.info.ClassLayout;
 
@@ -34,10 +34,12 @@ import static io.airlift.slice.SizeOf.SIZE_OF_SHORT;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
-// Implements a seekable SliceInput over a list of byte[]. When
-// freeAfterRead is set, when a read reaches or skips past the end of
-// a byte array, the the reference of the array is dropped and it is
-// returned to an allocator.
+/**
+ * Implements a seekable SliceInput over a list of byte[]. When
+ * freeAfterRead is set, when a read reaches or skips past the end of
+ * a byte array, the the reference of the array is dropped and it is
+ * returned to an allocator.
+ */
 public final class ConcatenatedByteArrayInputStream
         extends FixedLengthSliceInput
 {
