@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.operator;
 import com.facebook.presto.spi.memory.Caches;
-import com.facebook.presto.spi.memory.Caches;
 import io.airlift.http.client.GatheringByteArrayInputStream;
 import io.airlift.http.client.ResponseListener;
 import io.airlift.units.DataSize;
