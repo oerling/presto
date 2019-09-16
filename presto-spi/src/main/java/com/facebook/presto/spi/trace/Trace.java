@@ -34,7 +34,7 @@ public class Trace
     public static void readTraceSettings()
     {
         long now = System.nanoTime();
-        if (now - traceReadTime  < 1000000000) {
+        if (now - traceReadTime < 1000000000) {
             return;
         }
         traceReadTime = now;
@@ -45,12 +45,12 @@ public class Trace
             for (String option : lines) {
                 builder.append(option);
             }
-        trace = builder.toString();
-        printTime = trace.contains("time");
+            trace = builder.toString();
+            printTime = trace.contains("time");
         }
         catch (Exception e) {
             trace = "";
-            synchronized(Trace.class) {
+            synchronized (Trace.class) {
                 if (traceWriter != null) {
                     try {
                         traceWriter.flush();
@@ -77,7 +77,7 @@ public class Trace
                 if (traceWriter == null) {
                     traceWriter = Files.newBufferedWriter(Paths.get("/tmp/presto.out"), CREATE);
                     if (printTime) {
-                        traceWriter.append("Trace" );
+                        traceWriter.append("Trace");
                         traceWriter.append(trace);
                         traceWriter.newLine();
                     }
@@ -92,8 +92,8 @@ public class Trace
                 traceWriter.newLine();
             }
             catch (Exception e) {
-            traceWriter = null;
-        }
+                traceWriter = null;
+            }
         }
     }
 
