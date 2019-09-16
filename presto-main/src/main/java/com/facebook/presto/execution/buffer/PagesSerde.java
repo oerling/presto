@@ -87,6 +87,9 @@ public class PagesSerde
             if (stream != null) {
                 return readRawPage(serializedPage.getPositionCount(), stream, blockEncodingSerde);
             }
+            else {
+                return readRawPage(serializedPage.getPositionCount(), serializedPage.getSlice().getInput(), blockEncodingSerde);
+            }
         }
         Slice slice = serializedPage.getSlice();
 

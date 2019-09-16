@@ -12,8 +12,9 @@
  * limitations under the License.
  */
 package com.facebook.presto.operator;
-
-//import com.facebook.presto.spi.block.ConcatenatedByteArrayInputStream;
+import com.facebook.presto.spi.memory.ArrayPool;
+import com.facebook.presto.spi.memory.Caches;
+import com.facebook.presto.spi.memory.Caches;
 import io.airlift.http.client.GatheringByteArrayInputStream;
 import io.airlift.http.client.ResponseListener;
 import io.airlift.units.DataSize;
@@ -42,7 +43,8 @@ class BufferingResponseListener
     private static final long BUFFER_MAX_BYTES = new DataSize(128, KILOBYTE).toBytes();
     private static final long BUFFER_MIN_BYTES = new DataSize(1, KILOBYTE).toBytes();
     private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
-
+    private static final ArrayPoolAllocator ALLOCATOR = new ArrayPoolAllocator();
+    
     private InputStream result;
     
     @GuardedBy("this")
@@ -78,14 +80,14 @@ class BufferingResponseListener
             length -= readLength;
             currentBufferPosition += readLength;
         }
-        callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
+        callbackCpuTime.addAndGet(Math.max(0, THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime));
     }
 
     @Override
     public synchronized InputStream onComplete()
     {
         if (usePool) {
-            result = new ConcatenatedByteArrayInputStream(buffers, size , null);
+            result = new ConcatenatedByteArrayInputStream(buffers, size , ALLOCATOR);
         }
         else {
             result = new GatheringByteArrayInputStream(buffers, size);
@@ -102,9 +104,25 @@ class BufferingResponseListener
     private synchronized void allocateCurrentBuffer(int length)
     {
         checkState(currentBufferPosition >= currentBuffer.length, "there is still remaining space in currentBuffer");
-        int size = (int) min(BUFFER_MAX_BYTES, max(length, max(2 * currentBuffer.length, BUFFER_MIN_BYTES)));
-        currentBuffer = new byte[size];
+        if (usePool) {
+            int size = (int) min(BUFFER_MAX_BYTES, max(length, max(2 * currentBuffer.length, BUFFER_MIN_BYTES))) - 128;
+            currentBuffer = Caches.getByteArrayPool().allocate(size);
+        }
+        else {
+            int size = (int) min(BUFFER_MAX_BYTES, max(length, max(2 * currentBuffer.length, BUFFER_MIN_BYTES)));
+            currentBuffer = new byte[size];
+        }
         buffers.add(currentBuffer);
         currentBufferPosition = 0;
+    }
+
+    private static class ArrayPoolAllocator
+            implements ConcatenatedByteArrayInputStream.Allocator
+    {
+        @Override
+            public void free(byte[] bytes)
+        {
+            Caches.getByteArrayPool().release(bytes);
+        }
     }
 }

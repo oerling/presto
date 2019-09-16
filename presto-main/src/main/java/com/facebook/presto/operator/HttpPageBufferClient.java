@@ -634,7 +634,7 @@ public final class HttpPageBufferClient
                 throw new PageTransportErrorException("Error fetching " + request.getUri().toASCIIString(), e);
             }
             finally {
-                callbackCpuTime.addAndGet(THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime);
+                callbackCpuTime.addAndGet(Math.max(0, THREAD_MX_BEAN.getCurrentThreadCpuTime() - startCpuTime));
 
             }
         }
