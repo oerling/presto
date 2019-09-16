@@ -44,6 +44,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -109,7 +110,8 @@ public class TestHttpPageBufferClient
                 callback,
                 scheduler,
                 pageBufferClientCallbackExecutor,
-                false);
+                new AtomicLong(),
+                                                               false);
 
         assertStatus(client, location, "queued", 0, 0, 0, 0, "not scheduled");
 
@@ -195,6 +197,7 @@ public class TestHttpPageBufferClient
                 callback,
                 scheduler,
                                                                pageBufferClientCallbackExecutor,
+                new AtomicLong(),
                 false);
 
         assertStatus(client, location, "queued", 0, 0, 0, 0, "not scheduled");
@@ -236,6 +239,7 @@ public class TestHttpPageBufferClient
                 callback,
                 scheduler,
                                                                pageBufferClientCallbackExecutor,
+                new AtomicLong(),
                 false);
 
         assertStatus(client, location, "queued", 0, 0, 0, 0, "not scheduled");
@@ -305,6 +309,7 @@ public class TestHttpPageBufferClient
                 callback,
                 scheduler,
                                                                pageBufferClientCallbackExecutor,
+                new AtomicLong(),
                 false);
 
         assertStatus(client, location, "queued", 0, 0, 0, 0, "not scheduled");
@@ -361,6 +366,7 @@ public class TestHttpPageBufferClient
                 scheduler,
                 ticker,
                                                                pageBufferClientCallbackExecutor,
+                new AtomicLong(),
                 false);
 
         assertStatus(client, location, "queued", 0, 0, 0, 0, "not scheduled");

@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.Closeable;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -176,6 +177,10 @@ public class ExchangeOperator
     public Page getOutput()
     {
         SerializedPage page = exchangeClient.pollPage();
+        AtomicLong offThreadCpu = exchangeClient.getCallbackCpu(); 
+        long nanos = offThreadCpu.get();
+        offThreadCpu.addAndGet(-nanos);
+        operatorContext.recordOffThreadCpu(nanos);
         if (page == null) {
             return null;
         }

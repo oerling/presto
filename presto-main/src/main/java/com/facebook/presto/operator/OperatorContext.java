@@ -190,6 +190,11 @@ public class OperatorContext
         }
     }
 
+    void recordOffThreadCpu(long nanos)
+    {
+        getOutputTiming.recordOffThreadCpu(nanos);
+    }
+    
     public void recordOutput(long sizeInBytes, long positions)
     {
         outputDataSize.update(sizeInBytes);

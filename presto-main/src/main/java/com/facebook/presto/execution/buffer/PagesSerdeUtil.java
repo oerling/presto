@@ -14,7 +14,6 @@
 package com.facebook.presto.execution.buffer;
 
 import com.facebook.presto.operator.ConcatenatedByteArrayInputStream;
-
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
