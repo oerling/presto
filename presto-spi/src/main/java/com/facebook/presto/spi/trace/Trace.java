@@ -29,6 +29,8 @@ public class Trace
     private static long openTimeMillis;
     private static boolean printTime;
     
+    private Trace() {}
+
     public static void readTraceSettings()
     {
         long now = System.nanoTime();
