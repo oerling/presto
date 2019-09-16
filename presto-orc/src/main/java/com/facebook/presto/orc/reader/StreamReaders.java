@@ -33,7 +33,7 @@ public final class StreamReaders
     private static String trace = "";
     private static long traceReadTime;
     private static BufferedWriter traceWriter;
-    
+
     public static StreamReader createStreamReader(
             StreamDescriptor streamDescriptor,
             DateTimeZone hiveStorageTimeZone,

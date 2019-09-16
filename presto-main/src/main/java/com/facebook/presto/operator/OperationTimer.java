@@ -131,7 +131,7 @@ class OperationTimer
         {
             this.cpuNanos.addAndGet(cpuNanos);
         }
-        
+
         @Override
         public String toString()
         {

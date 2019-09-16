@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 package com.facebook.presto.operator;
-import com.facebook.presto.spi.memory.ArrayPool;
 import com.facebook.presto.spi.memory.Caches;
 import com.facebook.presto.spi.memory.Caches;
 import io.airlift.http.client.GatheringByteArrayInputStream;
@@ -32,7 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
-import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -44,9 +42,9 @@ class BufferingResponseListener
     private static final long BUFFER_MIN_BYTES = new DataSize(1, KILOBYTE).toBytes();
     private static final ThreadMXBean THREAD_MX_BEAN = ManagementFactory.getThreadMXBean();
     private static final ArrayPoolAllocator ALLOCATOR = new ArrayPoolAllocator();
-    
+
     private InputStream result;
-    
+
     @GuardedBy("this")
     private byte[] currentBuffer = new byte[0];
     @GuardedBy("this")
@@ -87,7 +85,7 @@ class BufferingResponseListener
     public synchronized InputStream onComplete()
     {
         if (usePool) {
-            result = new ConcatenatedByteArrayInputStream(buffers, size , ALLOCATOR);
+            result = new ConcatenatedByteArrayInputStream(buffers, size, ALLOCATOR);
         }
         else {
             result = new GatheringByteArrayInputStream(buffers, size);
@@ -100,7 +98,7 @@ class BufferingResponseListener
         checkState(result != null);
         return result;
     }
-    
+
     private synchronized void allocateCurrentBuffer(int length)
     {
         checkState(currentBufferPosition >= currentBuffer.length, "there is still remaining space in currentBuffer");

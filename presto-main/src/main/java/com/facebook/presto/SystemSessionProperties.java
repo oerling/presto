@@ -129,7 +129,7 @@ public final class SystemSessionProperties
     public static final String PUSH_LIMIT_THROUGH_OUTER_JOIN = "push_limit_through_outer_join";
     public static final String LEGACY_MAP_SUBSCRIPT = "legacy_map_subscript";
     public static final String ZERO_COPY_EXCHANGE_ENABLED = "zero_copy_exchange_enabled";
-    
+
     private final List<PropertyMetadata<?>> sessionProperties;
 
     public SystemSessionProperties()
