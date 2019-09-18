@@ -383,11 +383,7 @@ public final class HiveSessionProperties
                 booleanProperty(
                         BLOCK_CACHE_ENABLED,
                         "Experimental: enable file block caching",
-<<<<<<< HEAD
-                        false,
-=======
                         hiveClientConfig.isBlockCacheEnabled(),
->>>>>>> bb691a2537... Added Hive config properties and caching of footers.
                         false),
                 integerProperty(
                         VIRTUAL_BUCKET_COUNT,

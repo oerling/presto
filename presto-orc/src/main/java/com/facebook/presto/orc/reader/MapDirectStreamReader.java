@@ -776,7 +776,6 @@ public class MapDirectStreamReader
         if (tracePruning) {
             Trace.trace("Map rows " + inputQualifyingSet.getPositionCount() + " total keys: " + innerQualifyingSet.getPositionCount() + " considered keys " + keyQualifyingSet.getPositionCount() +
                                 (positionalFilter != null ? " after value filter " + valueStreamReader.getOutputQualifyingSet().getPositionCount() : ""));
-                                
         }
         endScan(presentStream);
     }
