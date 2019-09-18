@@ -28,7 +28,7 @@ public class Trace
     private static BufferedWriter traceWriter;
     private static long openTimeMillis;
     private static boolean printTime;
-    
+
     private Trace() {}
 
     public static void readTraceSettings()
@@ -72,7 +72,7 @@ public class Trace
 
     public static void trace(String text)
     {
-        synchronized(Trace.class) {
+        synchronized (Trace.class) {
             try {
                 if (traceWriter == null) {
                     traceWriter = Files.newBufferedWriter(Paths.get("/tmp/presto.out"), CREATE);
