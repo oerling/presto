@@ -397,7 +397,7 @@ public class StripeReader
         int tailLength = toIntExact(stripe.getFooterLength());
         // read the footer
         if (orcDataSource.useCache()) {
-            try (FileCache.Entry entry = FileCache.get(orcDataSource, offset, tailLength)) {
+            try (FileCache.Entry entry = FileCache.get(orcDataSource, offset, tailLength, FileCache.getListener("stripe footer"), 5000)) {
                 try (InputStream inputStream = new OrcInputStream(orcDataSource.getId(), Slices.wrappedBuffer(entry.getBuffer(), 0, tailLength).getInput(), decompressor, systemMemoryUsage, tailLength)) {
                     return metadataReader.readStripeFooter(types, inputStream);
                 }

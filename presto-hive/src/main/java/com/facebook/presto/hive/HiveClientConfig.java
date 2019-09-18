@@ -165,6 +165,8 @@ public class HiveClientConfig
     private HiveCompressionCodec temporaryTableCompressionCodec = HiveCompressionCodec.SNAPPY;
 
     private boolean pushdownFilterEnabled;
+    private boolean blockCacheEnabled;
+    private DataSize blockCacheSize = new DataSize(10240, MEGABYTE);
 
     public int getMaxInitialSplits()
     {
@@ -1378,6 +1380,32 @@ public class HiveClientConfig
     public HiveClientConfig setPushdownFilterEnabled(boolean pushdownFilterEnabled)
     {
         this.pushdownFilterEnabled = pushdownFilterEnabled;
+        return this;
+    }
+
+    public boolean isBlockCacheEnabled()
+    {
+        return blockCacheEnabled;
+    }
+
+    @Config("hive.block-cache-enabled")
+    @ConfigDescription("Experimental: Enable using file block cache in queries")
+    public HiveClientConfig setBlockCacheEnabled(boolean blockCacheEnabled)
+    {
+        this.blockCacheEnabled = blockCacheEnabled;
+        return this;
+    }
+
+    public DataSize getBlockCacheSize()
+    {
+        return blockCacheSize;
+    }
+
+    @Config("hive.block-cache-size")
+    @ConfigDescription("Experimental: Set file block cache size")
+    public HiveClientConfig setBlockCacheSize(boolean pushdownFilterEnabled)
+    {
+        this.blockCacheSize = blockCacheSize;
         return this;
     }
 }
