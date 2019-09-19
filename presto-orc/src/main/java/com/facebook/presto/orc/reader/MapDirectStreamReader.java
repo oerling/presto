@@ -36,6 +36,7 @@ import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.block.IntArrayBlock;
 import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.block.VariableWidthBlock;
+import com.facebook.presto.spi.trace.Trace;
 import com.facebook.presto.spi.type.MapType;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.collect.ImmutableList;
@@ -142,7 +143,7 @@ public class MapDirectStreamReader
         this.streamDescriptor = requireNonNull(streamDescriptor, "stream is null");
         this.keyStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(0), hiveStorageTimeZone, systemMemoryContext);
         this.valueStreamReader = createStreamReader(streamDescriptor.getNestedStreams().get(1), hiveStorageTimeZone, systemMemoryContext);
-        tracePruning = StreamReaders.isTrace("prune");
+        tracePruning = Trace.isTrace("prune");
     }
 
     @Override
@@ -183,7 +184,7 @@ public class MapDirectStreamReader
             this.longSubscripts = longSubscripts.build();
         }
         if (tracePruning) {
-            StreamReaders.trace("Map keys to get: = " + this.longSubscripts.toString());
+            Trace.trace("Map keys to get: = " + this.longSubscripts.toString());
         }
     }
 
@@ -773,9 +774,8 @@ public class MapDirectStreamReader
             fixupOffsetsAfterNulls(lastElementOffset);
         }
         if (tracePruning) {
-            StreamReaders.trace("Map rows " + inputQualifyingSet.getPositionCount() + " total keys: " + innerQualifyingSet.getPositionCount() + " considered keys " + keyQualifyingSet.getPositionCount() +
+            Trace.trace("Map rows " + inputQualifyingSet.getPositionCount() + " total keys: " + innerQualifyingSet.getPositionCount() + " considered keys " + keyQualifyingSet.getPositionCount() +
                                 (positionalFilter != null ? " after value filter " + valueStreamReader.getOutputQualifyingSet().getPositionCount() : ""));
-
         }
         endScan(presentStream);
     }

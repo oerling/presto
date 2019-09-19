@@ -17,22 +17,11 @@ import com.facebook.presto.memory.context.AggregatedMemoryContext;
 import com.facebook.presto.orc.StreamDescriptor;
 import org.joda.time.DateTimeZone;
 
-import java.io.BufferedWriter;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.List;
-
-import static java.nio.file.StandardOpenOption.CREATE;
-
 public final class StreamReaders
 {
     private StreamReaders()
     {
     }
-    private static String trace = "";
-    private static long traceReadTime;
-    private static BufferedWriter traceWriter;
 
     public static StreamReader createStreamReader(
             StreamDescriptor streamDescriptor,
@@ -103,74 +92,6 @@ public final class StreamReaders
         if (values != null) {
             for (int i = 0; i < numPositions; i++) {
                 values[base + i] = values[base + positions[i]];
-            }
-        }
-    }
-
-    public static void readTraceSettings()
-    {
-        long now = System.nanoTime();
-        if (now - traceReadTime  < 1000000000) {
-            return;
-        }
-        traceReadTime = now;
-        try {
-            Path path = Paths.get("/tmp/prestotrace.txt");
-            List<String> lines = Files.readAllLines(path);
-            StringBuilder builder = new StringBuilder();
-            for (String option : lines) {
-                builder.append(option);
-            }
-        trace = builder.toString();
-        }
-        catch (Exception e) {
-            trace = "";
-            synchronized(StreamReaders.class) {
-                if (traceWriter != null) {
-                    try {
-                        traceWriter.flush();
-                        traceWriter.close();
-                        traceWriter = null;
-                    }
-                    catch (Exception e2) {
-                        traceWriter = null;
-                    }
-                }
-            }
-        }
-    }
-
-    public static boolean isTrace(String pattern)
-    {
-        return trace.contains(pattern);
-    }
-
-    public static void trace(String text)
-    {
-        synchronized(StreamReaders.class) {
-            try {
-                if (traceWriter == null) {
-                    traceWriter = Files.newBufferedWriter(Paths.get("/tmp/prestoreaders.out"), CREATE);
-                }
-                traceWriter.append(text);
-                traceWriter.newLine();
-            }
-            catch (Exception e) {
-            traceWriter = null;
-        }
-        }
-    }
-
-    public static void flushTrace()
-    {
-        synchronized (StreamReaders.class) {
-            if (traceWriter != null) {
-                try {
-                    traceWriter.flush();
-                }
-                catch (Exception e) {
-                    traceWriter = null;
-                }
             }
         }
     }

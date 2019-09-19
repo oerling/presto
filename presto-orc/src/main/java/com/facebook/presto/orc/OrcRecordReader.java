@@ -38,6 +38,7 @@ import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SubfieldPath;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.RunLengthEncodedBlock;
+import com.facebook.presto.spi.trace.Trace;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
@@ -302,8 +303,8 @@ public class OrcRecordReader
         streamReaders = createStreamReaders(orcDataSource, types, hiveStorageTimeZone, presentColumnsAndTypes.build(), includedSubfields, streamReadersSystemMemoryContext);
         maxBytesPerCell = new long[streamReaders.length];
         nextBatchSize = initialBatchSize;
-        StreamReaders.readTraceSettings();
-        StreamReaders.flushTrace();
+        Trace.readTraceSettings();
+        Trace.flushTrace();
     }
 
     // Constructs a dummy OrcRecordReader to be used as a wrapper
