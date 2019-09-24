@@ -309,6 +309,7 @@ public final class OrcInputStream
         if (available >= 2 * Long.BYTES) {
             long word = ByteArrays.getLong(buffer, position);
             int count = 1;
+            boolean atEnd = false;
             result = word & 0x7f;
             if ((word & 0x80) != 0) {
                 long control = word >>> 8;
@@ -318,21 +319,25 @@ public final class OrcInputStream
                     result |= word & mask;
                     count++;
                     if ((control & 0x80) == 0) {
+                        atEnd = true;
+                        break;
+                    }
+                    if (mask == 0x7fL << (7 * 7)) {
                         break;
                     }
                     mask = mask << 7;
                     control = control >>> 8;
                 }
-            }
-            if (count == 8) {
-                word = ByteArrays.getLong(buffer, position + 8);
-                result |= (word & 0x7f) << 56;
-                if ((word & 0x80) == 0) {
-                    count++;
-                }
-                else {
-                    result |= 1L << 63;
-                    count += 2;
+                if (!atEnd) {
+                    word = ByteArrays.getLong(buffer, position + 8);
+                    result |= (word & 0x7f) << 56;
+                    if ((word & 0x80) == 0) {
+                        count++;
+                    }
+                    else {
+                        result |= 1L << 63;
+                        count += 2;
+                    }
                 }
             }
             position += count;
