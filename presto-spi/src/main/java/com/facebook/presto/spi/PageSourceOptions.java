@@ -17,6 +17,7 @@ import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.Type;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.function.Function;
 
 import static java.util.Objects.requireNonNull;
@@ -44,7 +45,9 @@ public class PageSourceOptions
     public static class ScanInfo
     {
         private AdaptationStats stats;
-        long numScannedRows;
+        private long numScannedRows;
+        private List<String> filterLabels;
+        private List<FilterStats> filterStats;
 
         public AdaptationStats getStats()
         {
@@ -64,6 +67,22 @@ public class PageSourceOptions
         public long getNumScannedRows()
         {
             return numScannedRows;
+        }
+
+        public List<FilterStats> getFilterStats()
+        {
+            return filterStats;
+        }
+
+        public List<String> getFilterLabels()
+        {
+            return filterLabels;
+        }
+
+        public void setFilterStats(List<String> labels, List<FilterStats> filterStats)
+        {
+            this.filterLabels = labels;
+            this.filterStats = filterStats;
         }
     }
 
@@ -100,7 +119,16 @@ public class PageSourceOptions
                 nIn /= 2;
                 nOut /= 2;
                 time /= 2;
-            }
+            } 
+        }
+        public long getNIn()
+        {
+            return nIn;
+        }
+
+        public long getNOut()
+        {
+            return nOut;
         }
     }
 

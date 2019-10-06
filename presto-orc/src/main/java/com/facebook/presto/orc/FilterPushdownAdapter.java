@@ -31,10 +31,10 @@ public class FilterPushdownAdapter
         this.predicate = predicate;
     }
 
-    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks)
+    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks, List<String> splitColumnNames)
     {
         reader = new OrcRecordReader(predicate, splitColumnIndices);
-        reader.pushdownFilterAndProjection(options, splitColumnIndices, splitColumnTypes, splitConstantBlocks);
+        reader.pushdownFilterAndProjection(options, splitColumnIndices, splitColumnTypes, splitConstantBlocks, splitColumnNames);
     }
 
     public Page postProcess(Page page)

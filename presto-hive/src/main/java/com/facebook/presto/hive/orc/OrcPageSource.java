@@ -119,7 +119,7 @@ public class OrcPageSource
     @Override
     public boolean pushdownFilterAndProjection(PageSourceOptions options)
     {
-        recordReader.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
+        recordReader.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks, columnNames);
         useAriaScan = true;
         return true;
     }

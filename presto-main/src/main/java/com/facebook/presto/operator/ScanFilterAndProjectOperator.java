@@ -28,7 +28,6 @@ import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.PageSourceOptions;
-import com.facebook.presto.spi.PageSourceOptions.ScanInfo;
 import com.facebook.presto.spi.RecordCursor;
 import com.facebook.presto.spi.RecordPageSource;
 import com.facebook.presto.spi.UpdatablePageSource;
@@ -52,6 +51,7 @@ import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -90,8 +90,9 @@ public class ScanFilterAndProjectOperator
 
     private boolean filterAndProjectPushedDown;
     private boolean reusePages;
-    private ScanInfo scanInfo = new ScanInfo();
+    private PageSourceOptions.ScanInfo scanInfo = new PageSourceOptions.ScanInfo();
     private long previousNumScannedRows;
+    private Optional<String> tableName = Optional.empty();
 
     protected ScanFilterAndProjectOperator(
             OperatorContext operatorContext,
@@ -115,12 +116,24 @@ public class ScanFilterAndProjectOperator
         this.mergingOutput = requireNonNull(mergingOutput, "mergingOutput is null");
 
         this.pageBuilder = new PageBuilder(ImmutableList.copyOf(requireNonNull(types, "types is null")));
+        operatorContext.setInfoSupplier(this::getScanInfo);
     }
 
     @Override
     public OperatorContext getOperatorContext()
     {
         return operatorContext;
+    }
+
+    private OperatorInfo getScanInfo()
+    {
+        List<PageSourceOptions.FilterStats> filters = scanInfo.getFilterStats();
+        List<String> names = scanInfo.getFilterLabels();
+        ImmutableList.Builder<ScanInfo.FilterInfo> stats = new ImmutableList.Builder();
+        for (int i = 0; i < names.size(); i++) {
+            stats.add(new ScanInfo.FilterInfo(names.get(i), filters.get(i).getNIn(), filters.get(i).getNOut()));
+        }
+        return new ScanInfo(tableName.orElse("unspecified"), stats.build());
     }
 
     @Override
@@ -143,6 +156,12 @@ public class ScanFilterAndProjectOperator
 
         Object splitInfo = split.getInfo();
         if (splitInfo != null) {
+            if (splitInfo instanceof Map) {
+                Object table = ((Map) splitInfo).get("table");
+                if (table instanceof String) {
+                    tableName = Optional.of((String) table);
+                }
+            }
             operatorContext.setInfoSupplier(() -> new SplitOperatorInfo(splitInfo));
         }
         blocked.set(null);

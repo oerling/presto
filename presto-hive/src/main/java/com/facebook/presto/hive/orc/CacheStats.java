@@ -26,7 +26,7 @@ public class CacheStats
     private static final FileCacheStats stats = new FileCacheStats();
 
     @Inject
-    CacheStats(HiveClientConfig hiveClientConfig)
+    public CacheStats(HiveClientConfig hiveClientConfig)
     {
         FileCache.incrementTargetSize(hiveClientConfig.getBlockCacheSize().toBytes());
         FileCache.registerStats(stats);

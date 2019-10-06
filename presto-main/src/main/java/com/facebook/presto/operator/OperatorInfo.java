@@ -31,6 +31,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = HashCollisionsInfo.class, name = "hashCollisionsInfo"),
         @JsonSubTypes.Type(value = PartitionedOutputInfo.class, name = "partitionedOutput"),
         @JsonSubTypes.Type(value = JoinOperatorInfo.class, name = "joinOperatorInfo"),
+        @JsonSubTypes.Type(value = ScanInfo.class, name = "ScanInfo"),
         @JsonSubTypes.Type(value = WindowInfo.class, name = "windowInfo"),
         @JsonSubTypes.Type(value = TableWriterInfo.class, name = "tableWriter")})
 public interface OperatorInfo

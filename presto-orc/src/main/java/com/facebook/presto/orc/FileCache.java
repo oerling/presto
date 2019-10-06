@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.google.common.base.MoreObjects.toStringHelper;
     import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static java.lang.Math.toIntExact;
 import static java.lang.Thread.currentThread;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -56,8 +57,8 @@ public class FileCache
     private static final Logger log = Logger.get(FileCache.class);
 
     private static final List<WeakReference<FileToken>>[] fileTokens = new ArrayList[1024];
-    private static final List<Entry>[] entryHashTable = new ArrayList[8192];
-    private static final Entry[] entries = new Entry[MAX_ENTRIES];
+    private static final List<Entry>[] entryHashTable = new ArrayList[32 * 1024];
+    private static Entry[] entries;
     private static final ReferenceQueue<byte[]> gcdBuffers = new ReferenceQueue();
     private static volatile int clockHand;
     private static int numEntries;
@@ -75,14 +76,11 @@ public class FileCache
 
     static {
         byteArrayPool = Caches.getByteArrayPool();
-        for (int i = 0; i < 200; i++) {
-            entries[numEntries++] = new Entry(0);
-        }
     }
 
     private static AtomicLong totalSize = new AtomicLong();
     private static AtomicLong prefetchSize = new AtomicLong();
-    private static long targetSize = 20 * (1L << 30);
+    private static long targetSize;
     private static long bytesAllocated;
     private static long numGcdBuffers;
     private static long numGcdBytes;
@@ -162,13 +160,15 @@ public class FileCache
     public static void incrementTargetSize(long bytes)
     {
         long free = Runtime.getRuntime().freeMemory();
+        long max = Runtime.getRuntime().maxMemory();
+        long total = Runtime.getRuntime().totalMemory();
         long newSize = targetSize + bytes;
         if (newSize <= 0) {
             log.warn("Setting FileCache size to 0");
             targetSize = 0;
         }
-        else if (bytes > free - (500 * (1014 * 1024))) {
-            log.warn("Attempting to set FileCache size above free memory - 500MB: Increase by " + bytes + " while " + free + "available");
+        else if (bytes > free + (max - total) - (500 * (1014 * 1024))) {
+            log.warn("Attempting to set FileCache size above free memory - 500MB: Increase by " + bytes + " while " + (free + max - total) + "available. Total = " + total + " and max = " + max);
         }
         else {
             targetSize += bytes;
@@ -327,13 +327,13 @@ public class FileCache
         boolean isPrefetch;
         private byte sizeIndex;
 
-        Entry(int pinCount)
+        public Entry(int pinCount)
         {
             this.pinCount = pinCount;
             isTemporary = false;
         }
 
-        Entry(boolean isTemporary)
+        private Entry(boolean isTemporary)
         {
             this.isTemporary = isTemporary;
         }
@@ -487,9 +487,12 @@ public class FileCache
             totalSize.addAndGet(bufferSize);
         }
 
-        public void loadDone()
+        public void loadDone(boolean success)
         {
             // Remove the future from the entry before marking it done. otherwise a waiting thread may see the same future on its next try and keep looping until this thread sets loadingFuture to null. Idempotent.
+            if (success) {
+                verify(softBuffer != null);
+            }
             SettableFuture<Boolean> future = loadingFuture;
             loadingFuture = null;
             if (future != null) {
@@ -503,7 +506,7 @@ public class FileCache
         {
             log.warn("FileCache: Removing bad entry " + toString() + " caused by " + e.toString());
             removeFromBucket(bucketIndex, true, null, true);
-            loadDone();
+            loadDone(false);
             throw new IOException(e);
         }
 
@@ -546,10 +549,8 @@ public class FileCache
         List<Entry> list = entryHashTable[bucketIndex];
         if (list == null) {
             synchronized (FileCache.class) {
+                ensureEntries();
                 list = entryHashTable[bucketIndex];
-                if (offset == 2711273783L) {
-                    System.out.println("bing");
-                }
                 if (list == null) {
                     list = new ArrayList();
                     entryHashTable[bucketIndex] = list;
@@ -697,6 +698,17 @@ public class FileCache
         }
     }
 
+    private static void ensureEntries()
+    {
+        if (entries == null) {
+            entries = new Entry[Math.max(20000, toIntExact(targetSize / 200000))];
+            numEntries = Math.min(200, entries.length);
+                for (int i = 0; i < numEntries; i++) {
+                    entries[i] = new Entry(0);
+                }
+        }
+    }
+    
     private static long hashMix(long h1, long h2)
     {
         return h1 ^ (h2 * M);
@@ -719,7 +731,8 @@ public class FileCache
                     // If this is not a prefetch, this must succeed. Remove the temporary entry from the hash table and give it a buffer not owned by the cache.
                     entry.removeFromBucket(bucketIndex, true, null, true);
                     if (isPrefetch) {
-                        entry.loadDone();
+                        entry.softBuffer = null;
+                        entry.loadDone(false);
                         return null;
                     }
                     entry.buffer = newBuffer(size);
@@ -779,7 +792,7 @@ public class FileCache
                     verify(false, "A newly acquired permanent entry has pinCount != 1: " + entry.toString());
                 }
             }
-            entry.loadDone();
+            entry.loadDone(true);
             if (entry.listener != null) {
                 entry.listener.loaded(entry);
             }
@@ -794,7 +807,7 @@ public class FileCache
             log.warn("FileCache: Error loading " + entry.toString() + ": " + e.toString());
             entry.close();
             entry.removeFromBucket();
-            entry.loadDone();
+            entry.loadDone(false);
             throw e;
         }
     }

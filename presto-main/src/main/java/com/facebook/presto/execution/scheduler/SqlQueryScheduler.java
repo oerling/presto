@@ -75,8 +75,9 @@ import java.util.function.Supplier;
 import static com.facebook.presto.SystemSessionProperties.getConcurrentLifespansPerNode;
 import static com.facebook.presto.SystemSessionProperties.getMaxTasksPerStage;
 import static com.facebook.presto.SystemSessionProperties.getWriterMinSize;
-import static com.facebook.presto.connector.ConnectorId.isInternalSystemConnector;
+import static com.facebook.presto.SystemSessionProperties.workerAffinityEnabled;
 import static com.facebook.presto.execution.BasicStageStats.aggregateBasicStageStats;
+import static com.facebook.presto.connector.ConnectorId.isInternalSystemConnector;
 import static com.facebook.presto.execution.SqlStageExecution.createSqlStageExecution;
 import static com.facebook.presto.execution.StageState.ABORTED;
 import static com.facebook.presto.execution.StageState.CANCELED;
@@ -417,7 +418,7 @@ public class SqlQueryScheduler
             if (isInternalSystemConnector(connectorId)) {
                 connectorId = null;
             }
-            NodeSelector nodeSelector = nodeScheduler.createNodeSelector(connectorId);
+            NodeSelector nodeSelector = nodeScheduler.createNodeSelector(connectorId, workerAffinityEnabled(session));
             SplitPlacementPolicy placementPolicy = new DynamicSplitPlacementPolicy(nodeSelector, stage::getAllTasks);
 
             checkArgument(!plan.getFragment().getStageExecutionDescriptor().isStageGroupedExecution());
