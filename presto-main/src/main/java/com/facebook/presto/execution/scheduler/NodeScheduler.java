@@ -31,6 +31,9 @@ import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.stats.CounterStat;
 
+import org.weakref.jmx.Flatten;
+import org.weakref.jmx.Managed;
+
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 
@@ -68,6 +71,10 @@ public class NodeScheduler
     private final int maxPendingSplitsPerTask;
     private final NodeTaskMap nodeTaskMap;
     private final boolean useNetworkTopology;
+    private long numRandomSplits;
+    private long numAffinitySplits;
+    private long numRandomAffinitySplits;
+    private static NodeScheduler instance;
 
     @Inject
     public NodeScheduler(NetworkTopology networkTopology, InternalNodeManager nodeManager, NodeSchedulerConfig config, NodeTaskMap nodeTaskMap)
@@ -103,6 +110,7 @@ public class NodeScheduler
             networkLocationSegmentNames = ImmutableList.of();
         }
         topologicalSplitCounters = builder.build();
+        instance = this;
     }
 
     @PreDestroy
@@ -121,6 +129,11 @@ public class NodeScheduler
     }
 
     public NodeSelector createNodeSelector(ConnectorId connectorId)
+    {
+        return createNodeSelector(connectorId, false);
+    }
+
+    public NodeSelector createNodeSelector(ConnectorId connectorId, boolean useAffinity)
     {
         // this supplier is thread-safe. TODO: this logic should probably move to the scheduler since the choice of which node to run in should be
         // done as close to when the the split is about to be scheduled
@@ -176,7 +189,7 @@ public class NodeScheduler
                     networkLocationCache);
         }
         else {
-            return new SimpleNodeSelector(nodeManager, nodeTaskMap, includeCoordinator, nodeMap, minCandidates, maxSplitsPerNode, maxPendingSplitsPerTask);
+            return new SimpleNodeSelector(nodeManager, nodeTaskMap, includeCoordinator, nodeMap, minCandidates, maxSplitsPerNode, maxPendingSplitsPerTask, useAffinity);
         }
     }
 
@@ -325,5 +338,36 @@ public class NodeScheduler
                 .map(remoteTask -> remoteTask.whenSplitQueueHasSpace(spaceThreshold))
                 .collect(toImmutableList());
         return whenAnyCompleteCancelOthers(stateChangeFutures);
+    }
+
+    public static void recordSplitAssignment(boolean affinity, boolean affinityOverflow)
+    {
+        if (!affinity) {
+            instance.numRandomSplits++;
+        }
+        else if (affinityOverflow) {
+            instance.numRandomAffinitySplits++;
+        }
+        else {
+            instance.numAffinitySplits++;
+        }
+    }
+
+    @Managed
+    public long getNumRandomSplits()
+    {
+        return numRandomSplits;
+    }
+
+    @Managed
+    public long getNumAffinitySplits()
+    {
+        return numAffinitySplits;
+    }
+
+    @Managed
+    public long getNumRandomAffinitySplits()
+    {
+        return numRandomAffinitySplits;
     }
 }
