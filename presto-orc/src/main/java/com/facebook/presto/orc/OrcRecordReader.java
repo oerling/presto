@@ -828,13 +828,15 @@ public class OrcRecordReader
         }
     }
 
-    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks)
+    public void pushdownFilterAndProjection(PageSourceOptions options, int[] splitColumnIndices, List<Type> splitColumnTypes, Block[] splitConstantBlocks, List<String> splitColumnNames)
     {
         reuseBlocks = options.getReusePages();
         this.splitColumnIndices = splitColumnIndices;
         constantBlocks = makeCombinedConstantBlocks(options, splitColumnIndices, splitConstantBlocks);
         verify(currentRowGroup == -1, "Should not call pushdownFilterAndProjection() after getNextPage()");
         Map<Integer, Filter> filters = predicate.getFilters();
+        ImmutableList.Builder<PageSourceOptions.FilterStats> trackedFilters = new ImmutableList.Builder();
+        ImmutableList.Builder<String> trackedFilterLabels = new ImmutableList.Builder();
         for (int i = 0; i < splitColumnIndices.length; i++) {
             // There may be simple filters on missing columns. Simple
             // filters on prefilled columns, i.e. columns that have no
@@ -852,6 +854,10 @@ public class OrcRecordReader
                         constantFilterIsFalse = true;
                         return;
                     }
+                }
+                else {
+                    trackedFilters.add(filter);
+                    trackedFilterLabels.add(splitColumnNames.get(i));
                 }
             }
         }
@@ -885,6 +891,11 @@ public class OrcRecordReader
             ariaBatchRows = adaptation.getBatchSize();
             setReaderBudget();
         }
+        FilterFunction[] nonConstantFilterFunctions = anyConstantFilterFunctions ? Arrays.stream(filterFunctions).filter(f -> !isConstantFilterFunction(f, constantBlocks)).toArray(FilterFunction[]::new) : filterFunctions;
+        for (FilterFunction filter : nonConstantFilterFunctions) {
+            trackedFilters.add(filter);
+            trackedFilterLabels.add(makeFilterFunctionLabel(filter, splitColumnIndices, splitColumnNames));
+        }
         reader = new ColumnGroupReader(
                 streamReaders,
                 presentColumns,
@@ -895,13 +906,31 @@ public class OrcRecordReader
                 options.getInternalChannels(),
                 options.getOutputChannels(),
                 filters,
-                anyConstantFilterFunctions ? Arrays.stream(filterFunctions).filter(f -> !isConstantFilterFunction(f, constantBlocks)).toArray(FilterFunction[]::new) : filterFunctions,
+                nonConstantFilterFunctions,
                 enforceMemoryBudget,
                 constantBlocks,
                 options.getCoercers(),
                 adaptation);
         targetResultBytes = (int) maxBlockBytes; // options.getTargetBytes();
         reader.setResultSizeBudget(targetResultBytes, enforceMemoryBudget);
+        scanInfo.setFilterStats(trackedFilterLabels.build(), trackedFilters.build());
+    }
+
+    private static String makeFilterFunctionLabel(FilterFunction filter, int[] splitColumnIndices, List<String>splitColumnNames)
+    {
+        StringBuilder builder = new StringBuilder();
+        builder.append("f(");
+        boolean isFirst = true;
+        for (int channel : filter.getInputChannels()) {
+            if (!isFirst) {
+                builder.append(", ");
+            }
+            isFirst = false;
+            if (channel < splitColumnNames.size()) {
+                builder.append(splitColumnNames.get(channel));
+            }
+        }
+        return builder.toString();
     }
 
     private static boolean isConstantFilterFunction(FilterFunction filter, Block[] constantBlocks)

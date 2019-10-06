@@ -267,7 +267,7 @@ public class RcFilePageSource
     {
         if (postProcessor != null) {
             // postProcessor can be null if this has declared type RC in the schema. postProcessor s installed if this is declared ORC but actually is RC.
-            postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks);
+            postProcessor.pushdownFilterAndProjection(options, hiveColumnIndexes, types, constantBlocks, columnNames);
         }
         return true;
     }
