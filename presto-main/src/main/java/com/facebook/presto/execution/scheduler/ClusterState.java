@@ -35,10 +35,10 @@ public class ClusterState
     private static final ClusterState instance = new ClusterState();
 
     Map<String, NodeState> nodeStates = new HashMap();
-    
-    
+
+
     /**
-     * 
+     *
      */
     public static void update(TaskStatus status)
     {
@@ -54,8 +54,8 @@ public class ClusterState
     {
     }
 
-    
-    
+
+
     public static class ReservationForecast
     {
         TaskId taskId;
@@ -105,7 +105,7 @@ public class ClusterState
         private QueryId queryId;
         private long totalReservation;
         private Int2ObjectMap<ReservationForecast> forecasts = new Int2ObjectOpenHashMap();
-        
+
         QueryState(QueryId queryId)
         {
             this.queryId = queryId;
