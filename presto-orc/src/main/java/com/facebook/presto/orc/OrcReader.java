@@ -92,7 +92,7 @@ public class OrcReader
             throws IOException
     {
         orcDataSource = wrapWithCacheIfTiny(orcDataSource, tinyStripeThreshold);
-        this.orcDataSource = orcDataSource;
+            this.orcDataSource = orcDataSource;
         requireNonNull(orcEncoding, "orcEncoding is null");
         this.metadataReader = new ExceptionWrappingMetadataReader(orcDataSource.getId(), orcEncoding.createMetadataReader());
         this.maxMergeDistance = requireNonNull(maxMergeDistance, "maxMergeDistance is null");
@@ -287,7 +287,7 @@ public class OrcReader
 
     private static OrcDataSource wrapWithCacheIfTiny(OrcDataSource dataSource, DataSize maxCacheSize)
     {
-        if (dataSource instanceof CachingOrcDataSource) {
+        if (dataSource.useCache() || dataSource instanceof CachingOrcDataSource) {
             return dataSource;
         }
         if (dataSource.getSize() > maxCacheSize.toBytes()) {
