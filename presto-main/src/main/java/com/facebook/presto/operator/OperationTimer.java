@@ -129,7 +129,7 @@ class OperationTimer
 
         void recordOffThreadCpu(long cpuNanos)
         {
-            this.cpuNanos.addAndGet(cpuNanos);
+            this.cpuNanos.addAndGet(Math.max(0, cpuNanos));
         }
 
         @Override
