@@ -130,7 +130,8 @@ public class ScanFilterAndProjectOperator
         List<PageSourceOptions.FilterStats> filters = scanInfo.getFilterStats();
         List<String> names = scanInfo.getFilterLabels();
         ImmutableList.Builder<ScanInfo.FilterInfo> stats = new ImmutableList.Builder();
-        for (int i = 0; i < names.size(); i++) {
+        int numNames = (names != null && filters != null) ? names.size() : 0;
+        for (int i = 0; i < numNames; i++) {
             stats.add(new ScanInfo.FilterInfo(names.get(i), filters.get(i).getNIn(), filters.get(i).getNOut()));
         }
         return new ScanInfo(tableName.orElse("unspecified"), stats.build());

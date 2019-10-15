@@ -119,7 +119,7 @@ public class PageSourceOptions
                 nIn /= 2;
                 nOut /= 2;
                 time /= 2;
-            } 
+            }
         }
         public long getNIn()
         {

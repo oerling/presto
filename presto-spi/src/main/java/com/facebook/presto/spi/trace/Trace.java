@@ -28,7 +28,7 @@ public class Trace
     private static BufferedWriter traceWriter;
     private static long openTimeMillis;
     private static boolean printTime;
-    
+
     private Trace() {}
 
     public static void readTraceSettings()
@@ -72,7 +72,7 @@ public class Trace
 
     public static void trace(String text)
     {
-        synchronized(Trace.class) {
+        synchronized (Trace.class) {
             try {
                 if (traceWriter == null) {
                     traceWriter = Files.newBufferedWriter(Paths.get("/tmp/presto.out"), CREATE);
@@ -114,5 +114,16 @@ public class Trace
     private static long milliTime()
     {
         return System.nanoTime() / 1000000;
+    }
+
+    public static String stackTrace(int maxFrames)
+    {
+        StringBuilder result = new StringBuilder();
+        StackTraceElement[] elements = Thread.currentThread().getStackTrace();
+        for (int i = 1; i < elements.length && i < maxFrames; i++) {
+            StackTraceElement s = elements[i];
+            result.append(s.getClassName() + "." + s.getMethodName() + "(" + s.getFileName() + ":" + s.getLineNumber() + ")\n");
+        }
+        return result.toString();
     }
 }

@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.presto.spi.trace.Trace;
 import com.facebook.presto.util.Mergeable;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -35,6 +36,9 @@ public class ScanInfo
     {
         this.label = label;
         this.filters = filters;
+        if (Trace.isTrace("scaninfo")) {
+            Trace.trace("newScanInfo " + Trace.stackTrace(10));
+        }
     }
 
     @Override
@@ -70,6 +74,9 @@ public class ScanInfo
             else {
                 result.put(filter.getLabel(), filter);
             }
+        }
+        if (Trace.isTrace("scaninfo")) {
+            Trace.trace("mergeScanInfo " + Trace.stackTrace(10));
         }
         return new ScanInfo(label, ImmutableList.copyOf(result.values()));
     }
