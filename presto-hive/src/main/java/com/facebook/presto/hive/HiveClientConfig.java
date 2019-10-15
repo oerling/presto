@@ -166,7 +166,7 @@ public class HiveClientConfig
 
     private boolean pushdownFilterEnabled;
     private boolean blockCacheEnabled;
-    private DataSize blockCacheSize = new DataSize(10240, MEGABYTE);
+    private DataSize blockCacheSize = new DataSize(40 * 1024, MEGABYTE);
 
     public int getMaxInitialSplits()
     {
