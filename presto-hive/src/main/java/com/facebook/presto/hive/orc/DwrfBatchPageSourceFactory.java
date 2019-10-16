@@ -42,6 +42,9 @@ import static com.facebook.presto.hive.HiveSessionProperties.getOrcMaxMergeDista
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcMaxReadBlockSize;
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcStreamBufferSize;
 import static com.facebook.presto.hive.HiveSessionProperties.getOrcTinyStripeThreshold;
+import static com.facebook.presto.hive.HiveSessionProperties.isBlockCacheEnabled;
+import static com.facebook.presto.hive.HiveUtil.isDeserializerClass;
+
 import static com.facebook.presto.hive.orc.OrcBatchPageSourceFactory.createOrcPageSource;
 import static com.facebook.presto.orc.OrcEncoding.DWRF;
 import static java.util.Objects.requireNonNull;
@@ -74,7 +77,7 @@ public class DwrfBatchPageSourceFactory
             Map<String, String> tableParameters,
             List<HiveColumnHandle> columns,
             TupleDomain<HiveColumnHandle> effectivePredicate,
-            DateTimeZone hiveStorageTimeZone)
+                                                                    DateTimeZone hiveStorageTimeZone)
     {
         if (!OrcSerde.class.getName().equals(storage.getStorageFormat().getSerDe())) {
             return Optional.empty();
@@ -106,6 +109,7 @@ public class DwrfBatchPageSourceFactory
                 getOrcLazyReadSmallRanges(session),
                 false,
                 stats,
-                domainCompactionThreshold));
+                domainCompactionThreshold,
+                isBlockCacheEnabled(session)));
     }
 }

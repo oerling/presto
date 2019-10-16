@@ -115,7 +115,7 @@ public class OrcReader
 
         // Read the tail of the file
         byte[] buffer = new byte[toIntExact(min(size, EXPECTED_FOOTER_SIZE))];
-        orcDataSource.readFully(size - buffer.length, buffer);
+        readFromCache(size - buffer.length, buffer, 0, buffer.length);
 
         // get length of PostScript - last byte of the file
         int postScriptSize = buffer[buffer.length - SIZE_OF_BYTE] & 0xff;
@@ -161,8 +161,7 @@ public class OrcReader
             completeFooterSlice = Slices.wrappedBuffer(newBuffer);
 
             // initial read was not large enough, so read missing section
-            orcDataSource.readFully(size - completeFooterSize, newBuffer, 0, completeFooterSize - buffer.length);
-
+            readFromCache(size - completeFooterSize, newBuffer, 0, completeFooterSize - buffer.length);
             // copy already read bytes into the new buffer
             completeFooterSlice.setBytes(completeFooterSize - buffer.length, buffer);
         }
@@ -192,6 +191,19 @@ public class OrcReader
             writeValidation.get().validateMetadata(orcDataSource.getId(), footer.getUserMetadata());
             writeValidation.get().validateFileStatistics(orcDataSource.getId(), footer.getFileStats());
             writeValidation.get().validateStripeStatistics(orcDataSource.getId(), footer.getStripes(), metadata.getStripeStatsList());
+        }
+    }
+
+    private void readFromCache(long position, byte[] buffer, int bufferOffset, int bufferLength)
+            throws IOException
+    {
+        if (orcDataSource.useCache()) {
+            try (FileCache.Entry entry = FileCache.get(orcDataSource, position, bufferLength, FileCache.getListener("footer"), 10000)) {
+                System.arraycopy(entry.getBuffer(), 0, buffer, bufferOffset, bufferLength);
+            }
+        }
+        else {
+            orcDataSource.readFully(position, buffer, bufferOffset, bufferLength);
         }
     }
 

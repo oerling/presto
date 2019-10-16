@@ -34,12 +34,34 @@ public interface OrcDataSource
     void readFully(long position, byte[] buffer, int bufferOffset, int bufferLength)
             throws IOException;
 
-    <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges)
+    <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException;
+
+    default <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges)
+            throws IOException
+    {
+        return readFully(diskRanges, null);
+    }
 
     @Override
     default void close()
             throws IOException
     {
+    }
+
+    default FileCache.FileToken getToken()
+    {
+        return FileCache.getFileToken(getId().toString());
+    }
+
+    default boolean useCache()
+    {
+        return false;
+    }
+
+    // Returns a string identifying the table/partition for access tracking.
+    default String getSplitLabel()
+    {
+        return "";
     }
 }
