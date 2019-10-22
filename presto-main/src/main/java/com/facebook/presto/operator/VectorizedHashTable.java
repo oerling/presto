@@ -14,6 +14,8 @@
 package com.facebook.presto.operator;
 
 
+import java.util.List;
+
 class VectorizedHashTable
 {
     List<Slab> slabs;
