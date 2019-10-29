@@ -108,6 +108,9 @@ abstract class AbstractOrcRecordReader<T extends StreamReader>
     private final Optional<OrcWriteValidation.StatisticsValidation> stripeStatisticsValidation;
     private final Optional<OrcWriteValidation.StatisticsValidation> fileStatisticsValidation;
 
+    public static long minSplitOffset;
+    public static long maxSplitOffset = Long.MAX_VALUE;
+
     public AbstractOrcRecordReader(
             Map<Integer, Type> includedColumns,
             T[] streamReaders,
@@ -190,7 +193,7 @@ abstract class AbstractOrcRecordReader<T extends StreamReader>
             // select stripes that start within the specified split
             for (StripeInfo info : stripeInfos) {
                 StripeInformation stripe = info.getStripe();
-                if (splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
+                if (splitOffset >= minSplitOffset && splitOffset < maxSplitOffset && splitContainsStripe(splitOffset, splitLength, stripe) && isStripeIncluded(root, stripe, info.getStats(), predicate)) {
                     stripes.add(stripe);
                     stripeFilePositions.add(fileRowCount);
                     totalRowCount += stripe.getNumberOfRows();
