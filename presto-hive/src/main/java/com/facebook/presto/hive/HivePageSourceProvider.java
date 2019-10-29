@@ -112,7 +112,10 @@ public class HivePageSourceProvider
         Configuration configuration = hdfsEnvironment.getConfiguration(new HdfsContext(session, hiveSplit.getDatabase(), hiveSplit.getTable()), path);
 
         if (hiveLayout.isPushdownFilterEnabled()) {
-            return createSelectivePageSource(selectivePageSourceFactories, configuration, session, hiveSplit, hiveLayout, selectedColumns, hiveStorageTimeZone, rowExpressionService);
+            Optional<? extends ConnectorPageSource> pageSource = createSelectivePageSource(selectivePageSourceFactories, configuration, session, hiveSplit, hiveLayout, selectedColumns, hiveStorageTimeZone, rowExpressionService);
+            if (pageSource.isPresent()) {
+                return pageSource.get();
+            }
         }
 
         Optional<ConnectorPageSource> pageSource = createHivePageSource(
@@ -129,6 +132,7 @@ public class HivePageSourceProvider
                 hiveLayout.getDomainPredicate()
                         .transform(Subfield::getRootName)
                         .transform(hiveLayout.getPredicateColumns()::get),
+                hiveLayout.getRemainingPredicate(),
                 selectedColumns,
                 hiveSplit.getPartitionKeys(),
                 hiveStorageTimeZone,
@@ -148,7 +152,7 @@ public class HivePageSourceProvider
         throw new IllegalStateException("Could not find a file reader for split " + hiveSplit);
     }
 
-    private static ConnectorPageSource createSelectivePageSource(
+    private static Optional<? extends ConnectorPageSource> createSelectivePageSource(
             Set<HiveSelectivePageSourceFactory> selectivePageSourceFactories,
             Configuration configuration,
             ConnectorSession session,
@@ -209,11 +213,10 @@ public class HivePageSourceProvider
                     hiveStorageTimeZone,
                     split.getExtraFileInfo());
             if (pageSource.isPresent()) {
-                return pageSource.get();
+                return pageSource;
             }
         }
-
-        throw new IllegalStateException("Could not find a file reader for split " + split);
+        return Optional.empty();
     }
 
     public static Optional<ConnectorPageSource> createHivePageSource(
@@ -228,6 +231,7 @@ public class HivePageSourceProvider
             long fileSize,
             Storage storage,
             TupleDomain<HiveColumnHandle> effectivePredicate,
+            RowExpression remainingPredicate,
             List<HiveColumnHandle> hiveColumns,
             List<HivePartitionKey> partitionKeys,
             DateTimeZone hiveStorageTimeZone,
@@ -265,6 +269,7 @@ public class HivePageSourceProvider
                     tableParameters,
                     toColumnHandles(regularAndInterimColumnMappings, true),
                     effectivePredicate,
+                    remainingPredicate,
                     hiveStorageTimeZone,
                     extraFileInfo);
             if (pageSource.isPresent()) {
@@ -337,7 +342,6 @@ public class HivePageSourceProvider
                 List<Type> columnTypes = hiveColumns.stream()
                         .map(input -> typeManager.getType(input.getTypeSignature()))
                         .collect(toList());
-
                 return Optional.of(new RecordPageSource(columnTypes, hiveRecordCursor));
             }
         }
