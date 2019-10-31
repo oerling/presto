@@ -581,6 +581,15 @@ public class TestSelectiveOrcReader
     }
 
     @Test
+    public void testArraysOfNullsWithFilter()
+            throws Exception
+    {
+        tester.testRoundTripTypes(ImmutableList.of(arrayType(BIGINT), BOOLEAN),
+                ImmutableList.of(nCopies(5, null), newArrayList(true, false, null, true, false)),
+                ImmutableList.of(ImmutableMap.of(0, ImmutableMap.of(new Subfield("c"), IS_NULL))));
+    }
+
+    @Test
     public void testStructs()
             throws Exception
     {
