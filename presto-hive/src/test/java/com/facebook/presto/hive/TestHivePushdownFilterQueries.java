@@ -695,6 +695,16 @@ public class TestHivePushdownFilterQueries
     }
 
     @Test
+    public void testTextfileFormatWithPushdown()
+    {
+        assertUpdate("CREATE TABLE textfile (id BIGINT) WITH (format = 'TEXTFILE')");
+        assertUpdate("INSERT INTO textfile VALUES (1), (2), (3)", 3);
+        assertQuery("SELECT id FROM textfile WHERE id = 1", "SELECT 1");
+        assertQuery("SELECT id FROM textfile", "SELECT 1 UNION SELECT 2 UNION SELECT 3 ");
+        assertUpdate("DROP TABLE textfile");
+    }
+
+    @Test
     public void testSchemaEvolution()
     {
         assertUpdate("CREATE TABLE test_schema_evolution WITH (partitioned_by = ARRAY['regionkey']) AS SELECT nationkey, regionkey FROM nation", 25);
