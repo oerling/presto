@@ -83,6 +83,7 @@ public final class HiveTableLayoutHandle
         this.bucketFilter = requireNonNull(bucketFilter, "bucketFilter is null");
         this.pushdownFilterEnabled = pushdownFilterEnabled;
         this.layoutString = requireNonNull(layoutString, "layoutString is null");
+        this.pushdownFilterEnabled = pushdownFilterEnabled;
     }
 
     public HiveTableLayoutHandle(
@@ -113,6 +114,7 @@ public final class HiveTableLayoutHandle
         this.bucketFilter = requireNonNull(bucketFilter, "bucketFilter is null");
         this.pushdownFilterEnabled = pushdownFilterEnabled;
         this.layoutString = requireNonNull(layoutString, "layoutString is null");
+        this.pushdownFilterEnabled = pushdownFilterEnabled;
     }
 
     @JsonProperty
@@ -196,6 +198,12 @@ public final class HiveTableLayoutHandle
     public String getLayoutString()
     {
         return layoutString;
+    }
+
+    @JsonProperty
+    public boolean isPushdownFilterEnabled()
+    {
+        return pushdownFilterEnabled;
     }
 
     @Override
