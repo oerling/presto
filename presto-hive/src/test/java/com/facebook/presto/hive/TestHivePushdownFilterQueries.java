@@ -63,9 +63,10 @@ public class TestHivePushdownFilterQueries
             "       (CAST(day(commitdate) AS TINYINT), CAST(month(commitdate) AS TINYINT), CAST(year(commitdate) AS INTEGER)), " +
             "       (CAST(day(receiptdate) AS TINYINT), CAST(month(receiptdate) AS TINYINT), CAST(year(receiptdate) AS INTEGER))) END AS dates, \n" +
             "   CASE WHEN orderkey % 37 = 0 THEN null ELSE (CAST(shipdate AS TIMESTAMP), CAST(commitdate AS TIMESTAMP)) END AS timestamps, \n" +
-            "   CASE WHEN orderkey % 43 = 0 THEN null ELSE comment END AS comment, \n" +
+            "   CASE WHEN orderkey % 43 = 0 THEN null ELSE CASE WHEN linenumber % 2 = 0 THEN '' ELSE comment END END AS comment, \n" +
             "   CASE WHEN orderkey % 43 = 0 THEN null ELSE upper(comment) END AS uppercase_comment, \n" +
             "   CAST('' as VARBINARY) AS empty_comment, \n" +
+            "   CAST('' as VARCHAR) AS empty_varchar, \n" +
             "   CASE WHEN orderkey % 47 = 0 THEN null ELSE CAST(comment AS CHAR(5)) END AS fixed_comment, \n" +
             "   CASE WHEN orderkey % 49 = 0 THEN null ELSE (CAST(comment AS CHAR(4)), CAST(comment AS CHAR(3)), CAST(SUBSTR(comment,length(comment) - 4) AS CHAR(4))) END AS char_array, \n" +
             "   CASE WHEN orderkey % 49 = 0 THEN null ELSE (comment, comment) END AS varchar_array \n" +
@@ -87,7 +88,7 @@ public class TestHivePushdownFilterQueries
                 Optional.empty());
 
         queryRunner.execute(noPushdownFilter(queryRunner.getDefaultSession()),
-                "CREATE TABLE lineitem_ex (linenumber, orderkey, partkey, suppkey, quantity, extendedprice, tax, shipinstruct, shipmode, ship_by_air, is_returned, ship_day, ship_month, ship_timestamp, commit_timestamp, discount_real, discount, tax_real, ship_day_month, discount_long_decimal, tax_short_decimal, long_decimals, keys, doubles, nested_keys, flags, reals, info, dates, timestamps, comment, uppercase_comment, empty_comment, fixed_comment, char_array, varchar_array) AS " +
+                "CREATE TABLE lineitem_ex (linenumber, orderkey, partkey, suppkey, quantity, extendedprice, tax, shipinstruct, shipmode, ship_by_air, is_returned, ship_day, ship_month, ship_timestamp, commit_timestamp, discount_real, discount, tax_real, ship_day_month, discount_long_decimal, tax_short_decimal, long_decimals, keys, doubles, nested_keys, flags, reals, info, dates, timestamps, comment, uppercase_comment, empty_comment, empty_varchar, fixed_comment, char_array, varchar_array) AS " +
                         "SELECT linenumber, orderkey, partkey, suppkey, quantity, extendedprice, tax, shipinstruct, shipmode, " +
                         "   IF (linenumber % 5 = 0, null, shipmode = 'AIR') AS ship_by_air, " +
                         "   IF (linenumber % 7 = 0, null, returnflag = 'R') AS is_returned, " +
@@ -113,9 +114,10 @@ public class TestHivePushdownFilterQueries
                         "       CAST(ROW(day(commitdate), month(commitdate), year(commitdate)) AS ROW(day TINYINT, month TINYINT, year INTEGER)), " +
                         "       CAST(ROW(day(receiptdate), month(receiptdate), year(receiptdate)) AS ROW(day TINYINT, month TINYINT, year INTEGER))]), " +
                         "   IF (orderkey % 37 = 0, NULL, ARRAY[CAST(shipdate AS TIMESTAMP), CAST(commitdate AS TIMESTAMP)]) AS timestamps, " +
-                        "   IF (orderkey % 43 = 0, NULL, comment) AS comment, " +
+                        "   IF (orderkey % 43 = 0, NULL, IF (linenumber % 2 = 0 , '', comment)) AS comment, " +
                         "   IF (orderkey % 43 = 0, NULL, upper(comment)) AS uppercase_comment, " +
                         "   CAST('' as VARBINARY) AS empty_comment, \n" +
+                        "   CAST('' as VARCHAR) AS empty_varchar, \n" +
                         "   IF (orderkey % 47 = 0, NULL, CAST(comment AS CHAR(5))) AS fixed_comment, " +
                         "   IF (orderkey % 49 = 0, NULL, ARRAY[CAST(comment AS CHAR(4)), CAST(comment AS CHAR(3)), CAST(SUBSTR(comment,length(comment) - 4) AS CHAR(4))]) AS char_array, " +
                         "   IF (orderkey % 49 = 0, NULL, ARRAY[comment, comment]) AS varchar_array " +
@@ -355,6 +357,8 @@ public class TestHivePushdownFilterQueries
     public void testStrings()
     {
         assertFilterProject("comment < 'a' OR comment BETWEEN 'c' AND 'd'", "empty_comment");
+        assertFilterProject("empty_varchar = ''", "empty_varchar");
+        assertFilterProject("empty_varchar <> ''", "empty_varchar");
         //char
         assertFilterProject("orderkey = 8480", "char_array");
         assertFilterProject("orderkey < 1000", "fixed_comment");
@@ -487,6 +491,46 @@ public class TestHivePushdownFilterQueries
     }
 
     @Test
+    public void testNaN()
+    {
+        getQueryRunner().execute("CREATE TABLE test_nans(double_nan DOUBLE, float_nan REAL)");
+        getQueryRunner().execute("INSERT INTO test_nans values (CAST('NaN' AS DOUBLE), CAST('NaN' AS REAL)), (CAST('-Infinity' AS DOUBLE), CAST('-Infinity' AS REAL)), (CAST('Infinity' AS DOUBLE), CAST('Infinity' AS REAL)), (1.0, 1.0)");
+
+        try {
+            assertQuery("SELECT double_nan from test_nans where double_nan > 1.0", "SELECT CAST('Infinity' AS DOUBLE)");
+            assertQuery("SELECT double_nan from test_nans where double_nan < 1.0", "SELECT CAST('-Infinity' AS DOUBLE)");
+            assertQuery("SELECT double_nan from test_nans where double_nan = 1.0 ", "SELECT 1.0");
+
+            assertQuery("SELECT double_nan from test_nans where double_nan = CAST('Infinity' AS DOUBLE) ", "SELECT CAST('Infinity' AS DOUBLE)");
+            assertQueryReturnsEmptyResult("SELECT * from test_nans where double_nan > CAST('Infinity' AS DOUBLE) ");
+
+            assertQuery("SELECT double_nan from test_nans where double_nan = CAST('-Infinity' AS DOUBLE) ", "SELECT CAST('-Infinity' AS DOUBLE)");
+            assertQueryReturnsEmptyResult("SELECT double_nan from test_nans where double_nan < CAST('-Infinity' AS DOUBLE) ");
+
+            assertQueryReturnsEmptyResult("SELECT double_nan from test_nans where double_nan = CAST('NaN' AS DOUBLE)");
+            assertQueryReturnsEmptyResult("SELECT double_nan from test_nans where double_nan < CAST('NaN' AS DOUBLE)");
+            assertQueryReturnsEmptyResult("SELECT double_nan from test_nans where double_nan > CAST('NaN' AS DOUBLE)");
+
+            assertQuery("SELECT float_nan from test_nans where float_nan > 1.0", "SELECT CAST('Infinity' AS REAL)");
+            assertQuery("SELECT float_nan from test_nans where float_nan < 1.0", "SELECT CAST('-Infinity' AS REAL)");
+            assertQuery("SELECT float_nan from test_nans where float_nan = 1.0 ", "SELECT CAST(1.0 AS REAL)");
+
+            assertQuery("SELECT float_nan from test_nans where float_nan = CAST('Infinity' AS REAL) ", "SELECT CAST('Infinity' AS REAL)");
+            assertQueryReturnsEmptyResult("SELECT float_nan from test_nans where float_nan > CAST('Infinity' AS REAL) ");
+
+            assertQuery("SELECT float_nan from test_nans where float_nan = CAST('-Infinity' AS REAL) ", "SELECT CAST('-Infinity' AS REAL)");
+            assertQueryReturnsEmptyResult("SELECT float_nan from test_nans where float_nan < CAST('-Infinity' AS REAL) ");
+
+            assertQueryReturnsEmptyResult("SELECT float_nan from test_nans where float_nan = CAST('NaN' AS REAL)");
+            assertQueryReturnsEmptyResult("SELECT float_nan from test_nans where float_nan < CAST('NaN' AS REAL)");
+            assertQueryReturnsEmptyResult("SELECT float_nan from test_nans where float_nan > CAST('NaN' AS REAL)");
+        }
+        finally {
+            getQueryRunner().execute("DROP TABLE test_nans");
+        }
+    }
+
+    @Test
     public void testStructs()
     {
         assertQueryUsingH2Cte("SELECT orderkey, info, dates FROM lineitem_ex");
@@ -600,11 +644,11 @@ public class TestHivePushdownFilterQueries
         // Tests composing two pushdowns each with a range filter and filter function.
         assertQuery(
                 "WITH data AS (" +
-                "    SELECT l.suppkey, l.linenumber, l.shipmode, MAX(o.orderdate)" +
-                "    FROM lineitem l,  orders o WHERE" +
-                "        o.orderkey = l.orderkey AND linenumber IN (2, 3, 4, 6) AND shipmode LIKE '%AIR%'" +
-                "        GROUP BY l.suppkey, l.linenumber, l.shipmode)" +
-                "SELECT COUNT(*) FROM data WHERE suppkey BETWEEN 10 AND 30 AND shipmode LIKE '%REG%'");
+                        "    SELECT l.suppkey, l.linenumber, l.shipmode, MAX(o.orderdate)" +
+                        "    FROM lineitem l,  orders o WHERE" +
+                        "        o.orderkey = l.orderkey AND linenumber IN (2, 3, 4, 6) AND shipmode LIKE '%AIR%'" +
+                        "        GROUP BY l.suppkey, l.linenumber, l.shipmode)" +
+                        "SELECT COUNT(*) FROM data WHERE suppkey BETWEEN 10 AND 30 AND shipmode LIKE '%REG%'");
     }
 
     @Test

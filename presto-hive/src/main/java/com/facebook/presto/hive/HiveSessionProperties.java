@@ -377,7 +377,7 @@ public final class HiveSessionProperties
                 booleanProperty(
                         PUSHDOWN_FILTER_ENABLED,
                         "Experimental: enable complex filter pushdown",
-                        hiveClientConfig.isPushdownFilterEnabled(),
+                        true, //hiveClientConfig.isPushdownFilterEnabled(),
                         false),
                 booleanProperty(
                         NESTED_COLUMNS_FILTER_ENABLED,
