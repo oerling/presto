@@ -37,7 +37,7 @@ public class ScanInfo
         this.label = label;
         this.filters = filters;
         if (Trace.isTrace("scaninfo")) {
-            Trace.trace("newScanInfo " + Trace.stackTrace(10));
+            Trace.trace("newScanInfo " + toString() + Trace.stackTrace(30));
         }
     }
 
@@ -75,44 +75,21 @@ public class ScanInfo
                 result.put(filter.getLabel(), filter);
             }
         }
+        ScanInfo merged = new ScanInfo(label, ImmutableList.copyOf(result.values()));
         if (Trace.isTrace("scaninfo")) {
-            Trace.trace("mergeScanInfo " + Trace.stackTrace(10));
+            Trace.trace("mergeScanInfo " + merged.toString() + Trace.stackTrace(10));
         }
-        return new ScanInfo(label, ImmutableList.copyOf(result.values()));
+        return merged;
     }
 
-    public static class FilterInfo
+    @Override
+    public String toString()
     {
-        private String label;
-        private long nIn;
-        private long nOut;
-
-        @JsonCreator
-        public FilterInfo(@JsonProperty("label") String label,
-                          @JsonProperty("nIn") long nIn,
-                          @JsonProperty("nOut") long nOut)
-        {
-            this.label = label;
-            this.nIn = nIn;
-            this.nOut = nOut;
+        StringBuilder builder = new StringBuilder();
+        builder.append(label);
+        for (FilterInfo filter : filters) {
+            builder.append(filter.toString());
         }
-
-        @JsonProperty
-        public String getLabel()
-        {
-            return label;
-        }
-
-        @JsonProperty
-        public long getNIn()
-        {
-            return nIn;
-        }
-
-        @JsonProperty
-        public long getNOut()
-        {
-            return nOut;
-        }
+        return builder.toString();
     }
 }
