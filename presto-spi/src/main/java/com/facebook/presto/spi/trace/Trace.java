@@ -44,6 +44,7 @@ public class Trace
             StringBuilder builder = new StringBuilder();
             for (String option : lines) {
                 builder.append(option);
+                builder.append(" ");
             }
             trace = builder.toString();
             printTime = trace.contains("time");
@@ -67,6 +68,7 @@ public class Trace
 
     public static boolean isTrace(String pattern)
     {
+        readTraceSettings();
         return trace.contains(pattern);
     }
 
@@ -77,7 +79,7 @@ public class Trace
                 if (traceWriter == null) {
                     traceWriter = Files.newBufferedWriter(Paths.get("/tmp/presto.out"), CREATE);
                     if (printTime) {
-                        traceWriter.append("Trace");
+                        traceWriter.append("Trace: ");
                         traceWriter.append(trace);
                         traceWriter.newLine();
                     }
