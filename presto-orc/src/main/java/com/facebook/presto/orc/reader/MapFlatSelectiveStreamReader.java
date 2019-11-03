@@ -166,10 +166,12 @@ public class MapFlatSelectiveStreamReader
         }
         else {
             switch (keyOrcTypeKind) {
+                case BOOLEAN:
                 case BYTE:
                 case SHORT:
                 case INT:
                 case LONG:
+                case DECIMAL:
                     requiredLongKeys = requiredSubfields.stream()
                             .map(Subfield::getPath)
                             .map(path -> path.get(0))
@@ -178,6 +180,7 @@ public class MapFlatSelectiveStreamReader
                             .collect(toImmutableSet());
                     requiredStringKeys = null;
                     return;
+                case VARCHAR:
                 case STRING:
                 case BINARY:
                     requiredStringKeys = requiredSubfields.stream()
