@@ -51,6 +51,7 @@ import static com.facebook.presto.orc.TupleDomainFilter.IS_NULL;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.LENGTH;
 import static com.facebook.presto.orc.metadata.Stream.StreamKind.PRESENT;
 import static com.facebook.presto.orc.reader.SelectiveStreamReaders.createNestedStreamReader;
+import static com.facebook.presto.orc.reader.SelectiveStreamReaders.prepareOutputPositions;
 import static com.facebook.presto.orc.stream.MissingInputStreamSource.missingStreamSource;
 import static com.facebook.presto.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static com.facebook.presto.spi.block.ClosingBlockLease.newLease;
@@ -238,13 +239,7 @@ public class ListSelectiveStreamReader
             nulls = ensureCapacity(nulls, positionCount);
         }
 
-        if (!(nullsAllowed && nonNullsAllowed) || nullsFilter != null || listFilter != null) {
-            outputPositions = ensureCapacity(outputPositions, positionCount);
-        }
-        else {
-            outputPositions = positions;
-            outputPositionsReadOnly = true;
-        }
+        outputPositions = prepareOutputPositions(outputPositions, positions, positionCount);
 
         systemMemoryContext.setBytes(getRetainedSizeInBytes());
 
