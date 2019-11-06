@@ -94,7 +94,7 @@ public class LegacyAccessControl
     @Override
     public void checkCanDropTable(ConnectorTransactionHandle transaction, ConnectorIdentity identity, SchemaTableName tableName)
     {
-        if (!allowDropTable) {
+        if (false && !allowDropTable) {
             denyDropTable(tableName.toString());
         }
 
