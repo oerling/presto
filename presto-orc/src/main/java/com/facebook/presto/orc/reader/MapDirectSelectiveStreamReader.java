@@ -267,8 +267,6 @@ public class MapDirectSelectiveStreamReader
     {
         if (nullsAllowed) {
             outputPositionCount = positionCount;
-            outputPositions = positions;
-            outputPositionsReadOnly = true;
         }
         else {
             outputPositionCount = 0;
@@ -309,9 +307,7 @@ public class MapDirectSelectiveStreamReader
             nestedOffset += length;
         }
 
-        outputPositions = positions;
         outputPositionCount = positionCount;
-        outputPositionsReadOnly = true;
         readOffset = offset + streamPosition;
 
         if (outputRequired) {

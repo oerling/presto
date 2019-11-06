@@ -200,7 +200,7 @@ public abstract class AbstractDecimalSelectiveStreamReader
         else if (nullsAllowed) {
             outputPositionCount = positionCount;
             if (filter != null) {
-                outputPositions = positions;
+                /* removed outputPositions asg. */
                 outputPositionsReadOnly = true;
             }
         }

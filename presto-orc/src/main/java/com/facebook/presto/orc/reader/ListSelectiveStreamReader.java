@@ -304,8 +304,6 @@ public class ListSelectiveStreamReader
             }
             else {
                 outputPositionCount = positionCount;
-                outputPositions = positions;
-                outputPositionsReadOnly = true;
             }
         }
         else {

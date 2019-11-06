@@ -261,7 +261,7 @@ public class TimestampSelectiveStreamReader
         else if (nullsAllowed) {
             outputPositionCount = positionCount;
             if (filter != null) {
-                outputPositions = positions;
+                /* removed outputPositions asg. */
                 outputPositionsReadOnly = true;
             }
         }
@@ -345,7 +345,7 @@ public class TimestampSelectiveStreamReader
         }
 
         boolean includeNulls = nullsAllowed && presentStream != null;
-        if (positionCount == outputPositionCount) {
+        if (false && positionCount == outputPositionCount) {
             Block block = new LongArrayBlock(positionCount, Optional.ofNullable(includeNulls ? nulls : null), values);
             nulls = null;
             values = null;

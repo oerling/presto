@@ -218,7 +218,7 @@ public class StructSelectiveStreamReader
             // no nulls
             if (nonNullsAllowed) {
                 if (nestedReaders.isEmpty()) {
-                    outputPositions = positions;
+                    /* removed outputPositions asg. */
                     outputPositionCount = positionCount;
                     outputPositionsReadOnly = true;
                 }
@@ -652,7 +652,7 @@ public class StructSelectiveStreamReader
         @Override
         public int read(int offset, int[] positions, int positionCount)
         {
-            outputPositions = positions;
+            /* removed outputPositions asg. */
             outputPositionCount = positionCount;
             return outputPositionCount;
         }

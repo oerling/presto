@@ -256,7 +256,7 @@ public class MapFlatSelectiveStreamReader
         }
         else {
             outputPositionCount = positionCount;
-            outputPositions = positions;
+            /* removed outputPositions asg. */
             outputPositionsReadOnly = true;
         }
     }
