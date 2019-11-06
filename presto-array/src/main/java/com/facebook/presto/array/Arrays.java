@@ -36,14 +36,20 @@ public class Arrays
         }
         else if (buffer.length < capacity) {
             if (expansionOption == PRESERVE) {
+                int oldSize = buffer.length;
                 buffer = java.util.Arrays.copyOf(buffer, newCapacity);
+                debugFill(buffer, 0);
             }
             else {
                 buffer = new int[newCapacity];
+                debugFill(buffer, 0);
             }
         }
         else if (expansionOption == INITIALIZE) {
             java.util.Arrays.fill(buffer, 0);
+        }
+        else if (expansionOption != PRESERVE) {
+            debugFill(buffer, 0);
         }
 
         return buffer;
@@ -52,44 +58,48 @@ public class Arrays
     public static long[] ensureCapacity(long[] buffer, int capacity)
     {
         if (buffer == null || buffer.length < capacity) {
-            return new long[(int) (capacity * SMALL.expansionFactor)];
+            buffer = new long[(int) (capacity * SMALL.expansionFactor)];
         }
-
+        debugFill(buffer, 0);
         return buffer;
     }
 
     public static boolean[] ensureCapacity(boolean[] buffer, int capacity)
     {
         if (buffer == null || buffer.length < capacity) {
-            return new boolean[(int) (capacity * SMALL.expansionFactor)];
+            buffer = new boolean[(int) (capacity * SMALL.expansionFactor)];
         }
 
+        debugFill(buffer, 0);
         return buffer;
     }
 
     public static byte[] ensureCapacity(byte[] buffer, int capacity)
     {
         if (buffer == null || buffer.length < capacity) {
-            return new byte[(int) (capacity * SMALL.expansionFactor)];
+            buffer = new byte[(int) (capacity * SMALL.expansionFactor)];
         }
 
+        debugFill(buffer, 0);
         return buffer;
     }
 
     public static int[][] ensureCapacity(int[][] buffer, int capacity)
     {
         if (buffer == null || buffer.length < capacity) {
-            return new int[capacity][];
+            buffer = new int[capacity][];
         }
 
+        debugFill(buffer, 0);
         return buffer;
     }
 
     public static boolean[][] ensureCapacity(boolean[][] buffer, int capacity)
     {
         if (buffer == null || buffer.length < capacity) {
-            return new boolean[capacity][];
+            buffer = new boolean[capacity][];
         }
+        debugFill(buffer, 0);
 
         return buffer;
     }
@@ -103,7 +113,9 @@ public class Arrays
         }
         else if (buffer.length < capacity) {
             if (expansionOption == PRESERVE) {
+                int oldCapacity = buffer.length;
                 buffer = java.util.Arrays.copyOf(buffer, newCapacity);
+                debugFill(buffer, oldCapacity);
             }
             else {
                 buffer = new byte[newCapacity];
@@ -112,10 +124,65 @@ public class Arrays
         else if (expansionOption == INITIALIZE) {
             java.util.Arrays.fill(buffer, (byte) 0);
         }
+        else if (expansionOption != PRESERVE) {
+            debugFill(buffer, 0);
+        }
 
         return buffer;
     }
 
+    private static void debugFill(byte[] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = (byte) i;
+        }
+    }
+
+    private static void debugFill(boolean[] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = (i & 1) == 0;
+        }
+    }
+    
+    private static void debugFill(int[] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = -1000000000 - i;
+        }
+    }
+
+    private static void debugFill(int[][] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = null;
+        }
+    }
+
+    private static void debugFill(int[][][] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = null;
+        }
+    }
+
+    private static void debugFill(boolean[][] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = null;
+        }
+    }
+
+    
+    
+    private static void debugFill(long[] array, int begin)
+    {
+        for (int i = begin; i < array.length; i++) {
+            array[i] = -10000000000000L - i;
+        }
+    }
+        
+    
     public enum ExpansionFactor
     {
         SMALL(1.0),
