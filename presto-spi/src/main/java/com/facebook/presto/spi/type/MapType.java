@@ -66,9 +66,9 @@ public class MapType
         }
         this.keyType = keyType;
         this.valueType = valueType;
-        requireNonNull(keyBlockNativeEquals, "keyBlockNativeEquals is null");
-        requireNonNull(keyNativeHashCode, "keyNativeHashCode is null");
-        requireNonNull(keyBlockHashCode, "keyBlockHashCode is null");
+        //requireNonNull(keyBlockNativeEquals, "keyBlockNativeEquals is null");
+        //requireNonNull(keyNativeHashCode, "keyNativeHashCode is null");
+        //requireNonNull(keyBlockHashCode, "keyBlockHashCode is null");
         this.keyBlockNativeEquals = keyBlockNativeEquals;
         this.keyNativeHashCode = keyNativeHashCode;
         this.keyBlockHashCode = keyBlockHashCode;

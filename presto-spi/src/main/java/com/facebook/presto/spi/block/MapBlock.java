@@ -212,7 +212,7 @@ public class MapBlock
     }
 
     @Override
-    protected Block getRawValueBlock()
+    public Block getRawValueBlock()
     {
         return valueBlock;
     }

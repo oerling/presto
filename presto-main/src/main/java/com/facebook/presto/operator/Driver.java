@@ -47,6 +47,8 @@ import java.util.function.Supplier;
 import static com.facebook.airlift.concurrent.MoreFutures.getFutureValue;
 import static com.facebook.presto.operator.Operator.NOT_BLOCKED;
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
+import static com.facebook.presto.spi.type.HashUtil.checkPage;
+
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfUnchecked;
@@ -381,6 +383,7 @@ public class Driver
 
                     // if we got an output page, add it to the next operator
                     if (page != null && page.getPositionCount() != 0) {
+                        checkPage(page);
                         next.addInput(page);
                         next.getOperatorContext().recordAddInput(operationTimer, page);
                         movedPage = true;

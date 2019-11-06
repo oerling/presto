@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.facebook.presto.spi.block.DictionaryId.randomDictionaryId;
+import static com.facebook.presto.spi.type.HashUtil.checkPage;
 import static io.airlift.slice.SizeOf.sizeOf;
 import static java.lang.Math.min;
 import static java.lang.String.format;
@@ -45,6 +46,7 @@ public class Page
     public Page(Block... blocks)
     {
         this(determinePositionCount(blocks), blocks);
+        checkPage(this);
     }
 
     public Page(int positionCount, Block... blocks)
@@ -52,6 +54,7 @@ public class Page
         requireNonNull(blocks, "blocks is null");
         this.blocks = Arrays.copyOf(blocks, blocks.length);
         this.positionCount = positionCount;
+        checkPage(this);
     }
 
     public int getChannelCount()
