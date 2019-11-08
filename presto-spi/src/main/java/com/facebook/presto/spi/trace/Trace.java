@@ -13,6 +13,11 @@
  */
 package com.facebook.presto.spi.trace;
 
+import com.facebook.presto.spi.Page;
+import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.LongArrayBlock;
+import com.facebook.presto.spi.block.VariableWidthBlock;
+
 import java.io.BufferedWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -128,4 +133,35 @@ public class Trace
         }
         return result.toString();
     }
+
+
+    public static void tracePage(String message, Page page)
+    {
+        StringBuilder builder = new StringBuilder();
+        builder.append(message);
+        builder.append("\n Page" + page.getPositionCount() + " rows:\n");
+        for (int i = 0; i < page.getPositionCount(); i++) {
+            builder.append("Row " + i + ": ");
+            for (int channel = 0; channel < page.getChannelCount(); channel++) {
+                Block block = page.getBlock(channel);
+                if (block instanceof LongArrayBlock) {
+                    builder.append(Long.valueOf(((LongArrayBlock) block).getLong(i)).toString());
+                }
+                else if (block instanceof VariableWidthBlock) {
+                    VariableWidthBlock values = (VariableWidthBlock) block;
+                    Slice slice = values.getSlice(i, 0, values.getSliceLength(i));
+                    builder.append(slice.toStringUtf8());
+                }
+                else {
+                    builder.append("<***>");
+                }
+                builder.append(", ");
+            }
+            builder.append("\n");
+        }
+        trace(builder.toString());
+        flushTrace();
+    }
 }
+
+
