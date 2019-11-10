@@ -13,16 +13,15 @@
  */
 package com.facebook.presto.hive;
 
-import com.facebook.presto.expressions.RowExpressionNodeInliner;
 import com.facebook.presto.orc.FilterFunction;
 import com.facebook.presto.orc.TupleDomainFilter;
-import com.facebook.presto.orc.TupleDomainFilterUtils;
 import com.facebook.presto.spi.ConnectorPageSource;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.predicate.Domain;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.predicate.TupleDomain.ColumnDomain;
 import com.facebook.presto.spi.relation.ConstantExpression;
 import com.facebook.presto.spi.relation.InputReferenceExpression;
 import com.facebook.presto.spi.relation.RowExpression;
@@ -42,15 +41,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.facebook.presto.expressions.RowExpressionNodeInliner.replaceExpression;
 import static com.facebook.presto.hive.orc.OrcSelectivePageSourceFactory.toFilterFunctions;
+import static com.facebook.presto.orc.TupleDomainFilterUtils.toFilter;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.RealType.REAL;
 import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
-import static java.lang.Boolean.TRUE;
 import static java.lang.Double.longBitsToDouble;
 import static java.lang.Float.intBitsToFloat;
 import static sun.misc.Unsafe.ARRAY_BYTE_BASE_OFFSET;
@@ -58,31 +59,34 @@ import static sun.misc.Unsafe.ARRAY_BYTE_BASE_OFFSET;
 public class FilteredHivePageSource
         extends HivePageSource
 {
+    public static final ConstantExpression TRUE_CONSTANT = new ConstantExpression(true, BOOLEAN);
     private List<HiveColumnHandle> columns;
     private TupleDomain<HiveColumnHandle> predicate;
-    private RowExpression optimizedPredicate;
+    private RowExpression remainingPredicate;
     private TypeManager typeManager;
-    private RowExpressionService expressionService;
+    private RowExpressionService rowExpressionService;
     private ConnectorSession session;
+    private List<HivePageSourceProvider.ColumnMapping> columnMappings;
 
     public FilteredHivePageSource(
             List<HivePageSourceProvider.ColumnMapping> columnMappings,
             List<HiveColumnHandle> columns,
             TupleDomain<HiveColumnHandle> predicate,
-            RowExpression optimizedPredicate,
+            RowExpression remainingPredicate,
             Optional<HivePageSourceProvider.BucketAdaptation> bucketAdaptation,
             DateTimeZone hiveStorageTimeZone,
             TypeManager typeManager,
-            RowExpressionService expressionService,
+            RowExpressionService rowExpressionService,
             ConnectorSession session,
             ConnectorPageSource delegate)
     {
         super(columnMappings, bucketAdaptation, hiveStorageTimeZone, typeManager, delegate);
+        this.columnMappings = columnMappings;
         this.columns = columns;
         this.predicate = predicate;
-        this.optimizedPredicate = optimizedPredicate;
+        this.remainingPredicate = remainingPredicate;
         this.typeManager = typeManager;
-        this.expressionService = expressionService;
+        this.rowExpressionService = rowExpressionService;
         this.session = session;
     }
 
@@ -100,28 +104,28 @@ public class FilteredHivePageSource
             positions[i] = i;
         }
 
+        ImmutableMap<HiveColumnHandle, Domain> filters = ImmutableMap.of();
+        Optional<List<ColumnDomain<HiveColumnHandle>>> columnDomains = predicate.getColumnDomains();
+        if (columnDomains.isPresent()) {
+            filters = columnDomains.get().stream().collect(toImmutableMap(ColumnDomain::getColumn, ColumnDomain::getDomain));
+        }
+
         Block[] blocks = new Block[page.getChannelCount()];
         for (int i = 0; i < page.getChannelCount(); i++) {
             blocks[i] = page.getBlock(i);
-        }
-
-        Optional<List<TupleDomain.ColumnDomain<HiveColumnHandle>>> columnDomains = predicate.getColumnDomains();
-        if (columnDomains.isPresent()) {
-            ImmutableMap<HiveColumnHandle, Domain> filters = columnDomains.get().stream().collect(toImmutableMap(TupleDomain.ColumnDomain::getColumn, TupleDomain.ColumnDomain::getDomain));
-            if (filters != null && filters.size() > 0) {
-                for (Map.Entry<HiveColumnHandle, Domain> filter : filters.entrySet()) {
-                    positionCount = filterBlock(blocks[filter.getKey().getHiveColumnIndex()], filter.getKey().getHiveType().getType(typeManager), TupleDomainFilterUtils.toFilter(filter.getValue()), positions, positionCount);
-                }
+            HiveColumnHandle columnHandle = columnMappings.get(i).getHiveColumnHandle();
+            if (filters.containsKey(columnHandle)) {
+                positionCount = filterBlock(blocks[i], columnHandle.getHiveType().getType(typeManager), toFilter(filters.get(columnHandle)), positions, positionCount);
             }
         }
 
-        if (optimizedPredicate != null && !(optimizedPredicate instanceof ConstantExpression && TRUE == ((ConstantExpression) optimizedPredicate).getValue())) {
+        if (remainingPredicate != null && !(remainingPredicate.equals(TRUE_CONSTANT))) {
             Map<VariableReferenceExpression, InputReferenceExpression> variableToInput = columns.stream()
                     .collect(toImmutableMap(
                             hiveColumnIndex -> new VariableReferenceExpression(hiveColumnIndex.getName(), hiveColumnIndex.getHiveType().getType(typeManager)),
                             hiveColumnIndex -> new InputReferenceExpression(hiveColumnIndex.getHiveColumnIndex(), hiveColumnIndex.getHiveType().getType(typeManager))));
 
-            List<FilterFunction> filterFunctions = toFilterFunctions(RowExpressionNodeInliner.replaceExpression(optimizedPredicate, variableToInput), session, expressionService.getDeterminismEvaluator(), expressionService.getPredicateCompiler());
+            List<FilterFunction> filterFunctions = toFilterFunctions(replaceExpression(remainingPredicate, variableToInput), session, rowExpressionService.getDeterminismEvaluator(), rowExpressionService.getPredicateCompiler());
             RuntimeException[] errors = new RuntimeException[positionCount];
 
             for (FilterFunction function : filterFunctions) {
@@ -130,14 +134,12 @@ public class FilteredHivePageSource
                     break;
                 }
             }
-
             for (int i = 0; i < positionCount; i++) {
                 if (errors[i] != null) {
                     throw errors[i];
                 }
             }
         }
-
         page = new Page(positionCount, blocks);
         return page.getPositions(positions, 0, positionCount);
     }

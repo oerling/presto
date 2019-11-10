@@ -302,7 +302,7 @@ public class FeaturesConfig
 
     public boolean isLegacyMapSubscript()
     {
-        return legacyMapSubscript;
+        return true; //legacyMapSubscript;
     }
 
     public JoinDistributionType getJoinDistributionType()
