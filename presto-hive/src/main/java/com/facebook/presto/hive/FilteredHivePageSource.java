@@ -40,6 +40,8 @@ import org.joda.time.DateTimeZone;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.IntStream;
 
 import static com.facebook.presto.expressions.RowExpressionNodeInliner.replaceExpression;
 import static com.facebook.presto.hive.orc.OrcSelectivePageSourceFactory.toFilterFunctions;
@@ -67,6 +69,7 @@ public class FilteredHivePageSource
     private RowExpressionService rowExpressionService;
     private ConnectorSession session;
     private List<HivePageSourceProvider.ColumnMapping> columnMappings;
+    private final Map<Integer, Integer> functionInputs;
 
     public FilteredHivePageSource(
             List<HivePageSourceProvider.ColumnMapping> columnMappings,
@@ -88,6 +91,9 @@ public class FilteredHivePageSource
         this.typeManager = typeManager;
         this.rowExpressionService = rowExpressionService;
         this.session = session;
+        this.functionInputs = IntStream.range(0, columns.size())
+                .boxed()
+                .collect(toImmutableMap(i -> columns.get(i).getHiveColumnIndex(), Function.identity()));
     }
 
     @Override
@@ -129,7 +135,15 @@ public class FilteredHivePageSource
             RuntimeException[] errors = new RuntimeException[positionCount];
 
             for (FilterFunction function : filterFunctions) {
-                positionCount = function.filter(page, positions, positionCount, errors);
+                int[] inputs = function.getInputChannels();
+                Block[] inputBlocks = new Block[inputs.length];
+
+                for (int i = 0; i < inputs.length; i++) {
+                    inputBlocks[i] = blocks[this.functionInputs.get(inputs[i])];
+                }
+
+                Page inputPage = new Page(positionCount, inputBlocks);
+                positionCount = function.filter(inputPage, positions, positionCount, errors);
                 if (positionCount == 0) {
                     break;
                 }

@@ -60,7 +60,6 @@ import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.MaterializedRow;
 import com.facebook.presto.testing.TestingConnectorSession;
 import com.facebook.presto.testing.TestingNodeManager;
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
@@ -80,6 +79,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.function.BiFunction;
 
 import static com.facebook.airlift.concurrent.MoreFutures.getFutureValue;
 import static com.facebook.airlift.concurrent.Threads.daemonThreadsNamed;
@@ -88,6 +88,7 @@ import static com.facebook.presto.hive.AbstractTestHiveClient.createTablePropert
 import static com.facebook.presto.hive.AbstractTestHiveClient.filterNonHiddenColumnHandles;
 import static com.facebook.presto.hive.AbstractTestHiveClient.filterNonHiddenColumnMetadata;
 import static com.facebook.presto.hive.AbstractTestHiveClient.getAllSplits;
+import static com.facebook.presto.hive.HiveTestUtils.FILTER_STATS_CALCULATOR_SERVICE;
 import static com.facebook.presto.hive.HiveTestUtils.FUNCTION_RESOLUTION;
 import static com.facebook.presto.hive.HiveTestUtils.PAGE_SORTER;
 import static com.facebook.presto.hive.HiveTestUtils.ROW_EXPRESSION_SERVICE;
@@ -131,6 +132,7 @@ public abstract class AbstractTestHiveFileSystem
 
     private ExecutorService executor;
     private HiveClientConfig config;
+    private MetastoreClientConfig metastoreClientConfig;
 
     @BeforeClass
     public void setUp()
@@ -149,7 +151,7 @@ public abstract class AbstractTestHiveFileSystem
 
     protected abstract Path getBasePath();
 
-    protected void setup(String host, int port, String databaseName, Function<HiveClientConfig, HdfsConfiguration> hdfsConfigurationProvider, boolean s3SelectPushdownEnabled)
+    protected void setup(String host, int port, String databaseName, BiFunction<HiveClientConfig, MetastoreClientConfig, HdfsConfiguration> hdfsConfigurationProvider, boolean s3SelectPushdownEnabled)
     {
         database = databaseName;
         table = new SchemaTableName(database, "presto_test_external_fs");
@@ -158,19 +160,20 @@ public abstract class AbstractTestHiveFileSystem
         temporaryCreateTable = new SchemaTableName(database, "tmp_presto_test_create_" + random);
 
         config = new HiveClientConfig().setS3SelectPushdownEnabled(s3SelectPushdownEnabled);
+        metastoreClientConfig = new MetastoreClientConfig();
 
         String proxy = System.getProperty("hive.metastore.thrift.client.socks-proxy");
         if (proxy != null) {
-            config.setMetastoreSocksProxy(HostAndPort.fromString(proxy));
+            metastoreClientConfig.setMetastoreSocksProxy(HostAndPort.fromString(proxy));
         }
 
-        HiveCluster hiveCluster = new TestingHiveCluster(config, host, port);
+        HiveCluster hiveCluster = new TestingHiveCluster(metastoreClientConfig, host, port);
         ExecutorService executor = newCachedThreadPool(daemonThreadsNamed("hive-%s"));
         HivePartitionManager hivePartitionManager = new HivePartitionManager(TYPE_MANAGER, config);
 
-        HdfsConfiguration hdfsConfiguration = hdfsConfigurationProvider.apply(config);
+        HdfsConfiguration hdfsConfiguration = hdfsConfigurationProvider.apply(config, metastoreClientConfig);
 
-        hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, config, new NoHdfsAuthentication());
+        hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, metastoreClientConfig, new NoHdfsAuthentication());
         metastoreClient = new TestingHiveMetastore(
                 new BridgingHiveMetastore(new ThriftHiveMetastore(hiveCluster)),
                 executor,
@@ -189,6 +192,7 @@ public abstract class AbstractTestHiveFileSystem
                 locationService,
                 FUNCTION_RESOLUTION,
                 ROW_EXPRESSION_SERVICE,
+                FILTER_STATS_CALCULATOR_SERVICE,
                 new TableParameterCodec(),
                 partitionUpdateCodec,
                 new HiveTypeTranslator(),
@@ -213,7 +217,7 @@ public abstract class AbstractTestHiveFileSystem
                 config.getSplitLoaderConcurrency(),
                 config.getRecursiveDirWalkerEnabled());
         pageSinkProvider = new HivePageSinkProvider(
-                getDefaultHiveFileWriterFactories(config),
+                getDefaultHiveFileWriterFactories(config, metastoreClientConfig),
                 hdfsEnvironment,
                 PAGE_SORTER,
                 metastoreClient,
@@ -226,8 +230,8 @@ public abstract class AbstractTestHiveFileSystem
                 new HiveEventClient(),
                 new HiveSessionProperties(config, new OrcFileWriterConfig(), new ParquetFileWriterConfig()),
                 new HiveWriterStats(),
-                getDefaultOrcFileWriterFactory(config));
-        pageSourceProvider = new HivePageSourceProvider(config, hdfsEnvironment, getDefaultHiveRecordCursorProvider(config), getDefaultHiveBatchPageSourceFactories(config), getDefaultHiveSelectivePageSourceFactories(config), TYPE_MANAGER, ROW_EXPRESSION_SERVICE);
+                getDefaultOrcFileWriterFactory(config, metastoreClientConfig));
+        pageSourceProvider = new HivePageSourceProvider(config, hdfsEnvironment, getDefaultHiveRecordCursorProvider(config, metastoreClientConfig), getDefaultHiveBatchPageSourceFactories(config, metastoreClientConfig), getDefaultHiveSelectivePageSourceFactories(config, metastoreClientConfig), TYPE_MANAGER, ROW_EXPRESSION_SERVICE);
     }
 
     protected ConnectorSession newSession()

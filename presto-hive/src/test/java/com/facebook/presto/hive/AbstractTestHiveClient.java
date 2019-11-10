@@ -198,6 +198,7 @@ import static com.facebook.presto.hive.HiveTableProperties.BUCKET_COUNT_PROPERTY
 import static com.facebook.presto.hive.HiveTableProperties.PARTITIONED_BY_PROPERTY;
 import static com.facebook.presto.hive.HiveTableProperties.SORTED_BY_PROPERTY;
 import static com.facebook.presto.hive.HiveTableProperties.STORAGE_FORMAT_PROPERTY;
+import static com.facebook.presto.hive.HiveTestUtils.FILTER_STATS_CALCULATOR_SERVICE;
 import static com.facebook.presto.hive.HiveTestUtils.FUNCTION_RESOLUTION;
 import static com.facebook.presto.hive.HiveTestUtils.PAGE_SORTER;
 import static com.facebook.presto.hive.HiveTestUtils.ROW_EXPRESSION_SERVICE;
@@ -222,7 +223,6 @@ import static com.facebook.presto.hive.HiveType.HIVE_SHORT;
 import static com.facebook.presto.hive.HiveType.HIVE_STRING;
 import static com.facebook.presto.hive.HiveType.toHiveType;
 import static com.facebook.presto.hive.HiveUtil.columnExtraInfo;
-import static com.facebook.presto.hive.HiveUtil.toPartitionValues;
 import static com.facebook.presto.hive.HiveWriteUtils.createDirectory;
 import static com.facebook.presto.hive.LocationHandle.WriteMode.STAGE_AND_MOVE_TO_TARGET_DIRECTORY;
 import static com.facebook.presto.hive.metastore.HiveColumnStatistics.createBinaryColumnStatistics;
@@ -232,6 +232,7 @@ import static com.facebook.presto.hive.metastore.HiveColumnStatistics.createDeci
 import static com.facebook.presto.hive.metastore.HiveColumnStatistics.createDoubleColumnStatistics;
 import static com.facebook.presto.hive.metastore.HiveColumnStatistics.createIntegerColumnStatistics;
 import static com.facebook.presto.hive.metastore.HiveColumnStatistics.createStringColumnStatistics;
+import static com.facebook.presto.hive.metastore.MetastoreUtil.toPartitionValues;
 import static com.facebook.presto.hive.metastore.PrestoTableType.MANAGED_TABLE;
 import static com.facebook.presto.hive.metastore.StorageFormat.fromHiveStorageFormat;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -823,13 +824,14 @@ public abstract class AbstractTestHiveClient
     protected final void setup(String host, int port, String databaseName, String timeZone)
     {
         HiveClientConfig hiveClientConfig = getHiveClientConfig();
+        MetastoreClientConfig metastoreClientConfig = getMetastoreClientConfig();
         hiveClientConfig.setTimeZone(timeZone);
         String proxy = System.getProperty("hive.metastore.thrift.client.socks-proxy");
         if (proxy != null) {
-            hiveClientConfig.setMetastoreSocksProxy(HostAndPort.fromString(proxy));
+            metastoreClientConfig.setMetastoreSocksProxy(HostAndPort.fromString(proxy));
         }
 
-        HiveCluster hiveCluster = new TestingHiveCluster(hiveClientConfig, host, port);
+        HiveCluster hiveCluster = new TestingHiveCluster(metastoreClientConfig, host, port);
         ExtendedHiveMetastore metastore = new CachingHiveMetastore(
                 new BridgingHiveMetastore(new ThriftHiveMetastore(hiveCluster)),
                 executor,
@@ -837,18 +839,18 @@ public abstract class AbstractTestHiveClient
                 Duration.valueOf("15s"),
                 10000);
 
-        setup(databaseName, hiveClientConfig, metastore);
+        setup(databaseName, hiveClientConfig, metastoreClientConfig, metastore);
     }
 
-    protected final void setup(String databaseName, HiveClientConfig hiveClientConfig, ExtendedHiveMetastore hiveMetastore)
+    protected final void setup(String databaseName, HiveClientConfig hiveClientConfig, MetastoreClientConfig metastoreClientConfig, ExtendedHiveMetastore hiveMetastore)
     {
         HiveConnectorId connectorId = new HiveConnectorId("hive-test");
 
         setupHive(connectorId.toString(), databaseName, hiveClientConfig.getTimeZone());
 
         metastoreClient = hiveMetastore;
-        HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationInitializer(hiveClientConfig), ImmutableSet.of());
-        hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hiveClientConfig, new NoHdfsAuthentication());
+        HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationInitializer(hiveClientConfig, metastoreClientConfig), ImmutableSet.of());
+        hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, metastoreClientConfig, new NoHdfsAuthentication());
         locationService = new HiveLocationService(hdfsEnvironment);
         metadataFactory = new HiveMetadataFactory(
                 metastoreClient,
@@ -865,6 +867,7 @@ public abstract class AbstractTestHiveClient
                 locationService,
                 FUNCTION_RESOLUTION,
                 ROW_EXPRESSION_SERVICE,
+                FILTER_STATS_CALCULATOR_SERVICE,
                 new TableParameterCodec(),
                 PARTITION_UPDATE_CODEC,
                 listeningDecorator(executor),
@@ -890,7 +893,7 @@ public abstract class AbstractTestHiveClient
                 hiveClientConfig.getSplitLoaderConcurrency(),
                 false);
         pageSinkProvider = new HivePageSinkProvider(
-                getDefaultHiveFileWriterFactories(hiveClientConfig),
+                getDefaultHiveFileWriterFactories(hiveClientConfig, metastoreClientConfig),
                 hdfsEnvironment,
                 PAGE_SORTER,
                 metastoreClient,
@@ -903,8 +906,8 @@ public abstract class AbstractTestHiveClient
                 new HiveEventClient(),
                 new HiveSessionProperties(hiveClientConfig, new OrcFileWriterConfig(), new ParquetFileWriterConfig()),
                 new HiveWriterStats(),
-                getDefaultOrcFileWriterFactory(hiveClientConfig));
-        pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, getDefaultHiveRecordCursorProvider(hiveClientConfig), getDefaultHiveBatchPageSourceFactories(hiveClientConfig), getDefaultHiveSelectivePageSourceFactories(hiveClientConfig), TYPE_MANAGER, ROW_EXPRESSION_SERVICE);
+                getDefaultOrcFileWriterFactory(hiveClientConfig, metastoreClientConfig));
+        pageSourceProvider = new HivePageSourceProvider(hiveClientConfig, hdfsEnvironment, getDefaultHiveRecordCursorProvider(hiveClientConfig, metastoreClientConfig), getDefaultHiveBatchPageSourceFactories(hiveClientConfig, metastoreClientConfig), getDefaultHiveSelectivePageSourceFactories(hiveClientConfig, metastoreClientConfig), TYPE_MANAGER, ROW_EXPRESSION_SERVICE);
     }
 
     /**
@@ -916,6 +919,11 @@ public abstract class AbstractTestHiveClient
                 .setMaxOpenSortFiles(10)
                 .setWriterSortBufferSize(new DataSize(100, KILOBYTE))
                 .setTemporaryTableSchema(database);
+    }
+
+    protected MetastoreClientConfig getMetastoreClientConfig()
+    {
+        return new MetastoreClientConfig();
     }
 
     protected ConnectorSession newSession()
@@ -1549,7 +1557,7 @@ public abstract class AbstractTestHiveClient
             ConnectorSession session = newSession();
             ConnectorTableHandle tableHandle = getTableHandle(metadata, tableName);
             List<ColumnHandle> allColumnHandles = ImmutableList.copyOf(metadata.getColumnHandles(session, tableHandle).values());
-            TableStatistics tableStatistics = metadata.getTableStatistics(session, tableHandle, allColumnHandles, Constraint.alwaysTrue());
+            TableStatistics tableStatistics = metadata.getTableStatistics(session, tableHandle, Optional.empty(), allColumnHandles, Constraint.alwaysTrue());
 
             assertFalse(tableStatistics.getRowCount().isUnknown(), "row count is unknown");
 
@@ -3503,8 +3511,8 @@ public abstract class AbstractTestHiveClient
 
                 ConnectorTableHandle tableHandle = metadata.getTableHandle(session, tableName);
                 List<ColumnHandle> allColumnHandles = ImmutableList.copyOf(metadata.getColumnHandles(session, tableHandle).values());
-                TableStatistics unsampledStatistics = metadata.getTableStatistics(sampleSize(2), tableHandle, allColumnHandles, Constraint.alwaysTrue());
-                TableStatistics sampledStatistics = metadata.getTableStatistics(sampleSize(1), tableHandle, allColumnHandles, Constraint.alwaysTrue());
+                TableStatistics unsampledStatistics = metadata.getTableStatistics(sampleSize(2), tableHandle, Optional.empty(), allColumnHandles, Constraint.alwaysTrue());
+                TableStatistics sampledStatistics = metadata.getTableStatistics(sampleSize(1), tableHandle, Optional.empty(), allColumnHandles, Constraint.alwaysTrue());
                 assertEquals(sampledStatistics, unsampledStatistics);
             }
         }
