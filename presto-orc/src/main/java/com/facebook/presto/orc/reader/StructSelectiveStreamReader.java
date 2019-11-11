@@ -608,9 +608,9 @@ public class StructSelectiveStreamReader
         Map<String, List<Subfield>> fields = new HashMap<>();
         for (Subfield subfield : requiredSubfields) {
             List<Subfield.PathElement> path = subfield.getPath();
-            String name = ((Subfield.NestedField) path.get(0)).getName();
+            String name = ((Subfield.NestedField) path.get(1)).getName();
             fields.computeIfAbsent(name, k -> new ArrayList<>());
-            if (path.size() > 1) {
+            if (path.size() > 2) {
                 fields.get(name).add(new Subfield("c", path.subList(1, path.size())));
             }
         }
@@ -638,7 +638,7 @@ public class StructSelectiveStreamReader
         @Override
         public int read(int offset, int[] positions, int positionCount)
         {
-            outputPositions = positions;
+            outputPositions = initializeOutputPositions(outputPositions, positions, positionCount);
             outputPositionCount = positionCount;
             return outputPositionCount;
         }
