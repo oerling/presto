@@ -29,6 +29,7 @@ import com.google.common.collect.ImmutableBiMap;
 
 import java.util.Map;
 
+import static com.facebook.presto.cost.FilterStatsCalculator.UNKNOWN_FILTER_COEFFICIENT;
 import static com.facebook.presto.cost.StatsUtil.toVariableStatsEstimate;
 import static java.util.Objects.requireNonNull;
 
@@ -48,25 +49,30 @@ public class ConnectorFilterStatsCalculatorService
             RowExpression predicate,
             ConnectorSession session,
             Map<ColumnHandle, String> columnNames,
-            Map<ColumnHandle, Type> columnTypes)
+            Map<String, Type> columnTypes)
     {
         PlanNodeStatsEstimate tableStats = toPlanNodeStats(tableStatistics, columnNames, columnTypes);
         PlanNodeStatsEstimate filteredStats = filterStatsCalculator.filterStats(tableStats, predicate, session);
+
+        if (filteredStats.isOutputRowCountUnknown()) {
+            filteredStats = tableStats.mapOutputRowCount(sourceRowCount -> tableStats.getOutputRowCount() * UNKNOWN_FILTER_COEFFICIENT);
+        }
+
         return toTableStatistics(filteredStats, ImmutableBiMap.copyOf(columnNames).inverse());
     }
 
     private static PlanNodeStatsEstimate toPlanNodeStats(
             TableStatistics tableStatistics,
             Map<ColumnHandle, String> columnNames,
-            Map<ColumnHandle, Type> columnTypes)
+            Map<String, Type> columnTypes)
     {
         PlanNodeStatsEstimate.Builder builder = PlanNodeStatsEstimate.builder()
                 .setOutputRowCount(tableStatistics.getRowCount().getValue());
 
         for (Map.Entry<ColumnHandle, ColumnStatistics> entry : tableStatistics.getColumnStatistics().entrySet()) {
             String columnName = columnNames.get(entry.getKey());
-            Type type = columnTypes.get(entry.getKey());
-            builder.addVariableStatistics(new VariableReferenceExpression(columnName, type), toVariableStatsEstimate(tableStatistics, entry.getValue()));
+            VariableReferenceExpression variable = new VariableReferenceExpression(columnName, columnTypes.get(columnName));
+            builder.addVariableStatistics(variable, toVariableStatsEstimate(tableStatistics, entry.getValue()));
         }
         return builder.build();
     }

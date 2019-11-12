@@ -27,5 +27,5 @@ import java.util.Map;
  */
 public interface FilterStatsCalculatorService
 {
-    TableStatistics filterStats(TableStatistics tableStatistics, RowExpression predicate, ConnectorSession session, Map<ColumnHandle, String> columnNames, Map<ColumnHandle, Type> columnTypes);
+    TableStatistics filterStats(TableStatistics tableStatistics, RowExpression predicate, ConnectorSession session, Map<ColumnHandle, String> columnNames, Map<String, Type> columnTypes);
 }

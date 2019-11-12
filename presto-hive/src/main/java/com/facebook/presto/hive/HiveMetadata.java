@@ -636,36 +636,38 @@ public class HiveMetadata
 
         HiveTableLayoutHandle hiveLayoutHandle = (HiveTableLayoutHandle) tableLayoutHandle.get();
 
+        Set<String> columnNames = columnHandles.stream()
+                .map(HiveColumnHandle.class::cast)
+                .map(HiveColumnHandle::getName)
+                .collect(toImmutableSet());
+
         Set<ColumnHandle> allColumnHandles = ImmutableSet.<ColumnHandle>builder()
                 .addAll(columnHandles)
-                .addAll(hiveLayoutHandle.getPredicateColumns().values())
+                .addAll(hiveLayoutHandle.getPredicateColumns().values().stream()
+                        .filter(column -> !columnNames.contains(column.getName()))
+                        .collect(toImmutableList()))
                 .build();
 
-        Map<String, ColumnHandle> columns = allColumnHandles.stream()
-                .map(HiveColumnHandle.class::cast)
-                .collect(toImmutableMap(HiveColumnHandle::getName, Function.identity()));
+        Map<String, ColumnHandle> allColumns = Maps.uniqueIndex(allColumnHandles, column -> ((HiveColumnHandle) column).getName());
 
-        Map<String, Type> columnTypesByName = columns.entrySet().stream()
+        Map<String, Type> allColumnTypes = allColumns.entrySet().stream()
                 .collect(toImmutableMap(Map.Entry::getKey, entry -> getColumnMetadata(session, tableHandle, entry.getValue()).getType()));
 
         Constraint<ColumnHandle> combinedConstraint = new Constraint<>(constraint.getSummary().intersect(hiveLayoutHandle.getDomainPredicate()
                 .transform(subfield -> isEntireColumn(subfield) ? subfield.getRootName() : null)
-                .transform(columns::get)));
+                .transform(allColumns::get)));
 
         SubfieldExtractor subfieldExtractor = new SubfieldExtractor(functionResolution, rowExpressionService.getExpressionOptimizer(), session);
 
         RowExpression domainPredicate = rowExpressionService.getDomainTranslator().toPredicate(
                 hiveLayoutHandle.getDomainPredicate()
-                        .transform(subfield -> subfieldExtractor.toRowExpression(subfield, columnTypesByName.get(subfield.getRootName()))));
+                        .transform(subfield -> subfieldExtractor.toRowExpression(subfield, allColumnTypes.get(subfield.getRootName()))));
         RowExpression combinedPredicate = binaryExpression(SpecialFormExpression.Form.AND, ImmutableList.of(hiveLayoutHandle.getRemainingPredicate(), domainPredicate));
 
         List<HivePartition> partitions = partitionManager.getPartitions(metastore, tableHandle, combinedConstraint, session).getPartitions();
-        TableStatistics tableStatistics = hiveStatisticsProvider.getTableStatistics(session, ((HiveTableHandle) tableHandle).getSchemaTableName(), columns, columnTypesByName, partitions);
+        TableStatistics tableStatistics = hiveStatisticsProvider.getTableStatistics(session, ((HiveTableHandle) tableHandle).getSchemaTableName(), allColumns, allColumnTypes, partitions);
 
-        Map<ColumnHandle, Type> columnTypes = columns.entrySet().stream()
-                .collect(toImmutableMap(Map.Entry::getValue, entry -> columnTypesByName.get(entry.getKey())));
-
-        return filterStatsCalculatorService.filterStats(tableStatistics, combinedPredicate, session, ImmutableBiMap.copyOf(columns).inverse(), columnTypes);
+        return filterStatsCalculatorService.filterStats(tableStatistics, combinedPredicate, session, ImmutableBiMap.copyOf(allColumns).inverse(), allColumnTypes);
     }
 
     private List<SchemaTableName> listTables(ConnectorSession session, SchemaTablePrefix prefix)
