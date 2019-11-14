@@ -66,14 +66,9 @@ public class TestTpcds
                 .collect(joining(", "));
 
         assertQuery("SELECT typeof(i_current_price) FROM item LIMIT 1", "VALUES 'decimal(7,2)'"); // decimal(7,2) is a short decimal
-        assertQuerySucceeds("SELECT i_current_price FROM item WHERE i_current_price IN (" + longValues + ")");
-        assertQuerySucceeds("SELECT i_current_price FROM item WHERE i_current_price NOT IN (" + longValues + ")");
-        assertQuerySucceeds("SELECT i_current_price FROM item WHERE i_current_price IN (i_wholesale_cost, " + longValues + ")");
-        assertQuerySucceeds("SELECT i_current_price FROM item WHERE i_current_price NOT IN (i_wholesale_cost, " + longValues + ")");
-    }
-
-    private void assertQuerySucceeds(String sql)
-    {
-        computeActual(sql);
+        computeActual("SELECT i_current_price FROM item WHERE i_current_price IN (" + longValues + ")");
+        computeActual("SELECT i_current_price FROM item WHERE i_current_price NOT IN (" + longValues + ")");
+        computeActual("SELECT i_current_price FROM item WHERE i_current_price IN (i_wholesale_cost, " + longValues + ")");
+        computeActual("SELECT i_current_price FROM item WHERE i_current_price NOT IN (i_wholesale_cost, " + longValues + ")");
     }
 }
