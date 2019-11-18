@@ -513,7 +513,8 @@ public class SliceDictionarySelectiveReader
         presentStream = presentStreamSource.openStream();
         inDictionaryStream = inDictionaryStreamSource.openStream();
         dataStream = dataStreamSource.openStream();
-
+        allNulls = false;
+        
         rowGroupOpen = true;
     }
 
