@@ -17,6 +17,7 @@ import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.block.VariableWidthBlock;
+import io.airlift.slice.Slice;
 
 import java.io.BufferedWriter;
 import java.nio.file.Files;
@@ -43,6 +44,7 @@ public class Trace
             return;
         }
         traceReadTime = now;
+        checkDeleteTrace();
         try {
             Path path = Paths.get("/tmp/prestotrace.txt");
             List<String> lines = Files.readAllLines(path);
@@ -68,6 +70,30 @@ public class Trace
                     }
                 }
             }
+        }
+    }
+
+    private static void checkDeleteTrace()
+    {
+        try {
+            Path path = Paths.get("/tmp/deletetrace.txt");
+            List<String> lines = Files.readAllLines(path);
+            synchronized (Trace.class) {
+                Files.delete(path);
+                if (traceWriter != null) {
+                try {
+                    traceWriter.flush();
+                    traceWriter.close();
+                    traceWriter = null;
+                    Files.delete(Paths.get("/tmp/prestotrace.txt"));
+                }
+                catch (Exception e2) {
+                    traceWriter = null;
+                }
+                }
+                }
+            }
+        catch (Exception e) {
         }
     }
 
