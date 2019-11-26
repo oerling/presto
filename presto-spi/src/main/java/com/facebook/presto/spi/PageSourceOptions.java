@@ -91,11 +91,15 @@ public class PageSourceOptions
         protected long nIn;
         protected long nOut;
         protected long time;
+        private long totalNIn;
+        private long totalNOut;
 
         public void updateStats(int nIn, int nOut, long time)
         {
             this.nIn += nIn;
             this.nOut += nOut;
+            totalNIn += nIn;
+            totalNOut += nOut;
             this.time += time;
         }
 
@@ -123,12 +127,12 @@ public class PageSourceOptions
         }
         public long getNIn()
         {
-            return nIn;
+            return totalNIn;
         }
 
         public long getNOut()
         {
-            return nOut;
+            return totalNOut;
         }
     }
 

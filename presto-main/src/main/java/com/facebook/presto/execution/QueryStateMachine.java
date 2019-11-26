@@ -17,7 +17,8 @@ import com.facebook.presto.Session;
 import com.facebook.presto.execution.QueryExecution.QueryOutputInfo;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.warnings.WarningCollector;
-import com.facebook.presto.memory.VersionedMemoryPoolId;
+import com.facebook.presto.execution.scheduler.ClusterState;
+ import com.facebook.presto.memory.VersionedMemoryPoolId;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.operator.BlockedReason;
 import com.facebook.presto.operator.OperatorStats;
@@ -828,6 +829,7 @@ public class QueryStateMachine
 
     private void cleanupQueryQuietly()
     {
+        ClusterState.queryFinished(queryId);
         try {
             metadata.cleanupQuery(session);
         }

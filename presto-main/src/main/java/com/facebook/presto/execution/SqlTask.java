@@ -243,6 +243,8 @@ public class SqlTask
 
         TaskState state = taskStateMachine.getState();
         List<ExecutionFailureInfo> failures = ImmutableList.of();
+        Duration scheduledTime = null;
+        Duration cpuTime = null;
         if (state == FAILED) {
             failures = toFailures(taskStateMachine.getFailureCauses());
         }
@@ -265,6 +267,8 @@ public class SqlTask
             systemMemoryReservation = taskStats.getSystemMemoryReservation();
             fullGcCount = taskStats.getFullGcCount();
             fullGcTime = taskStats.getFullGcTime();
+            scheduledTime = taskStats.getTotalScheduledTime();
+            cpuTime = taskStats.getTotalCpuTime();
         }
         else if (taskHolder.getTaskExecution() != null) {
             long physicalWrittenBytes = 0;
@@ -281,8 +285,16 @@ public class SqlTask
             completedDriverGroups = taskContext.getCompletedDriverGroups();
             fullGcCount = taskContext.getFullGcCount();
             fullGcTime = taskContext.getFullGcTime();
+            TaskStats taskStats = taskContext.getTaskStats();
+            scheduledTime = taskStats.getTotalScheduledTime();
+            cpuTime = taskStats.getTotalCpuTime();
         }
-
+        if (scheduledTime == null) {
+            scheduledTime = new Duration(0, MILLISECONDS);
+        }
+        if (cpuTime == null) {
+            cpuTime = new Duration(0, MILLISECONDS);
+        }
         return new TaskStatus(taskStateMachine.getTaskId(),
                 taskInstanceId,
                 versionNumber,
@@ -298,7 +310,9 @@ public class SqlTask
                 userMemoryReservation,
                 systemMemoryReservation,
                 fullGcCount,
-                fullGcTime);
+                fullGcTime,
+                scheduledTime,
+                cpuTime);
     }
 
     private TaskStats getTaskStats(TaskHolder taskHolder)

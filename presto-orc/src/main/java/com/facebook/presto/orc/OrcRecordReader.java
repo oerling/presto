@@ -855,10 +855,10 @@ public class OrcRecordReader
                         return;
                     }
                 }
-                else {
-                    trackedFilters.add(filter);
-                    trackedFilterLabels.add(splitColumnNames.get(i));
-                }
+            }
+            else if (filter != null) {
+                trackedFilters.add(filter);
+                trackedFilterLabels.add(splitColumnNames.get(i));
             }
         }
         scanInfo = options.getScanInfo();

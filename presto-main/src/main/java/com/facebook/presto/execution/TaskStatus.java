@@ -70,6 +70,8 @@ public class TaskStatus
     private final Duration fullGcTime;
 
     private final List<ExecutionFailureInfo> failures;
+    private final Duration scheduledTime;
+    private final Duration cpuTime;
 
     @JsonCreator
     public TaskStatus(
@@ -88,7 +90,9 @@ public class TaskStatus
             @JsonProperty("memoryReservation") DataSize memoryReservation,
             @JsonProperty("systemMemoryReservation") DataSize systemMemoryReservation,
             @JsonProperty("fullGcCount") long fullGcCount,
-            @JsonProperty("fullGcTime") Duration fullGcTime)
+            @JsonProperty("fullGcTime") Duration fullGcTime,
+            @JsonProperty("scheduledTime") Duration scheduledTime,
+            @JsonProperty("cpuTime") Duration cpuTime)
     {
         this.taskId = requireNonNull(taskId, "taskId is null");
         this.taskInstanceId = requireNonNull(taskInstanceId, "taskInstanceId is null");
@@ -117,6 +121,8 @@ public class TaskStatus
         checkArgument(fullGcCount >= 0, "fullGcCount is negative");
         this.fullGcCount = fullGcCount;
         this.fullGcTime = requireNonNull(fullGcTime, "fullGcTime is null");
+        this.scheduledTime = requireNonNull(scheduledTime, "scheduledTime is null");
+        this.cpuTime = requireNonNull(cpuTime, "cpuTime is null");
     }
 
     @JsonProperty
@@ -215,6 +221,18 @@ public class TaskStatus
         return fullGcTime;
     }
 
+        @JsonProperty
+    public Duration getScheduledTime()
+    {
+        return scheduledTime;
+    }
+
+    @JsonProperty
+    public Duration getCpuTime()
+    {
+        return cpuTime;
+    }
+
     @Override
     public String toString()
     {
@@ -242,6 +260,8 @@ public class TaskStatus
                 new DataSize(0, BYTE),
                 new DataSize(0, BYTE),
                 0,
+                new Duration(0, MILLISECONDS),
+                new Duration(0, MILLISECONDS),
                 new Duration(0, MILLISECONDS));
     }
 
@@ -263,6 +283,8 @@ public class TaskStatus
                 taskStatus.getMemoryReservation(),
                 taskStatus.getSystemMemoryReservation(),
                 taskStatus.getFullGcCount(),
-                taskStatus.getFullGcTime());
+                taskStatus.getFullGcTime(),
+                taskStatus.getScheduledTime(),
+                taskStatus.getCpuTime());
     }
 }

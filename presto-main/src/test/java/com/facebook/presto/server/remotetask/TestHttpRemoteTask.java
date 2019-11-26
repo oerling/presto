@@ -498,7 +498,9 @@ public class TestHttpRemoteTask
                     initialTaskStatus.getMemoryReservation(),
                     initialTaskStatus.getSystemMemoryReservation(),
                     initialTaskStatus.getFullGcCount(),
-                    initialTaskStatus.getFullGcTime());
+                    initialTaskStatus.getFullGcTime(),
+                    initialTaskStatus.getScheduledTime(),
+                    initialTaskStatus.getCpuTime());
         }
     }
 }
