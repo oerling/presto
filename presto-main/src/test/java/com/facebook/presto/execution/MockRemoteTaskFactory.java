@@ -252,6 +252,8 @@ public class MockRemoteTaskFactory
                             new DataSize(0, BYTE),
                             new DataSize(0, BYTE),
                             0,
+                            new Duration(0, MILLISECONDS),
+                            new Duration(0, MILLISECONDS),
                             new Duration(0, MILLISECONDS)),
                     DateTime.now(),
                     outputBuffer.getInfo(),
@@ -279,7 +281,9 @@ public class MockRemoteTaskFactory
                     stats.getUserMemoryReservation(),
                     stats.getSystemMemoryReservation(),
                     0,
-                    new Duration(0, MILLISECONDS));
+                                  new Duration(0, MILLISECONDS),
+                                  new Duration(0, MILLISECONDS),
+                                  new Duration(0, MILLISECONDS));
         }
 
         private synchronized void updateSplitQueueSpace()
