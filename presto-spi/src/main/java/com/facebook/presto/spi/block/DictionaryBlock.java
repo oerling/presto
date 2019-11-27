@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.spi.block;
 
+import com.facebook.presto.spi.memory.Caches;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import org.openjdk.jol.info.ClassLayout;
@@ -28,6 +29,8 @@ import static com.facebook.presto.spi.block.BlockUtil.checkValidPositions;
 import static com.facebook.presto.spi.block.BlockUtil.checkValidRegion;
 import static com.facebook.presto.spi.block.BlockUtil.countUsedPositions;
 import static com.facebook.presto.spi.block.DictionaryId.randomDictionaryId;
+import static com.facebook.presto.spi.memory.Caches.getBooleanArrayPool;
+import static com.facebook.presto.spi.memory.Caches.getLongArrayPool;
 import static io.airlift.slice.SizeOf.sizeOf;
 import static java.lang.Math.min;
 import static java.util.Objects.requireNonNull;
@@ -212,7 +215,7 @@ public class DictionaryBlock
     private void calculateCompactSize()
     {
         int uniqueIds = 0;
-        boolean[] used = new boolean[dictionary.getPositionCount()];
+        boolean[] used = getBooleanArrayPool().allocateAndInitialize(dictionary.getPositionCount());
         for (int i = 0; i < positionCount; i++) {
             int position = getId(i);
             if (!used[position]) {
@@ -222,6 +225,7 @@ public class DictionaryBlock
         }
         this.sizeInBytes = dictionary.getPositionsSizeInBytes(used) + (Integer.BYTES * (long) positionCount);
         this.uniqueIds = uniqueIds;
+        getBooleanArrayPool().release(used);
     }
 
     @Override
@@ -234,7 +238,7 @@ public class DictionaryBlock
         // Calculation of logical size can be performed as part of calculateCompactSize() with minor modifications.
         // Keeping this calculation separate as this is a little more expensive and may not be called as often.
         long sizeInBytes = 0;
-        long[] seenSizes = new long[dictionary.getPositionCount()];
+        long[] seenSizes = getLongArrayPool().allocateAndInitialize(dictionary.getPositionCount());
         Arrays.fill(seenSizes, -1L);
         for (int i = 0; i < getPositionCount(); i++) {
             int position = getId(i);
@@ -245,6 +249,7 @@ public class DictionaryBlock
         }
 
         logicalSizeInBytes = sizeInBytes;
+        getLongArrayPool().release(seenSizes);
         return sizeInBytes;
     }
 
@@ -257,11 +262,13 @@ public class DictionaryBlock
             return getSizeInBytes();
         }
 
-        boolean[] used = new boolean[dictionary.getPositionCount()];
+        boolean[] used = getBooleanArrayPool().allocateAndInitialize(dictionary.getPositionCount());
         for (int i = positionOffset; i < positionOffset + length; i++) {
             used[getId(i)] = true;
         }
-        return dictionary.getPositionsSizeInBytes(used) + Integer.BYTES * (long) length;
+        long size = dictionary.getPositionsSizeInBytes(used) + Integer.BYTES * (long) length;
+        getBooleanArrayPool().release(used);
+        return size;
     }
 
     @Override
@@ -269,13 +276,15 @@ public class DictionaryBlock
     {
         checkValidPositions(positions, positionCount);
 
-        boolean[] used = new boolean[dictionary.getPositionCount()];
+        boolean[] used = getBooleanArrayPool().allocateAndInitialize(dictionary.getPositionCount());
         for (int i = 0; i < positions.length; i++) {
             if (positions[i]) {
                 used[getId(i)] = true;
             }
         }
-        return dictionary.getPositionsSizeInBytes(used) + (Integer.BYTES * (long) countUsedPositions(positions));
+        long size = dictionary.getPositionsSizeInBytes(used) + (Integer.BYTES * (long) countUsedPositions(positions));
+        getBooleanArrayPool().release(used);
+        return size;
     }
 
     @Override
@@ -356,7 +365,7 @@ public class DictionaryBlock
         boolean isCompact = isCompact() && length >= dictionary.getPositionCount();
         boolean[] seen = null;
         if (isCompact) {
-            seen = new boolean[dictionary.getPositionCount()];
+            seen = getBooleanArrayPool().allocateAndInitialize(dictionary.getPositionCount());
         }
         for (int i = 0; i < length; i++) {
             newIds[i] = getId(positions[offset + i]);
@@ -367,6 +376,7 @@ public class DictionaryBlock
         for (int i = 0; i < dictionary.getPositionCount() && isCompact; i++) {
             isCompact &= seen[i];
         }
+        getBooleanArrayPool().release(seen);
         return new DictionaryBlock(newIds.length, getDictionary(), newIds, isCompact, getDictionarySourceId());
     }
 
