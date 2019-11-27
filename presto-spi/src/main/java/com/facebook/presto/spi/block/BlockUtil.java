@@ -65,8 +65,8 @@ final class BlockUtil
 
     static int calculateNewArraySize(int currentSize)
     {
-        // grow array by 50%
-        long newSize = (long) currentSize + (currentSize >> 1);
+        // Double array size.
+        long newSize = (long) currentSize << 1;
 
         // verify new size is within reasonable bounds
         if (newSize < DEFAULT_CAPACITY) {
