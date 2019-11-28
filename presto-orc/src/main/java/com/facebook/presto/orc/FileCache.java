@@ -237,10 +237,10 @@ public class FileCache
             numMisses.addAndGet(1);
         }
 
-        public void hit(Entry entry)
+        public void hit(Entry entry, int hitBytes)
         {
             numHits.addAndGet(1);
-            hitSize.addAndGet(entry.dataSize);
+            hitSize.addAndGet(hitBytes);
         }
 
         public void evicted(Entry entry, long now, boolean wasPrefetch)
@@ -335,6 +335,8 @@ public class FileCache
         int bucketIndex = -1;
         // Controls the rate at which an entry ages. 100 means it ages at the speed of wall time. 1000 means that it ages 10x slower than wall time. This allows preferential retention of high value entries.
         int retentionWeight = 100;
+        // Number of streams included in the entry. Start counting hits only after hitting all the streams once.
+        int numMerged;
         // When finding an Entry with isTemporary set, wait for the loading future and then retry the get. A temporary entry must not be returned to a caller.
         final boolean isTemporary;
         boolean isPrefetch;
@@ -351,7 +353,7 @@ public class FileCache
             this.isTemporary = isTemporary;
         }
 
-        public static Entry createTemporary(FileToken token, long offset, int dataSize, boolean isPrefetch, long now, int bucketIndex)
+        public static Entry createTemporary(FileToken token, long offset, int dataSize, boolean isPrefetch, long now, int bucketIndex, int numMerged)
         {
             Entry entry = new Entry(true);
             entry.token = token;
@@ -362,6 +364,7 @@ public class FileCache
             entry.loadingThread = currentThread();
             entry.accessTime = now;
             entry.bucketIndex = bucketIndex;
+            entry.numMerged = numMerged;
             return entry;
         }
 
@@ -515,6 +518,7 @@ public class FileCache
             other.isPrefetch = isPrefetch;
             other.listener = listener;
             other.retentionWeight = retentionWeight;
+            other.numMerged = numMerged;
             if (other.softBuffer.getBucket() != bucketIndex) {
                 verify(false, "Inserting entry with bad bucket index " + other.softBuffer.getBucket() + " into " + bucketIndex + " " + other.toString());
             }
@@ -622,17 +626,17 @@ public class FileCache
             throws IOException
     {
         numGets++;
-        return getInternal(dataSource, offset, size, false, System.nanoTime(), null, 100);
+        return getInternal(dataSource, offset, size, false, System.nanoTime(), null, 100, size, 1);
     }
 
-    public static Entry get(OrcDataSource dataSource, long offset, int size, Listener listener, int retentionWeight)
+    public static Entry get(OrcDataSource dataSource, long offset, int size, Listener listener, int retentionWeight, int hitSize, int numMerged)
             throws IOException
     {
         numGets++;
-        return getInternal(dataSource, offset, size, false, System.nanoTime(), listener, retentionWeight);
+        return getInternal(dataSource, offset, size, false, System.nanoTime(), listener, retentionWeight, hitSize, numMerged);
     }
 
-    private static Entry getInternal(OrcDataSource dataSource, long offset, int size, boolean isPrefetch, long now, Listener listener, int retentionWeight)
+    private static Entry getInternal(OrcDataSource dataSource, long offset, int size, boolean isPrefetch, long now, Listener listener, int retentionWeight, int hitSize, int numMerged)
             throws IOException
     {
         FileToken token = dataSource.getToken();
@@ -657,6 +661,7 @@ public class FileCache
             Entry entryToWait = null;
             Entry entryToLoad = null;
             Entry hitEntry = null;
+            boolean countAsHit = false;
             synchronized (bucket) {
                 for (Entry entry : bucket) {
                     if (entry.softBuffer == null && entry.loadingFuture == null && !entry.isExclusive()) {
@@ -715,17 +720,24 @@ public class FileCache
                         entry.accessTime = now;
                         // Enforce a range so as not to wrap around.
                         entry.accessCount = Math.min(entry.accessCount + 1, 10000);
-                        if (!entry.isPrefetch) {
-                            numHits++;
-                            numHitBytes += entry.dataSize;
+                        if (entry.isPrefetch) {
+                            entry.numMerged = numMerged;
+                            entry.isPrefetch = false;
                         }
+                        else if (numMerged <= 1) {
+                            countAsHit = true;
+                        }
+                        else {
+                            entry.numMerged--;
+                        }
+
                         hitEntry = entry;
                         break;
                     }
                 }
                 if (entryToLoad == null && futureToWait == null && hitEntry == null) {
                     // There was a miss. While synchronized on the bucket, add an entry in loading state.
-                    entryToLoad = Entry.createTemporary(token, offset, size, isPrefetch, now, bucketIndex);
+                    entryToLoad = Entry.createTemporary(token, offset, size, isPrefetch, now, bucketIndex, numMerged);
                     entryToLoad.listener = listener;
                     entryToLoad.retentionWeight = retentionWeight;
                     bucket.add(entryToLoad);
@@ -762,10 +774,12 @@ public class FileCache
                 continue;
             }
             if (hitEntry != null) {
-                boolean wasPrefetch = hitEntry.isPrefetch;
-                hitEntry.isPrefetch = false;
-                if (!wasPrefetch && hitEntry.listener != null) {
-                    hitEntry.listener.hit(hitEntry);
+                if (countAsHit) {
+                    numHits++;
+                    numHitBytes += hitSize;
+                    if (hitEntry.listener != null) {
+                    hitEntry.listener.hit(hitEntry, hitSize);
+                }
                 }
                 try {
                     verify(hitEntry.getPinCount() > 0);
@@ -1195,7 +1209,7 @@ public class FileCache
                     prefetchBytes += size;
                     currentThread().setName("prefetch");
                     long startTime = System.nanoTime();
-                    FileCache.getInternal(dataSource, offset, size, true, startTime, listener, retentionWeight);
+                    FileCache.getInternal(dataSource, offset, size, true, startTime, listener, retentionWeight, 0, 0);
                     prefetchMicros += (System.nanoTime() - startTime) / 1000;
                 }
                 catch (Exception e) {

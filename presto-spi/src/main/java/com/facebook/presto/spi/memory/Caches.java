@@ -23,7 +23,11 @@ public final class Caches
     static final int BYTE_SMALLEST_ARRAY_SIZE = 1024;
     static final int BYTE_LARGEST_ARRAY_SIZE = 8 * 1024 * 1024;
     static final long BYTE_POOL_CAPACITY = 2028 * 1024 * 1024;
+    static final int LONG_SMALLEST_ARRAY_SIZE = 4;
+    static final int LONG_LARGEST_ARRAY_SIZE = 64 * 1024;
+    static final long LONG_POOL_CAPACITY = 1024 * 1024;
 
+    
     private static ArrayPool<byte[]> byteArrayPool;
     private static ByteArrayPoolCacheAdapter byteArrayPoolCacheAdapter;
 
@@ -73,10 +77,37 @@ public final class Caches
         }
     }
 
+    private static class LongArrayAllocator
+            extends ArrayPool.Allocator<long[]>
+    {
+        @Override
+        long[] allocate(int size)
+        {
+            return new long[size];
+        }
+
+        @Override
+        void initialize(long[] array)
+        {
+            Arrays.fill(array, 0);
+        }
+
+        @Override
+        int getSize(long[] array)
+        {
+            return array.length;
+        }
+    }
+
+    
     private static ArrayPool<boolean[]> booleanArrayPool;
 
     public static ArrayPool<boolean[]> getBooleanArrayPool()
     {
+        ArrayPool pool = booleanArrayPool;
+        if (pool != null) {
+            return pool;
+        }
         synchronized (Caches.class) {
             if (booleanArrayPool == null) {
                 booleanArrayPool = new ArrayPool(BOOLEAN_SMALLEST_ARRAY_SIZE, BOOLEAN_LARGEST_ARRAY_SIZE, BOOLEAN_POOL_CAPACITY, new BooleanArrayAllocator());
@@ -87,12 +118,32 @@ public final class Caches
 
     public static ArrayPool<byte[]> getByteArrayPool()
     {
+        ArrayPool pool = byteArrayPool;
+        if (pool != null) {
+            return pool;
+        }
         synchronized (Caches.class) {
             if (byteArrayPool == null) {
                 byteArrayPool = new ArrayPool(BYTE_SMALLEST_ARRAY_SIZE, BYTE_LARGEST_ARRAY_SIZE, BYTE_POOL_CAPACITY, new ByteArrayAllocator());
             }
         }
         return byteArrayPool;
+    }
+
+    private static ArrayPool<long[]> longArrayPool;
+
+    public static ArrayPool<long[]> getLongArrayPool()
+    {
+        ArrayPool pool = longArrayPool;
+        if (pool != null) {
+            return pool;
+        }
+        synchronized (Caches.class) {
+            if (longArrayPool == null) {
+                longArrayPool = new ArrayPool(LONG_SMALLEST_ARRAY_SIZE, LONG_LARGEST_ARRAY_SIZE, LONG_POOL_CAPACITY, new LongArrayAllocator());
+            }
+        }
+        return longArrayPool;
     }
 
     public static CacheAdapter getByteArrayPoolCacheAdapter()
