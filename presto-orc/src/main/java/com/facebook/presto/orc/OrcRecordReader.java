@@ -822,7 +822,7 @@ public class OrcRecordReader
             List<DiskRange> scratchDiskRanges = stripes.stream()
                     .map(stripe -> new DiskRange(stripe.getOffset(), toIntExact(stripe.getTotalLength())))
                     .collect(Collectors.toList());
-            List<DiskRange> diskRanges = mergeAdjacentDiskRanges(scratchDiskRanges, maxMergeDistance, tinyStripeThreshold);
+            List<DiskRange> diskRanges = mergeAdjacentDiskRanges(scratchDiskRanges, maxMergeDistance, tinyStripeThreshold, null);
 
             return new LinearProbeRangeFinder(diskRanges);
         }

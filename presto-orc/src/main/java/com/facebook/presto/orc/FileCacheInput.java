@@ -57,8 +57,9 @@ final class FileCacheInput
     private int readCount;
     private int prefetchWatermark = MAX_BUFFER_SIZE;
     private FileCache.Listener listener;
+    private int numMerged;
 
-    public FileCacheInput(OrcDataSource dataSource, StreamId streamId, ReadTracker tracker, long loadOffset, long loadLength, int viewOffset, int viewLength)
+    public FileCacheInput(OrcDataSource dataSource, StreamId streamId, ReadTracker tracker, long loadOffset, long loadLength, int viewOffset, int viewLength, int numMerged)
     {
         checkArgument(viewLength > 0, "viewLength must be at least 1");
         checkArgument(viewLength <= Integer.MAX_VALUE, "viewLength must be less than 2GB");
@@ -72,6 +73,7 @@ final class FileCacheInput
         this.viewLength = viewLength;
         this.position = viewOffset;
         this.dataSource = requireNonNull(dataSource, "dataSource is null");
+        this.numMerged = numMerged;
         if (streamId.getLabel() != null) {
             listener = FileCache.getListener(dataSource.getSplitLabel() + streamId.getLabel());
         }
@@ -105,7 +107,7 @@ final class FileCacheInput
         bufferOffset += MAX_BUFFER_SIZE;
         bufferBytes = Math.min(MAX_BUFFER_SIZE, loadLength - bufferOffset);
         try {
-            entry = FileCache.get(dataSource, loadOffset + bufferOffset, bufferBytes, listener, 100);
+            entry = FileCache.get(dataSource, loadOffset + bufferOffset, bufferBytes, listener, 100, Math.min(bufferBytes, viewLength));
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -128,7 +130,7 @@ final class FileCacheInput
         tracker.recordRead(streamId);
         bufferBytes = Math.min(MAX_BUFFER_SIZE, loadLength - loadStart);
         try {
-            entry = FileCache.get(dataSource, loadOffset + loadStart, bufferBytes, listener, 100);
+            entry = FileCache.get(dataSource, loadOffset + loadStart, bufferBytes, listener, 100, Math.min(viewLength, bufferBytes));
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);

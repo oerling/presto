@@ -201,7 +201,7 @@ public class OrcReader
             throws IOException
     {
         if (orcDataSource.useCache()) {
-            try (FileCache.Entry entry = FileCache.get(orcDataSource, position, bufferLength, FileCache.getListener("footer"), 10000)) {
+            try (FileCache.Entry entry = FileCache.get(orcDataSource, position, bufferLength, FileCache.getListener("footer"), 10000, bufferLength, 1)) {
                 System.arraycopy(entry.getBuffer(), 0, buffer, bufferOffset, bufferLength);
             }
         }
