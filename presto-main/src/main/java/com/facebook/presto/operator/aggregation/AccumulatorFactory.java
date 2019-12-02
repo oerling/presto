@@ -30,4 +30,9 @@ public interface AccumulatorFactory
     boolean hasOrderBy();
 
     boolean hasDistinct();
+
+    default String getName()
+    {
+        return "noname";
+    }
 }
