@@ -51,6 +51,7 @@ import static java.util.Objects.requireNonNull;
 public class GenericAccumulatorFactory
         implements AccumulatorFactory
 {
+    private final String name;
     private final List<AccumulatorStateDescriptor> stateDescriptors;
     private final Constructor<? extends Accumulator> accumulatorConstructor;
     private final Constructor<? extends GroupedAccumulator> groupedAccumulatorConstructor;
@@ -70,7 +71,8 @@ public class GenericAccumulatorFactory
     private final PagesIndex.Factory pagesIndexFactory;
 
     public GenericAccumulatorFactory(
-            List<AccumulatorStateDescriptor> stateDescriptors,
+                                     String name,
+                                     List<AccumulatorStateDescriptor> stateDescriptors,
             Constructor<? extends Accumulator> accumulatorConstructor,
             Constructor<? extends GroupedAccumulator> groupedAccumulatorConstructor,
             List<LambdaProvider> lambdaProviders,
@@ -84,6 +86,7 @@ public class GenericAccumulatorFactory
             Session session,
             boolean distinct)
     {
+        this.name = name;
         this.stateDescriptors = requireNonNull(stateDescriptors, "stateDescriptors is null");
         this.accumulatorConstructor = requireNonNull(accumulatorConstructor, "accumulatorConstructor is null");
         this.groupedAccumulatorConstructor = requireNonNull(groupedAccumulatorConstructor, "groupedAccumulatorConstructor is null");
@@ -201,6 +204,11 @@ public class GenericAccumulatorFactory
     public boolean hasDistinct()
     {
         return distinct;
+    }
+
+    public String getName()
+    {
+        return name;
     }
 
     private Accumulator instantiateAccumulator(List<Integer> inputs, Optional<Integer> mask)

@@ -18,6 +18,7 @@ import com.facebook.presto.operator.aggregation.AccumulatorFactory;
 import com.facebook.presto.operator.aggregation.builder.HashAggregationBuilder;
 import com.facebook.presto.operator.aggregation.builder.InMemoryHashAggregationBuilder;
 import com.facebook.presto.operator.aggregation.builder.SpillableHashAggregationBuilder;
+import com.facebook.presto.operator.aggregation.builder.VectorizedAggregation;
 import com.facebook.presto.operator.scalar.CombineHashFunction;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
@@ -36,6 +37,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static com.facebook.presto.SystemSessionProperties.isVectorizedAggregationEnabled;
 import static com.facebook.presto.operator.aggregation.builder.InMemoryHashAggregationBuilder.toTypes;
 import static com.facebook.presto.sql.planner.optimizations.HashGenerationOptimizer.INITIAL_HASH_VALUE;
 import static com.facebook.presto.type.TypeUtils.NULL_HASH_CODE;
@@ -280,6 +282,8 @@ public class HashAggregationOperator
     // for yield when memory is not available
     private Work<?> unfinishedWork;
 
+    private VectorizedAggregation vectorizedAggregation;
+
     public HashAggregationOperator(
             OperatorContext operatorContext,
             List<Type> groupByTypes,
@@ -365,9 +369,23 @@ public class HashAggregationOperator
         requireNonNull(page, "page is null");
         inputProcessed = true;
 
-        if (aggregationBuilder == null) {
+        if (aggregationBuilder == null && vectorizedAggregation == null) {
             // TODO: We ignore spillEnabled here if any aggregate has ORDER BY clause or DISTINCT because they are not yet implemented for spilling.
-            if (step.isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
+            if (!step.isOutputPartial() && isVectorizedAggregationEnabled(operatorContext.getSession()) && accumulatorFactories.stream().allMatch(f -> isVectorized(f))) {
+                vectorizedAggregation = new VectorizedAggregation(
+                        accumulatorFactories,
+                        step,
+                        expectedGroups,
+                        groupByTypes,
+                        groupByChannels,
+                        hashChannel,
+                        operatorContext,
+                        maxPartialMemory,
+                        joinCompiler,
+                        true,
+                        useSystemMemory);
+            }
+            else if (step.isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
                 aggregationBuilder = new InMemoryHashAggregationBuilder(
                         accumulatorFactories,
                         step,
@@ -400,9 +418,13 @@ public class HashAggregationOperator
             // assume initial aggregationBuilder is not full
         }
         else {
-            checkState(!aggregationBuilder.isFull(), "Aggregation buffer is full");
+            checkState(vectorizedAggregation != null || !aggregationBuilder.isFull(), "Aggregation buffer is full");
         }
-
+        if (vectorizedAggregation != null) {
+            vectorizedAggregation.addInput(page );
+            return;
+        }
+        
         // process the current page; save the unfinished work if we are waiting for memory
         unfinishedWork = aggregationBuilder.processPage(page);
         if (unfinishedWork.process()) {
@@ -411,6 +433,11 @@ public class HashAggregationOperator
         aggregationBuilder.updateMemory();
     }
 
+    private static boolean isVectorized(AccumulatorFactory factory)
+    {
+        return false;
+    }
+    
     private boolean hasOrderBy()
     {
         return accumulatorFactories.stream().anyMatch(AccumulatorFactory::hasOrderBy);
@@ -444,7 +471,10 @@ public class HashAggregationOperator
         if (finished) {
             return null;
         }
-
+        if (vectorizedAggregation) {
+            return vectorizedAggregation.getOutput();
+        }
+        
         // process unfinished work if one exists
         if (unfinishedWork != null) {
             boolean workDone = unfinishedWork.process();
@@ -510,6 +540,9 @@ public class HashAggregationOperator
             // aggregationBuilder.close() will release all memory reserved in memory accounting.
             // The reference must be set to null afterwards to avoid unaccounted memory.
             aggregationBuilder = null;
+        }
+        if (vectorizedAggregation != null) {
+            vectorizedAggregation.close();
         }
         operatorContext.localUserMemoryContext().setBytes(0);
         operatorContext.localRevocableMemoryContext().setBytes(0);

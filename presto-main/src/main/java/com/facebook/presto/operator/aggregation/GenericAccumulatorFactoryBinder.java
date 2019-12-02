@@ -61,7 +61,8 @@ public class GenericAccumulatorFactoryBinder
 
     @Override
     public AccumulatorFactory bind(
-            List<Integer> argumentChannels,
+                                   String name,
+                                   List<Integer> argumentChannels,
             Optional<Integer> maskChannel,
             List<Type> sourceTypes,
             List<Integer> orderByChannels,
@@ -73,6 +74,7 @@ public class GenericAccumulatorFactoryBinder
             Session session)
     {
         return new GenericAccumulatorFactory(
+                name,
                 stateDescriptors,
                 accumulatorConstructor,
                 groupedAccumulatorConstructor,

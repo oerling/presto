@@ -25,6 +25,7 @@ import java.util.Optional;
 public interface AccumulatorFactoryBinder
 {
     AccumulatorFactory bind(
+            String name,
             List<Integer> argumentChannels,
             Optional<Integer> maskChannel,
             List<Type> sourceTypes,

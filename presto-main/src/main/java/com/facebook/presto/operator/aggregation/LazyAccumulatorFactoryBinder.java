@@ -44,6 +44,7 @@ public class LazyAccumulatorFactoryBinder
 
     @Override
     public AccumulatorFactory bind(
+            String name,
             List<Integer> argumentChannels,
             Optional<Integer> maskChannel,
             List<Type> sourceTypes,
@@ -55,6 +56,6 @@ public class LazyAccumulatorFactoryBinder
             List<LambdaProvider> lambdaProviders,
             Session session)
     {
-        return binder.get().bind(argumentChannels, maskChannel, sourceTypes, orderByChannels, orderings, pagesIndexFactory, distinct, joinCompiler, lambdaProviders, session);
+        return binder.get().bind(name, argumentChannels, maskChannel, sourceTypes, orderByChannels, orderings, pagesIndexFactory, distinct, joinCompiler, lambdaProviders, session);
     }
 }
