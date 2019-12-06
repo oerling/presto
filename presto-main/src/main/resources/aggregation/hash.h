@@ -107,7 +107,7 @@
 
 #define UNIT_SHIFT 16
 #define UNIT_MASK 0xffff
-#define ENTRY_MASK 0xffffffL
+#define ENTRY_MASK 0xffffff
 #define ENTRY_SHIFT 24
 
 #define DECL_STATUS(name)                       \
@@ -132,26 +132,30 @@
   
 
 // index is the index of a 8 byte word
-#define LOAD_STATUS(dest, tablesub, index)                               \
-        dest = ByteArrays.getLong(status##tablesub[hash >> (UNIT_SHIFT - 3)], ((hash) * 8) & UNIT_MASK)
+#define LOAD_STATUS(dest, tablesub, index)                          \
+        dest = ByteArrays.getLong(status##tablesub[index >> (UNIT_SHIFT - 3)], ((index) * 8) & UNIT_MASK)
 
 #define LOAD_ENTRY(dest, tablesub, index) \
   dest = ByteArrays.getLong(entries##tablesub[(index) >> (UNIT_SHIFT - 3)], ((index) * 8)& UNIT_MASK)
 
-#define STORE_STATUS(tablesub, index, newValue)                                  \
-  ByteArrays.setLong(status##tablesub[hash >> (UNIT_SHIFT - 3)], ((hash) * 8) & UNIT_MASK, newValue)
+#define STORE_STATUS(tablesub, index, newValue)                     \
+  ByteArrays.setLong(status##tablesub[index >> (UNIT_SHIFT - 3)], ((index) * 8) & UNIT_MASK, newValue)
 
 #define STORE_ENTRY(tablesub, index, newValue)                                   \
   ByteArrays.setLong(entries##tablesub[(index) >> (UNIT_SHIFT - 3)], ((index) * 8)& UNIT_MASK, newValue)
 
 
 #define DECODE_ENTRY(ptr, tablesub, entry)                     \
-  { ptr##Bytes = slabs##tablesub[entry >> ENTRY_SHIFT];       \
-  ptr##offset = entry & ENTRY_MASK; }
+  { ptr##Bytes = slabs##tablesub[(int) (entry >> ENTRY_SHIFT)]; \
+    ptr##Offset = (int)entry & ENTRY_MASK; }
 
 
 #define GETLONG(ptr, off) \
   ByteArrays.getLong(ptr##Bytes, ptr##Offset + off)
+
+#define SETLONG(ptr, off, value)                              \
+  ByteArrays.setLong(ptr##Bytes, ptr##Offset + off, value)
+
 
 #define DECL_ROWS(rows) \
   byte[][] rows##Bytes; \
@@ -170,7 +174,7 @@
 
 #define LOAD_PTR(ptr, rows, index) \
   { ptr##Bytes = rows##Bytes[index]; \
-    ptr##offset = ros##offset[index]; }
+    ptr##Offset = rows##Offset[index]; }
 
 #define ADD_ROW(rows, row, numRows, ptr) \
   { rows##Bytes[numRows] = ptr##Bytes; \
@@ -183,19 +187,21 @@
     encodedPtr = shard.lastAllocOffset + (slab.lastAllocSlabIndex << ENTRY_SHIFT); }
 
 
+#define ENCODE_PTR(entryIndex, offset) \
+  (((entryIndex) << ENTRY_SHIFT) + (offset))
+
 #endif
 
 
 
 
-		#define DECL_PROBE(sub)		\
+#define DECL_PROBE(sub)                   \
 		    long entry##sub = -1; \
 		    long field##sub;		\
     long empty##sub; \
 	    long hits##sub; \
 	    int hash##sub; \
 	    int row##sub; \
-            long encodedPayload; \
 	DECL_PTR(payload##sub); \
 
 
@@ -218,10 +224,10 @@
 	if (hits##sub != 0) { \
 	    int pos = Long.numberOfTrailingZeros(hits##sub) >> 3; \
 	    hits##sub &= hits##sub - 1; \
-            LOAD_ENTRY(encodedPayload##sub, tablesub, hash##sub * 8 + pos); \
-            DECODE_ENTRY(payload, tablesub, encodedPayload);             \
-            firstWord[numHitCandidates] = GETLONG(payload, firstKeyOffset); \
-            ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload);  \
+            LOAD_ENTRY(encodedPayload, tablesub, hash##sub * 8 + pos); \
+            DECODE_ENTRY(payload##sub, tablesub, encodedPayload);             \
+            firstWord[numHitCandidates] = GETLONG(payload##sub, firstKeyOffset); \
+            ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload##sub);  \
 }
 
 
@@ -230,11 +236,11 @@
 	for (;;) {		 \
 	while (hits##sub != 0) { \
 	    int pos = Long.numberOfTrailingZeros(hits##sub) >> 3; \
-            LOAD_ENTRY(encodedPayload##sub, tablesub, hash * 8 + pos); \
-            DECODE_ENTRY(payload##sub, tablesub, encodedPayload##sub); \
-            firstWord[numHitCandidates] = GETLONG(payload, firstKeyOffset); \
+            LOAD_ENTRY(encodedPayload, tablesub, hash##sub * 8 + pos); \
+            DECODE_ENTRY(payload##sub, tablesub, encodedPayload); \
+            firstWord[numHitCandidates] = GETLONG(payload##sub, firstKeyOffset); \
             if (numHitCandidates > hitCandidateSize + 256) { growHitCandidates(); } \
-            ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload); \
+            ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload##sub); \
 	    hits##sub &= hits##sub - 1; \
 	} \
 	if (empty##sub != 0) break; \

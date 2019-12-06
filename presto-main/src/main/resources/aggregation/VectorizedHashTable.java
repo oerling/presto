@@ -15,20 +15,36 @@ package com.facebook.presto.operator.aggregation;
 
 #include "hash.h"
 
-    import com.facebook.presto.spi.block.Block;
-    import com.facebook.presto.spi.block.DictionaryBlock;
+import com.facebook.presto.operator.aggregation.VectorizedAggregation.Aggregator;
+
+import com.facebook.presto.spi.block.ArrayAllocator;
+import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.BlockFlattener;
+import com.facebook.presto.spi.block.DictionaryBlock;
     import com.facebook.presto.spi.block.IntArrayBlock;
     import com.facebook.presto.spi.block.LongArrayBlock;
 import com.facebook.presto.spi.block.VariableWidthBlock;
+import com.facebook.presto.spi.type.Type;
+import com.google.common.collect.ImmutableList;
+import com.google.common.io.Closer;
+import com.google.common.primitives.Ints;
+import io.airlift.slice.ByteArrays;
+import sun.misc.Unsafe;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-class VectorizedHashTable
+import com.facebook.presto.spi.type.AbstractLongType;
+import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.google.common.base.Verify.verify;
+
+public class VectorizedHashTable
 {
     public static final int HASH_SLAB_BYTES = 64 * 1024;
-    public static final int ROW_SLAG_BYTES = 64 * 1024;
+    public static final int ROW_SLAB_BYTES = 64 * 1024;
     public static final int PROBE_WINDOW = 256;
     public static final int LONG_TYPE = 1;
     public static final int INT_TYPE = 2;
@@ -36,19 +52,43 @@ class VectorizedHashTable
     public static final int FLOAT_TYPE = 4;
     public static final int STRING_TYPE = 4;
     public static final int COMPLEX_TYPE = 6;
-        
+
+    public static final int SUM_AGGREGATION = 1;
+    
+    static Unsafe unsafe;
+
+    static {
+        try {
+            Field field = Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            unsafe = (Unsafe) field.get(null);
+            if (unsafe == null) {
+                throw new RuntimeException("Unsafe access not available");
+            }
+        }
+        catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     TableShard[] shards;
 
     int offset;
     int nullOffset;
     int fixedRowLength;
     List<Type> keys;
+    int[] groupByChannels;
+    Optional<Integer> hashChannel;
     List<Type> dependent;
-    List<AccumulatorFactory> accumulators;
+    List<Aggregator> aggregators;
     List<Column> columns = new ArrayList();
+    List<Aggregation> aggregations;
+    int firstLongKey = -1;
 
     // Input positions to consider. Initially 0, ... last position.
     int[] candidates;
+    int numCandidates;
+    long[] hashes;
     DECL_ROWS(hitCandidate);
     // The first word of each candidate hit.
     long[] firstWord;
@@ -64,36 +104,75 @@ class VectorizedHashTable
     // Input positions for which a group must be inserted.
     int[] misses;
     int numMisses;
-    int toRechek;
+    int[] toRecheck;
     int numToRecheck;
     long[] insertBloom = new long[64];
     int insertBloomSizeMask = 63;
+    boolean unroll;
 
-    VectorizedHashTable(
+    public VectorizedHashTable(
                         List<Type> keys,
                         List<Type> dependent,
                         int[] groupByChannels,
                         Optional<Integer> hashChannel,
                         int[] dependentChannels,
-                        List<AccumulatorFactory> accumulators,
+                        List<Aggregator> aggregators,
                         boolean nullableKeys,
                         long initialSize)
     {
         this.groupByChannels = groupByChannels;
+        this.hashChannel = hashChannel;
         for (int i = 0; i < keys.size(); i++) {
-            addColumn(keys.get(i), nullableKeys);
+            Type type = keys.get(i);
+            addColumn(type, nullableKeys);
+            if (firstLongKey == -1 && type == BIGINT)  {
+                firstLongKey = i;
+            }
         }
-        int nullStart = offset;
+            int nullStart = offset;
         for (int i = 0; i < dependent.size(); i++) {
             addColumn(dependent.get(i), true);
         }
-        for (int i = 0; i < accumulators.size(); i++) {
-            addAccumulator(accumulators.get(i));
+        for (int i = 0; i < aggregators.size(); i++) {
+            addAccumulator(aggregators.get(i));
         }
         offsetNulls(nullStart * 8);
         int nullBytes = roundUp(nullOffset, 8) / 8;
         for (int i = keys.size(); i < columns.size(); i++) {
             columns.get(i).offset(nullBytes);
+        }
+    }
+
+    void addColumn(Type type, boolean isNullable)
+    {
+        Column column = new Column(type, offset, isNullable ? nullOffset : -1);
+        columns.add(column);
+        offset += column.getSize();
+        if (isNullable) {
+            nullOffset++;
+        }
+    }
+
+    private void addAccumulator(Aggregator aggregator)
+    {
+        String name = aggregator.getName();
+        if (name.equals("SUM")) {
+            int[] channels = aggregator.getInputChannels();
+            Type type = aggregator.getType();
+            Column column = new Column(type, offset, nullOffset);
+            nullOffset++;
+            offset += column.getSize();
+            aggregations.add(new Aggregation(aggregator, ImmutableList.of(column), SUM_AGGREGATION));
+        }
+        else {
+            throw new UnsupportedOperationException("Aggregate " + name + " is not supported on vectorized path");
+        }
+    }
+
+    private void offsetNulls(int numBits)
+    {
+        for (Column column : columns) {
+            column.nullOffset += numBits;
         }
     }
 
@@ -109,8 +188,19 @@ class VectorizedHashTable
         {
             this.type = type;
             this.typeCode = getCodeForType(type);
+            this.offset = offset;
+            this.nullOffset = nullOffset;
         }
         
+        int getSize()
+        {
+            switch (typeCode) {
+            case INT_TYPE:
+            case FLOAT_TYPE: return 4;
+            default: return 8;
+            }
+        }
+
         void offsetNull(int bits)
         {
             if (nullOffset != -1) {
@@ -124,6 +214,62 @@ class VectorizedHashTable
         }
     }
 
+    static class Aggregation
+    {
+        Aggregator aggregator;
+        List<Column> columns;
+        int opCode;
+
+        Aggregation(Aggregator aggregator, List<Column> columns, int aggregationCode)
+        {
+            this.aggregator = aggregator;
+            this.columns = columns;
+            this.opCode = columns.get(0).typeCode + aggregationCode * 100;
+        }
+
+        // rows[rowIndices[i] is updated by blocks[xx][inputPositions[i]].
+        void addInput(TAKE_ROWS(rows), int[] rowIndices, int[] inputPositions, int numInput, Block[] blocks)
+        {
+            int[] inputChannels = aggregator.getInputChannels();
+            int offset = columns.get(0).offset;
+            switch (opCode)
+                {
+                case (LONG_TYPE + 100 * SUM_AGGREGATION): {
+                    Block block = blocks[inputChannels[0]];
+                    if (block instanceof LongArrayBlock) {
+                        LongArrayBlock typedBlock = (LongArrayBlock) block;
+                        int base = typedBlock.getOffsetBase();
+                        DECL_PTR(row);
+                        for (int i = 0; i < numInput; i++) {
+                            int rowIndex = rowIndices[i];
+                            int position = inputPositions[i];
+                            LOAD_PTR(row, rows, rowIndex);
+                            long value = typedBlock.getLongUnchecked(base + position);
+                            long valueOnRow = GETLONG(row, offset);
+                            SETLONG(row, offset, valueOnRow + value);
+                        }
+                    break;
+                }
+                }
+                default:
+                    throw new UnsupportedOperationException("Aggregate " + opCode + "not supported");
+
+                }
+        }
+    }
+
+    static void free(long f)
+    {
+        if (f != 0) {
+            /*Unsafe.freeMemory(f)*/;
+        }
+    }
+
+    static void free(byte[] bytes)
+    {
+    }
+
+    
     static class TableShard
     {
         DECL_STATUS(status);
@@ -138,6 +284,8 @@ class VectorizedHashTable
         int lastSlabIndex;
         int lastAllocOffset;
         int lastAllocSlabIndex;
+        long[] hashes = new long[PROBE_WINDOW];
+        long[] rehashEntries = new long[PROBE_WINDOW];
         TableShard[] shards;
 
         TableShard()
@@ -148,16 +296,25 @@ class VectorizedHashTable
 
         void initializeHash(int size)
         {
-            int roundedSize = roundUp(size, HASH_SLAB_BYTES);
+            size = Math.max(size, HASH_SLAB_BYTES);
+            int roundedSize = nextPowerOf2(size);
+            statusMask = (roundedSize >> 3) - 1;
+            capacity = roundedSize / 3 * 2;
             status = new byte[roundedSize / HASH_SLAB_BYTES][];
             for (int i = 0; i < status.length; i++) {
                 status[i] = getTableSlab();
+                Arrays.fill(status[i], 128);
+            }
+            entries = new byte[status.length * 8][];
+            for (int i = 0; i < entries.length; i++) {
+                entries[i] = getTableSlab();
+                Arrays.fill(entries[i], -1);
             }
         }
 
         byte[] getTableSlab()
         {
-            return new byte[HASH_SLAB_SIZE];
+            return new byte[HASH_SLAB_BYTES];
         }
 
         void freeHash()
@@ -175,26 +332,83 @@ class VectorizedHashTable
 
         void freeSlabs()
         {
+            for (int i = 0; i < numSlabs; i++) {
+                free(slabs[i]);
+            }
+            slabs = null;
+            slabSizes = null;
+            slabFilledTo = null;
+            numSlabs = 0;
+        }
+
+
+        void rehash(List<Column> columns, int numKeys)
+        {
+            freeHash();
+            initializeHash((statusMask + 1) * 16);
+            Column lastColumn = columns.get(columns.size() - 1);
+            int fixedRowSize = lastColumn.offset + lastColumn.getSize();
+            for (int slabIndex = 0; slabIndex < numSlabs; slabIndex++) {
+                int slabEnd = slabFilledTo[slabIndex];
+                for (rowIndex = 0; rowIndex < slabEnd; rowIndex += fixedRowSize) {
+                    rehashEntries[numRows++] = ENCODE_ENTRY(slabIndex, rowIndex);
+                    if (numRows == PROBE_WINDOW) {
+                        hashRows(columns, numKeys, numRows);
+                        addRows(numRows);
+                        numRows = 0;
+                    }
+                }
+            }
+            hashRows(columns, numKeys, numRows);
+            addRows(numRows);
+        }
+
+        void hashRows(List<Column> columns, int numKeys)
+        {
+            Arrays.fill(hashes, 0, numKeys, 0);
             
+            for (int columnIndex = 0; columnIndex < numKeys; columnIndex++) {
+                Column key = columns.get(columnIndex);
+                int offset = key.offset;
+                DECL_PTR(row);
+                byte[][] slabs0 = slabs;
+                for (int i = 0; i < numRows; i++) {
+                    DECODE_ENTRY(row, 0, rehashEntries[i]);
+                    hashes[i] = AbstractLongType.hash(GETLONG(row, offset));
+                }
+            }
+        }
+
+        void addRows(int numRows)
+        {
+            for (int i = 0; i < numRows; i++) {
+                addHash(hashes[i], rehashEntries[i]);
+            }
+        }
+
+        void close()
+        {
+            freeSlabs();
+            freeHash();
         }
 
         void newRow(int size)
         {
             if (numSlabs == 0) {
                 slabs = new byte[10][];
-                slabFill = new int[10];
+                slabFilledTo = new int[10];
                 slabSizes = new int[10];
                 slabs[0] = getHashSlab();
                 numSlabs = 1;
             }
-            lastSlab = numSlabs - 1;
-            if (slabSizes[lastSlab] - slabFill[lastSlab] < size) {
-                newSlab(HASH_SLAB_SIZE);
-                lastSlab = numSlabs - 1;
+            lastSlabIndex = numSlabs - 1;
+            if (slabSizes[lastSlabIndex] - slabFilledTo[lastSlabIndex] < size) {
+                newSlab(HASH_SLAB_BYTES);
+                lastSlabIndex = numSlabs - 1;
             }
-            lastAllocSlabIndex = lastSlab;
-            lastAllocOffset = slabFill[lastSlab];
-            slabFill[lastSlab} += size;
+            lastAllocSlabIndex = lastSlabIndex;
+            lastAllocOffset = slabFilledTo[lastSlabIndex];
+            slabFilledTo[lastSlabIndex] += size;
         }
         
         void newSlab(int size)
@@ -202,9 +416,9 @@ class VectorizedHashTable
             if (slabs.length == numSlabs) {
                 growSlabs();
             }
-            slabs.numSlabs = new byte[size];
+            slabs[numSlabs] = new byte[size];
             slabSizes[numSlabs] = size;
-            slabFill[numSlabs] = 0;
+            slabFilledTo[numSlabs] = 0;
             numSlabs++;
         }
         
@@ -212,57 +426,66 @@ class VectorizedHashTable
         {
             slabs = Arrays.copyOf(slabs, slabs.length * 2);
             slabSizes = Arrays.copyOf(slabSizes, slabSizes.length * 2);
-            slabFill = Arrays.copyOf(slabFill, slabFill.length * 2);
+            slabFilledTo = Arrays.copyOf(slabFilledTo, slabFilledTo.length * 2);
+        }
+
+        byte[] getHashSlab()
+        {
+            return new byte[HASH_SLAB_BYTES];
         }
         
         void addHash(long hash, long entry)
         {
-            int index = (int) hash & statusMask;
+            int hash0 = (int) hash & statusMask;
             long field = (hash >> 56) & 0x7f;
             byte statusByte = (byte) field;
             USE_TABLE(0, 0);
             for (;;) {
                 long hits0;
-                LOAD_STATUS(hits, 0, index);
+                LOAD_STATUS(hits0, 0, hash0);
                 long free = hits0 & 0x8080808080808080L;
                 if (free != 0) {
                     int pos = Long.numberOfTrailingZeros(free) >> 3;
 long                     newStatus= hits0 ^ (long) (statusByte | 0x80) << (pos * 8);
 
-STORE_STATUS(0, index, newStatus);
-STORE_ENTRY(0, index + pos, entry);
+STORE_STATUS(0, hash0, newStatus);
+STORE_ENTRY(0, hash0 + pos, entry);
                     break;
                 }
-                index = (index + 1) & statusMask;
+                hash0 = (hash0 + 1) & statusMask;
             }
+            numEntries++;
         }
 
-        void free(long f) {
-            if (f != 0) {
-                Unsafe.freeMemory(f);
-            }
-        }
-
-        void free(byte[])
+        long getSize()
         {
+            return numSlabs * ROW_SLAB_BYTES + entries.length * HASH_SLAB_BYTES;
         }
     }    
 
     // blocks are the flattened input Blocks. The dependent and the aggregates are updated and new groups are added as needed. 
-    void groupByInput(Block[] blocks)
+    public void groupByInput(Block[] blocks)
     {
         InitializeCandidates(blocks);
         int totalInput = numCandidates;
-        for (window = 0; window < totalInput; window += PROBE_WINDOW) {
+        for (int window = 0; window < totalInput; window += PROBE_WINDOW) {
             int windowEnd = Math.min(totalInput, window + PROBE_WINDOW);
             for (int i = window; i < windowEnd; i++) {
                 candidates[i - window] = i;
             }
             numCandidates = windowEnd - window;
             int currentProbe = 0;
-            int firstKeyOffset = keys[0].offset;
-            while (numCandidates > 0) {
+            int firstKeyOffset;
+            if (firstLongKey != -1) {
+                firstKeyOffset = columns.get(firstLongKey).offset;
+            }
+            else {
+                firstKeyOffset = columns.get(0).offset;
+            }
+                while (numCandidates > 0) {
                 USE_TABLE(0, 0);
+                long tempHash;
+                long encodedPayload;
                 DECL_PROBE(0);
                 if (unroll) {
                     for (; currentProbe + 4 < numCandidates; currentProbe += 4) {
@@ -270,13 +493,13 @@ STORE_ENTRY(0, index + pos, entry);
                     }
                 }
                 for (; currentProbe < numCandidates; currentProbe++) {
-                    PREGET(0, 0);
+                    PRE_PROBE(0, 0);
                     FIRST_PROBE(0, 0);
                     FULL_PROBE(0, 0);
                 }
                 compareKeys(blocks);
                 insertMisses(blocks);
-                updateGroups();
+                updateGroups(blocks);
                 System.arraycopy(toRecheck, 0, candidates, 0, numToRecheck);
                 numCandidates = numToRecheck;
             }
@@ -305,16 +528,18 @@ STORE_ENTRY(0, index + pos, entry);
                 }
             }
             else {
-                throw UnsupportedOperationException("Only LongArrayBlocks for fast aggregation");
+                throw new UnsupportedOperationException("Only LongArrayBlocks for fast aggregation");
             }
         }
         // Divide maskWords into hits and misses. Expect mostly hits.
+        hitRows = ensureCapacity(hitRows, numCandidates);
         for (int windowBase = 0; windowBase < numHitCandidates; windowBase += 64) {
             int windowEnd = Math.min(windowStart + 64, numHitCandidates);
             maskWord = maskWords[windowStart / 64];
             long mask = 1;
             for (int i = windowBase; i < windowEnd; i++) {
                 if (maskWord & mask != 0) {
+                    hitRows[numHits] = i;
                     actualHits[numHits++] = hitCandidatePositions[i];
                 }
                 mask = mask << 1;
@@ -347,7 +572,7 @@ STORE_ENTRY(0, index + pos, entry);
     {
         TableShard shard = shards[0];
         if (shard.numEntries > shard.capacity) {
-            rehash(shard);
+            shard.rehash(columns, keys.size());
         }
         Arrays.fill(insertBloom, 0);
         toRecheck = ensureCapacity(toRechek, numHitCandidates);
@@ -367,7 +592,8 @@ STORE_ENTRY(0, index + pos, entry);
             long encodedNewRow;
             shard.addRow(fixedRowSize);
             GET_NEW_ROW(newRow, encodedNewRow, shard);
-            actualHits[numHits++] = numHitCandidates;
+            hitRows[numHits] = numHitCandidates;
+            actualHits[numHits++] = row;
             ADD_ROW(hitCandidate, row, numHitCandidates, newRow);
             shard.addHash(hash, encodedNewRow);
         }
@@ -378,12 +604,13 @@ STORE_ENTRY(0, index + pos, entry);
     {
         
         for (int columnIndex = 0; columnIndex < keys.size(); columnIndex++) {
+            int offset = columns.get(columnIndex).offset;
             Block block = blocks[groupByChannels[columnIndex]];
             DECL_PTR(ptr);
             for (int i = from; i < to; i++) {
                 int row = hitCandidatePositions[i];
                 LOAD_ROW(ptr, hitCandidate, i);
-                SETLONG(ptr, block.getLong(row + base));
+                SETLONG(ptr, offset, block.getLong(row + base));
             }
         }
     }
@@ -393,13 +620,20 @@ STORE_ENTRY(0, index + pos, entry);
         numCandidates = blocks[0].getPositionCount();
         candidates = ensureCapacity(candidates, numCandidates);
         hashes = ensureCapacity(hashes, numCandidates);
+        if (hashChannel.isPresent()) {
+            Block hashBlock = blocks[hashChannel.get()];
+            int base = hashBlock.getOffsetBase();
+            for (int i = 0; i < numCandidates; i++) {
+                hashes[i] = hashBlock.getLongUnchecked(i + base);
+            }
+        }
         if (hitCandidatesSize == 0) {
             actualHits = new int[PROBE_WINDOW];
             hitCandidatesSize = PROBE_WINDOW * 3;
             ALLOC_ROWS(hitCandidate, hitCandidateSize);
             hitCandidatePositions = new int[hitCandidateSize];
             firstWord = new long[hitCandidateSize];
-            maskWords = new long[(hitCandidateSize + 64) / 64]
+            maskWords = new long[(hitCandidateSize + 64) / 64];
         }
     }
 
@@ -409,7 +643,7 @@ STORE_ENTRY(0, index + pos, entry);
         GROW_ROWS(hitCandidate, hitCandidateSize);
         hitCandidatePositions = Arrays.copyOf(hitCandidatePositions, hitCandidateSize);
         firstWord = Arrays.copyOf(firstWord, hitCandidateSize);
-        amaskWords = new long[(hitCandidateSize + 64) / 64]
+        maskWords = new long[(hitCandidateSize + 64) / 64];
     }
     
     void compareColumn(Column column, Block block, TAKE_ROWS(hitRows), int numHits, int[] candidateInputs, long[] maskWords)
@@ -423,7 +657,7 @@ STORE_ENTRY(0, index + pos, entry);
             for (int i = base; i < end; i++) {
                 if (maskWord & mask != 0) {
                     LOAD_ROW(row, hitCandidates, i);
-                    if (GET_LONG(row, columnOffset) != block.getLongUnchecked(candidateInputs[i] + blockBase)) {
+                    if (GETLONG(row, columnOffset) != block.getLongUnchecked(candidateInputs[i] + blockBase)) {
                         maskWord &= ~mask;
                     }
                     mask = mask << 1;
@@ -433,13 +667,18 @@ STORE_ENTRY(0, index + pos, entry);
                 }
     }
 
-
+    void updateGroups(Block[] blocks)
+    {
+        for (Aggregation aggregation : aggregations) {
+            aggregation.addInput(PASS_ROWS(hitCandidates), hitRows, actualHits, numHits, blocks);
+        }
+    }
     
     // The positions in keys given by candidates are probed. The
     // positions that hit at least one row are returned in candidates
     // and the corresponding first match row is in hits. The number of
     // hits is returned.
-    int hashProbeInput(Block[] keys, int[] candidates, TAKE_ROWS(hits))
+    public int hashProbeInput(Block[] keys, int[] candidates, TAKE_ROWS(hits))
     {
     }
 
@@ -454,12 +693,42 @@ STORE_ENTRY(0, index + pos, entry);
         }
     }
     
+    public long getGroupCount()
+    {
+        long size = 0;
+        for (TableShard shard : shards) {
+            if (shard != null) {
+                size += shard.numEntries;
+            }
+        }
+    }
+
+    public int getCapacity()
+    {
+        int size = 0;
+        for (TableShard shard : shards) {
+            if (shard != null) {
+                size += shard.capacity;
+            }
+        }
+    }
+
+
+    
     public List<Type> getTypes()
     {
         return keys;
     }
+
+    public void close()
+    {
+        for (TableShard shard : shards) {
+            shard.close();
+        }
+        shards = null;
+    }
     
-    static getCodeForType(Type type)
+    static int getCodeForType(Type type)
     {
         if (type == BIGINT) {
             return LONG_TYPE;
@@ -483,5 +752,9 @@ STORE_ENTRY(0, index + pos, entry);
     {
         return ((number + upTo - 1) / upTo) * upTo;
     }
-}        
 
+    int nextPowerOfTwo(int number)
+    {
+        return Integer.bitCount(number) == 1 ? number : Integer.highestOneBit(number << 1);
+    }
+}

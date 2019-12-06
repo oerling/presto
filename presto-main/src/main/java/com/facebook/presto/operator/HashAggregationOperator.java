@@ -18,7 +18,7 @@ import com.facebook.presto.operator.aggregation.AccumulatorFactory;
 import com.facebook.presto.operator.aggregation.builder.HashAggregationBuilder;
 import com.facebook.presto.operator.aggregation.builder.InMemoryHashAggregationBuilder;
 import com.facebook.presto.operator.aggregation.builder.SpillableHashAggregationBuilder;
-import com.facebook.presto.operator.aggregation.builder.VectorizedAggregation;
+import com.facebook.presto.operator.aggregation.VectorizedAggregation;
 import com.facebook.presto.operator.scalar.CombineHashFunction;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
@@ -471,7 +471,7 @@ public class HashAggregationOperator
         if (finished) {
             return null;
         }
-        if (vectorizedAggregation) {
+        if (vectorizedAggregation != null) {
             return vectorizedAggregation.getOutput();
         }
         

@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.operator.aggregation.builder;
+package com.facebook.presto.operator.aggregation;
 
 import com.facebook.presto.array.IntBigArray;
 import com.facebook.presto.memory.context.LocalMemoryContext;
@@ -19,6 +19,7 @@ import com.facebook.presto.operator.GroupByHash;
 import com.facebook.presto.operator.GroupByIdBlock;
 import com.facebook.presto.operator.HashCollisionsCounter;
 import com.facebook.presto.operator.OperatorContext;
+import com.facebook.presto.operator.SimpleArrayAllocator;
 import com.facebook.presto.operator.TransformWork;
 import com.facebook.presto.operator.UpdateMemory;
 import com.facebook.presto.operator.Work;
@@ -26,8 +27,13 @@ import com.facebook.presto.operator.WorkProcessor;
 import com.facebook.presto.operator.WorkProcessor.ProcessState;
 import com.facebook.presto.operator.aggregation.AccumulatorFactory;
 import com.facebook.presto.operator.aggregation.GroupedAccumulator;
+import com.facebook.presto.operator.aggregation.VectorizedHashTable;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
+import com.facebook.presto.spi.block.ArrayAllocator;
+import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.BlockFlattener;
+import com.facebook.presto.spi.block.BlockLease;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.plan.AggregationNode;
 import com.facebook.presto.spi.plan.AggregationNode.Step;
@@ -35,8 +41,10 @@ import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.gen.JoinCompiler;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.common.io.Closer;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.ListenableFuture;
+
 import io.airlift.units.DataSize;
 import it.unimi.dsi.fastutil.ints.AbstractIntIterator;
 import it.unimi.dsi.fastutil.ints.IntIterator;
@@ -51,6 +59,7 @@ import static com.facebook.presto.SystemSessionProperties.isDictionaryAggregatio
 import static com.facebook.presto.operator.GroupByHash.createGroupByHash;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Verify.verify;
 import static java.util.Objects.requireNonNull;
 
 public class VectorizedAggregation
@@ -112,23 +121,10 @@ public class VectorizedAggregation
             boolean yieldForMemoryReservation,
             boolean useSystemMemory)
     {
-        this.groupByHash = new VectorizedHashTable(
-                                                   
-                groupByTypes,
-                ImmutableList.of(),
-                Ints.toArray(groupByChannels),
-                hashChannel,
-                new int[0],
-                accumulatorFactories,
-                true,
-                expectedGroups);
-
-
-
         this.operatorContext = operatorContext;
         this.partial = step.isOutputPartial();
         this.maxPartialMemory = maxPartialMemory.map(dataSize -> OptionalLong.of(dataSize.toBytes())).orElseGet(OptionalLong::empty);
-        this.systemMemoryContext = operatorContext.newLocalSystemMemoryContext(VectorizedHashAggregationBuilder.class.getSimpleName());
+        this.systemMemoryContext = operatorContext.newLocalSystemMemoryContext(VectorizedAggregation.class.getSimpleName());
         this.localUserMemoryContext = operatorContext.localUserMemoryContext();
         this.useSystemMemory = useSystemMemory;
 
@@ -144,29 +140,43 @@ public class VectorizedAggregation
             builder.add(new Aggregator(accumulatorFactory, step, overwriteIntermediateChannel));
         }
         aggregators = builder.build();
+        this.groupByHash = new VectorizedHashTable(
+                groupByTypes,
+                ImmutableList.of(),
+                Ints.toArray(groupByChannels),
+                hashChannel,
+                new int[0],
+                aggregators,
+                true,
+                expectedGroups);
+
     }
 
     public void close()
     {
         groupByHash.close();
-        groupByHash = null;
         updateMemory(0);
 
     }
 
-    void addInput(Page page)
+    public void addInput(Page page)
     {
         if (blocks == null) {
             blocks = new Block[page.getChannelCount()];
 
         }
         for (int i = 0; i < page.getChannelCount(); i++) {
-            BlockLease lease = flattener.flatten(block);
+            BlockLease lease = flattener.flatten(page.getBlock(i));
             blockLeaseCloser.register(lease::close);
-            Blocks[i] = lease.get();
+            blocks[i] = lease.get();
         }
         groupByHash.groupByInput(blocks);
-        blockLeaseCloser.close();
+        try {
+            blockLeaseCloser.close();
+        }
+        catch (Exception e) {
+            verify(false, "BlockLease is not supposed to throw");
+        }
     }
 
     public boolean isFull()
@@ -196,32 +206,9 @@ public class VectorizedAggregation
         return groupByHash.getCapacity();
     }
 
-    private WorkProcessor<Page> buildResult(IntIterator groupIds)
+    public Page getOutput()
     {
-        final PageBuilder pageBuilder = new PageBuilder(buildTypes());
-        return WorkProcessor.create(() -> {
-            if (!groupIds.hasNext()) {
-                return ProcessState.finished();
-            }
-
-            pageBuilder.reset();
-
-            List<Type> types = groupByHash.getTypes();
-            while (!pageBuilder.isFull() && groupIds.hasNext()) {
-                int groupId = groupIds.nextInt();
-
-                groupByHash.appendValuesTo(groupId, pageBuilder, 0);
-
-                pageBuilder.declarePosition();
-                for (int i = 0; i < aggregators.size(); i++) {
-                    Aggregator aggregator = aggregators.get(i);
-                    BlockBuilder output = pageBuilder.getBlockBuilder(types.size() + i);
-                    aggregator.evaluate(groupId, output);
-                }
-            }
-
-            return ProcessState.ofResult(pageBuilder.build());
-        });
+        return null;
     }
 
     public List<Type> buildTypes()
@@ -243,11 +230,13 @@ public class VectorizedAggregation
         }
     }
 
-    private static class Aggregator
+    public static class Aggregator
     {
         private final GroupedAccumulator aggregation;
         private AggregationNode.Step step;
         private final int intermediateChannel;
+        private final String name;
+        private final int[] inputChannels;
 
         private Aggregator(AccumulatorFactory accumulatorFactory, AggregationNode.Step step, Optional<Integer> overwriteIntermediateChannel)
         {
@@ -265,6 +254,8 @@ public class VectorizedAggregation
                 this.aggregation = accumulatorFactory.createGroupedIntermediateAccumulator();
             }
             this.step = step;
+            this.name = accumulatorFactory.getName();
+            this.inputChannels = Ints.toArray(accumulatorFactory.getInputChannels());
         }
 
         public long getEstimatedSize()
@@ -272,6 +263,16 @@ public class VectorizedAggregation
             return aggregation.getEstimatedSize();
         }
 
+        public String getName()
+        {
+            return name;
+        }
+
+        public int[] getInputChannels()
+        {
+            return inputChannels;
+        }
+        
         public Type getType()
         {
             if (step.isOutputPartial()) {
