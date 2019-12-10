@@ -38,7 +38,14 @@ import java.util.List;
 import java.util.Optional;
 
 import com.facebook.presto.spi.type.AbstractLongType;
+
+import static com.facebook.presto.array.Arrays.ensureCapacity;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.RealType.REAL;
+import static com.facebook.presto.spi.type.Varchars.isVarcharType;
+
 import static com.google.common.base.Verify.verify;
 
 public class VectorizedHashTable
@@ -75,7 +82,7 @@ public class VectorizedHashTable
 
     int offset;
     int nullOffset;
-    int fixedRowLength;
+    int fixedRowSize;
     List<Type> keys;
     int[] groupByChannels;
     Optional<Integer> hashChannel;
@@ -94,7 +101,8 @@ public class VectorizedHashTable
     long[] firstWord;
     int[] hitCandidatePositions;
     int numHitCandidates;
-    int hitCandidateSize;
+    int hitCandidatesSize;
+    int[] hitRows;
     int[] actualHits;
     int numHits;
     long[] maskWords;
@@ -109,6 +117,7 @@ public class VectorizedHashTable
     long[] insertBloom = new long[64];
     int insertBloomSizeMask = 63;
     boolean unroll;
+    OutputState outputState;
 
     public VectorizedHashTable(
                         List<Type> keys,
@@ -141,6 +150,9 @@ public class VectorizedHashTable
         for (int i = keys.size(); i < columns.size(); i++) {
             columns.get(i).offset(nullBytes);
         }
+	Column lastColumn = columns.get(columns.size() - 1);
+	fixedRowSize = lastColumn.offset + lastColumn.getSize();
+
     }
 
     void addColumn(Type type, boolean isNullable)
@@ -303,12 +315,12 @@ public class VectorizedHashTable
             status = new byte[roundedSize / HASH_SLAB_BYTES][];
             for (int i = 0; i < status.length; i++) {
                 status[i] = getTableSlab();
-                Arrays.fill(status[i], 128);
+                Arrays.fill(status[i], (byte) 128);
             }
             entries = new byte[status.length * 8][];
             for (int i = 0; i < entries.length; i++) {
                 entries[i] = getTableSlab();
-                Arrays.fill(entries[i], -1);
+                Arrays.fill(entries[i], (byte) -1);
             }
         }
 
@@ -348,10 +360,11 @@ public class VectorizedHashTable
             initializeHash((statusMask + 1) * 16);
             Column lastColumn = columns.get(columns.size() - 1);
             int fixedRowSize = lastColumn.offset + lastColumn.getSize();
+	    int numRows = 0;
             for (int slabIndex = 0; slabIndex < numSlabs; slabIndex++) {
                 int slabEnd = slabFilledTo[slabIndex];
-                for (rowIndex = 0; rowIndex < slabEnd; rowIndex += fixedRowSize) {
-                    rehashEntries[numRows++] = ENCODE_ENTRY(slabIndex, rowIndex);
+                for (int rowIndex = 0; rowIndex < slabEnd; rowIndex += fixedRowSize) {
+                    rehashEntries[numRows++] = ENCODE_PTR(slabIndex, rowIndex);
                     if (numRows == PROBE_WINDOW) {
                         hashRows(columns, numKeys, numRows);
                         addRows(numRows);
@@ -363,9 +376,9 @@ public class VectorizedHashTable
             addRows(numRows);
         }
 
-        void hashRows(List<Column> columns, int numKeys)
+        void hashRows(List<Column> columns, int numKeys, int numRows)
         {
-            Arrays.fill(hashes, 0, numKeys, 0);
+            Arrays.fill(hashes, 0, numRows, 0);
             
             for (int columnIndex = 0; columnIndex < numKeys; columnIndex++) {
                 Column key = columns.get(columnIndex);
@@ -505,6 +518,90 @@ STORE_ENTRY(0, hash0 + pos, entry);
             }
         }
     }
+
+    private class OutputState
+    {
+	int outputBatch = 1024;
+	DECL_ROWS(rows);
+	int numRows;
+	int currentRow;
+	int currentShard;
+	int currentSlab;
+	int currentOffset;
+	
+	OutputState(outputColumns)
+	{
+	    this.outputColumns = outputColumns;
+	    ALLOC_ROWS(rows, outputBatch);
+	}
+
+	void reset()
+	{
+	    currentShard = 0;
+	    currentSlab = 0;
+	    currentOffset = 0;
+	}
+	
+	Page getoutput(int from, int to)
+	{
+	    Block[] blocks= new Block[outputColumns.size()];
+	    for (int i = 0; i < outputColumns.size(); i++) {
+		Column column = outputColumns.get(i);
+		blocks[i] = getBlock(from, to, column);
+	    }
+	    return new Page(to -from, blocks);
+	}
+
+	Block getBlock(int from, int to, Column column)
+	{
+	    int offset = column.offset;
+	    switch (column.typeCode) {
+	    case LONG_TYPE:
+	    case DOUBLE_TYPE: {
+		long array = new long[to - from];
+		DECL_PTR(ptr);
+		for (int i = from; i < to; i++) {
+		    LOAD_PTR(ptr, rows, i);
+		    array[i - from] = GETLONG(ptr, offset);
+		}
+		return new LongArrayBlock(to - from, Optional.empty(), array);
+	    }
+	    default: {
+		throw new UnsupportedOperationException("Column type not supported");
+	    }
+	    }
+	}
+
+	boolean nextBatch()
+	{
+	    TableShard shard = suards[currentShard];
+	    DECL_PTR(ptr);
+	    while (true) {
+		ptrBytes = shard.slabs[currentSlab];
+		ptrOffset = currentOffset;
+		rowsBytes[numOutput] = ptrBytes;
+		rowsOffset[numOutput] = ptrOffset;
+		numOutput++;
+		currentOffset += fixedRowSize;
+		if (currentOffset >= shard.slabFilledTo[currentSlab
+	    }
+	}
+    }
+
+    Page getOutput()
+    {
+	if (outputState == null) {
+	    outputState = new OutputState(outputColumns);
+	}
+	if (outputDone()) {
+	    return null;
+	}
+	
+    }
+
+    boolean outputDone(){
+
+    }
     
     private void compareKeys(Block[] blocks)
     {
@@ -515,8 +612,8 @@ STORE_ENTRY(0, hash0 + pos, entry);
                 LongArrayBlock longBlock = (LongArrayBlock) probeBlock;
                 int base = longBlock. getOffsetBase();
                 for (int windowBase = 0; windowBase < numHitCandidates; windowBase += 64) {
-                    int windowEnd = Math.min(windowStart + 64, numHitCandidates);
-                    maskWord = maskWords[windowStart / 64];
+                    int windowEnd = Math.min(windowBase + 64, numHitCandidates);
+                    long maskWord = maskWords[windowBase / 64];
                     long mask = 1;
                     for (int i = windowBase; i < windowEnd; i++) {
                     if (firstWord[i] != longBlock.getLongUnchecked(i + base)) {
@@ -524,7 +621,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
                 }
                 mask = mask << 1;
                     }
-                    maskwords[windowStart / 64] = maskWord;
+                    maskWords[windowBase / 64] = maskWord;
                 }
             }
             else {
@@ -534,11 +631,11 @@ STORE_ENTRY(0, hash0 + pos, entry);
         // Divide maskWords into hits and misses. Expect mostly hits.
         hitRows = ensureCapacity(hitRows, numCandidates);
         for (int windowBase = 0; windowBase < numHitCandidates; windowBase += 64) {
-            int windowEnd = Math.min(windowStart + 64, numHitCandidates);
-            maskWord = maskWords[windowStart / 64];
+            int windowEnd = Math.min(windowBase + 64, numHitCandidates);
+            long maskWord = maskWords[windowBase / 64];
             long mask = 1;
             for (int i = windowBase; i < windowEnd; i++) {
-                if (maskWord & mask != 0) {
+                if ((maskWord & mask) != 0) {
                     hitRows[numHits] = i;
                     actualHits[numHits++] = hitCandidatePositions[i];
                 }
@@ -568,29 +665,29 @@ STORE_ENTRY(0, hash0 + pos, entry);
         }
     }
 
-    private void insertMisses(Block[] bloccks)
+    private void insertMisses(Block[] blocks)
     {
         TableShard shard = shards[0];
         if (shard.numEntries > shard.capacity) {
             shard.rehash(columns, keys.size());
         }
         Arrays.fill(insertBloom, 0);
-        toRecheck = ensureCapacity(toRechek, numHitCandidates);
+        toRecheck = ensureCapacity(toRecheck, numHitCandidates);
         numToRecheck = 0;
         int initialCandidates = numHitCandidates;
         for (int i = 0; i < numMisses; i++) {
             int row = misses[i];
             long hash = hashes[row];
-            long mask = BF_MASK(hash);
-            int bloomIndex = (int) hash & bloomSizeMask;
-            if (insertBloom[bloomIndex] & bloomMask == bloomMask) {
+            long bloomMask = BF_MASK(hash);
+            int bloomIndex = (int) hash & insertBloomSizeMask;
+            if ((insertBloom[bloomIndex] & bloomMask) == bloomMask) {
                 toRecheck[numToRecheck++] = row;
                 continue;
             }
             insertBloom[bloomIndex] |= bloomMask;
             DECL_PTR(newRow);
             long encodedNewRow;
-            shard.addRow(fixedRowSize);
+            shard.newRow(fixedRowSize);
             GET_NEW_ROW(newRow, encodedNewRow, shard);
             hitRows[numHits] = numHitCandidates;
             actualHits[numHits++] = row;
@@ -602,15 +699,16 @@ STORE_ENTRY(0, hash0 + pos, entry);
 
     private void initializeNewRows(int from, int to, Block[] blocks)
     {
-        
-        for (int columnIndex = 0; columnIndex < keys.size(); columnIndex++) {
+	    USE_TABLE(0, 0);
+	    for (int columnIndex = 0; columnIndex < keys.size(); columnIndex++) {
             int offset = columns.get(columnIndex).offset;
             Block block = blocks[groupByChannels[columnIndex]];
+	    int base = block.getOffsetBase();
             DECL_PTR(ptr);
             for (int i = from; i < to; i++) {
                 int row = hitCandidatePositions[i];
-                LOAD_ROW(ptr, hitCandidate, i);
-                SETLONG(ptr, offset, block.getLong(row + base));
+                LOAD_PTR(ptr, hitCandidate, i);
+                SETLONG(ptr, offset, block.getLongUnchecked(row + base));
             }
         }
     }
@@ -630,39 +728,40 @@ STORE_ENTRY(0, hash0 + pos, entry);
         if (hitCandidatesSize == 0) {
             actualHits = new int[PROBE_WINDOW];
             hitCandidatesSize = PROBE_WINDOW * 3;
-            ALLOC_ROWS(hitCandidate, hitCandidateSize);
-            hitCandidatePositions = new int[hitCandidateSize];
-            firstWord = new long[hitCandidateSize];
-            maskWords = new long[(hitCandidateSize + 64) / 64];
+            ALLOC_ROWS(hitCandidate, hitCandidatesSize);
+            hitCandidatePositions = new int[hitCandidatesSize];
+            firstWord = new long[hitCandidatesSize];
+            maskWords = new long[(hitCandidatesSize + 64) / 64];
         }
     }
 
     private void growHitCandidates()
     {
-        hitCandidateSize *= 2;
-        GROW_ROWS(hitCandidate, hitCandidateSize);
-        hitCandidatePositions = Arrays.copyOf(hitCandidatePositions, hitCandidateSize);
-        firstWord = Arrays.copyOf(firstWord, hitCandidateSize);
-        maskWords = new long[(hitCandidateSize + 64) / 64];
+        hitCandidatesSize *= 2;
+        GROW_ROWS(hitCandidate, hitCandidatesSize);
+        hitCandidatePositions = Arrays.copyOf(hitCandidatePositions, hitCandidatesSize);
+        firstWord = Arrays.copyOf(firstWord, hitCandidatesSize);
+        maskWords = new long[(hitCandidatesSize + 64) / 64];
     }
     
     void compareColumn(Column column, Block block, TAKE_ROWS(hitRows), int numHits, int[] candidateInputs, long[] maskWords)
     {
         int blockBase = block.getOffsetBase();
-        int columnOffset = column.getOffset();
-
+        int columnOffset = column.offset;
+	DECL_PTR(row);
         for (int base = 0; base  < numHits; base += 64) {
-            mask = maskWords[i / 64];
+	    int end = Math.min(numHits, base + 64);
+            long maskWord = maskWords[base / 64];
             long mask = 1;
             for (int i = base; i < end; i++) {
-                if (maskWord & mask != 0) {
-                    LOAD_ROW(row, hitCandidates, i);
+                if ((maskWord & mask) != 0) {
+                    LOAD_PTR(row, hitCandidate, i);
                     if (GETLONG(row, columnOffset) != block.getLongUnchecked(candidateInputs[i] + blockBase)) {
                         maskWord &= ~mask;
                     }
                     mask = mask << 1;
                 }
-                maskWords[i / 64] = maskWord;
+                maskWords[base / 64] = maskWord;
             }
                 }
     }
@@ -670,7 +769,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
     void updateGroups(Block[] blocks)
     {
         for (Aggregation aggregation : aggregations) {
-            aggregation.addInput(PASS_ROWS(hitCandidates), hitRows, actualHits, numHits, blocks);
+            aggregation.addInput(PASS_ROWS(hitCandidate), hitRows, actualHits, numHits, blocks);
         }
     }
     
@@ -680,6 +779,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
     // hits is returned.
     public int hashProbeInput(Block[] keys, int[] candidates, TAKE_ROWS(hits))
     {
+	return 0;
     }
 
 
@@ -691,6 +791,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
                 size += shard.getSize();
             }
         }
+	return size;
     }
     
     public long getGroupCount()
@@ -701,6 +802,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
                 size += shard.numEntries;
             }
         }
+	return size;
     }
 
     public int getCapacity()
@@ -711,6 +813,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
                 size += shard.capacity;
             }
         }
+	return size;
     }
 
 
@@ -753,7 +856,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
         return ((number + upTo - 1) / upTo) * upTo;
     }
 
-    int nextPowerOfTwo(int number)
+    private static int nextPowerOf2(int number)
     {
         return Integer.bitCount(number) == 1 ? number : Integer.highestOneBit(number << 1);
     }
