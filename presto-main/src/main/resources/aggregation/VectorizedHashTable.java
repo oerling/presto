@@ -16,7 +16,7 @@ package com.facebook.presto.operator.aggregation;
 #include "hash.h"
 
 import com.facebook.presto.operator.aggregation.VectorizedAggregation.Aggregator;
-
+import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.block.ArrayAllocator;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockFlattener;
@@ -87,9 +87,9 @@ public class VectorizedHashTable
     int[] groupByChannels;
     Optional<Integer> hashChannel;
     List<Type> dependent;
-    List<Aggregator> aggregators;
     List<Column> columns = new ArrayList();
-    List<Aggregation> aggregations;
+    List<Column> outputColumns = new ArrayList();
+    List<Aggregation> aggregations = new ArrayList();
     int firstLongKey = -1;
 
     // Input positions to consider. Initially 0, ... last position.
@@ -152,7 +152,7 @@ public class VectorizedHashTable
         }
 	Column lastColumn = columns.get(columns.size() - 1);
 	fixedRowSize = lastColumn.offset + lastColumn.getSize();
-
+	outputColumns.addAll(columns);
     }
 
     void addColumn(Type type, boolean isNullable)
@@ -168,7 +168,7 @@ public class VectorizedHashTable
     private void addAccumulator(Aggregator aggregator)
     {
         String name = aggregator.getName();
-        if (name.equals("SUM")) {
+        if (name.equals("sum")) {
             int[] channels = aggregator.getInputChannels();
             Type type = aggregator.getType();
             Column column = new Column(type, offset, nullOffset);
@@ -300,19 +300,22 @@ public class VectorizedHashTable
         long[] rehashEntries = new long[PROBE_WINDOW];
         TableShard[] shards;
 
-        TableShard()
+        TableShard(int size)
         {
             shards = new TableShard[1];
             shards[0] = this;
+	    if (size > 0) {
+		initializeHash(size);
+	    }
         }
 
         void initializeHash(int size)
         {
-            size = Math.max(size, HASH_SLAB_BYTES);
+            size = Math.max(size, HASH_SLAB_BYTES / 8);
             int roundedSize = nextPowerOf2(size);
-            statusMask = (roundedSize >> 3) - 1;
+            statusMask = roundedSize - 1;
             capacity = roundedSize / 3 * 2;
-            status = new byte[roundedSize / HASH_SLAB_BYTES][];
+            status = new byte[roundedSize / (HASH_SLAB_BYTES / 8)][];
             for (int i = 0; i < status.length; i++) {
                 status[i] = getTableSlab();
                 Arrays.fill(status[i], (byte) 128);
@@ -523,15 +526,13 @@ STORE_ENTRY(0, hash0 + pos, entry);
     {
 	int outputBatch = 1024;
 	DECL_ROWS(rows);
-	int numRows;
-	int currentRow;
+	int numOutput;
 	int currentShard;
 	int currentSlab;
 	int currentOffset;
 	
-	OutputState(outputColumns)
+	OutputState()
 	{
-	    this.outputColumns = outputColumns;
 	    ALLOC_ROWS(rows, outputBatch);
 	}
 
@@ -540,25 +541,16 @@ STORE_ENTRY(0, hash0 + pos, entry);
 	    currentShard = 0;
 	    currentSlab = 0;
 	    currentOffset = 0;
+	    numOutput = 0;
 	}
 	
-	Page getoutput(int from, int to)
-	{
-	    Block[] blocks= new Block[outputColumns.size()];
-	    for (int i = 0; i < outputColumns.size(); i++) {
-		Column column = outputColumns.get(i);
-		blocks[i] = getBlock(from, to, column);
-	    }
-	    return new Page(to -from, blocks);
-	}
-
 	Block getBlock(int from, int to, Column column)
 	{
 	    int offset = column.offset;
 	    switch (column.typeCode) {
 	    case LONG_TYPE:
 	    case DOUBLE_TYPE: {
-		long array = new long[to - from];
+		long[] array = new long[to - from];
 		DECL_PTR(ptr);
 		for (int i = from; i < to; i++) {
 		    LOAD_PTR(ptr, rows, i);
@@ -572,9 +564,9 @@ STORE_ENTRY(0, hash0 + pos, entry);
 	    }
 	}
 
-	boolean nextBatch()
+	void nextBatch()
 	{
-	    TableShard shard = suards[currentShard];
+	    TableShard shard = shards[currentShard];
 	    DECL_PTR(ptr);
 	    while (true) {
 		ptrBytes = shard.slabs[currentSlab];
@@ -583,29 +575,60 @@ STORE_ENTRY(0, hash0 + pos, entry);
 		rowsOffset[numOutput] = ptrOffset;
 		numOutput++;
 		currentOffset += fixedRowSize;
-		if (currentOffset >= shard.slabFilledTo[currentSlab
+		if (currentOffset >= shard.slabFilledTo[currentSlab]){
+		    currentSlab++;
+		    currentOffset = 0;
+		    if (currentSlab == shard.numSlabs) {
+			currentShard++;
+			currentSlab = 0;
+			if (currentShard == shards.length) {
+			    return;
+			}
+		    }
+		}
+		if (numOutput == outputBatch) {
+		    return;
+		}
 	    }
-	}
-    }
+	    }
 
-    Page getOutput()
+	Page getOutput()
+	{
+	    if (outputState == null) {
+		outputState = new OutputState();
+	    }
+	    if (outputDone()) {
+		return null;
+	    }
+	    nextBatch();
+	    if (outputDone() && numOutput == 0) {
+		return null;
+	    }
+	    Block[] blocks= new Block[outputColumns.size()];
+	    for (int i = 0; i < outputColumns.size(); i++) {
+		Column column = outputColumns.get(i);
+		blocks[i] = getBlock(0, numOutput, column);
+	    }
+	    return new Page(numOutput, blocks);
+	}	
+
+	boolean outputDone()
+	{
+	    return currentShard >= shards.length;
+	}
+    }    
+
+    public Page getOutput()
     {
 	if (outputState == null) {
-	    outputState = new OutputState(outputColumns);
+	    outputState = new OutputState();
 	}
-	if (outputDone()) {
-	    return null;
-	}
-	
+	return outputState.getOutput();
     }
 
-    boolean outputDone(){
-
-    }
-    
     private void compareKeys(Block[] blocks)
     {
-        Arrays.fill(maskWords, -1, 0, roundUp(numHitCandidates, 64));
+        Arrays.fill(maskWords, 0, roundUp(numHitCandidates, 64) / 64, -1);
         if (firstLongKey != -1) {
             Block probeBlock = blocks[groupByChannels[firstLongKey]];
             if (probeBlock instanceof LongArrayBlock) {
@@ -672,7 +695,7 @@ STORE_ENTRY(0, hash0 + pos, entry);
             shard.rehash(columns, keys.size());
         }
         Arrays.fill(insertBloom, 0);
-        toRecheck = ensureCapacity(toRecheck, numHitCandidates);
+        toRecheck = ensureCapacity(toRecheck, numMisses);
         numToRecheck = 0;
         int initialCandidates = numHitCandidates;
         for (int i = 0; i < numMisses; i++) {
@@ -715,8 +738,13 @@ STORE_ENTRY(0, hash0 + pos, entry);
 
     void InitializeCandidates(Block[] blocks)
     {
+	if (shards == null) {
+	    shards = new TableShard[1];
+	    shards[0] = new TableShard(8192);
+	}
         numCandidates = blocks[0].getPositionCount();
         candidates = ensureCapacity(candidates, numCandidates);
+	misses = ensureCapacity(misses, numCandidates);
         hashes = ensureCapacity(hashes, numCandidates);
         if (hashChannel.isPresent()) {
             Block hashBlock = blocks[hashChannel.get()];

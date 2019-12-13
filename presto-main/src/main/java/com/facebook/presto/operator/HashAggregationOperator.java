@@ -435,6 +435,10 @@ public class HashAggregationOperator
 
     private static boolean isVectorized(AccumulatorFactory factory)
     {
+	String name = factory.getName();
+	if (name.equals("sum")) {
+	    return true;
+	}
         return false;
     }
     

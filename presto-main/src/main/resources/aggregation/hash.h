@@ -182,9 +182,9 @@
     rows##Positions[numRows++] = row; }
 
 #define GET_NEW_ROW(ptr, encodedPtr, shard)          \
-  { ptr##Bytes = shard.slabs[lastAllocSlabIndex]; \
+  { ptr##Bytes = shard.slabs[shard.lastAllocSlabIndex]; \
     ptr##Offset = shard.lastAllocOffset;                                \
-    encodedPtr = shard.lastAllocOffset + (slab.lastAllocSlabIndex << ENTRY_SHIFT); }
+    encodedPtr = shard.lastAllocOffset + (shard.lastAllocSlabIndex << ENTRY_SHIFT); }
 
 
 #define ENCODE_PTR(entryIndex, offset) \
@@ -239,7 +239,7 @@
             LOAD_ENTRY(encodedPayload, tablesub, hash##sub * 8 + pos); \
             DECODE_ENTRY(payload##sub, tablesub, encodedPayload); \
             firstWord[numHitCandidates] = GETLONG(payload##sub, firstKeyOffset); \
-            if (numHitCandidates > hitCandidateSize + 256) { growHitCandidates(); } \
+            if (numHitCandidates > hitCandidatesSize + 256) { growHitCandidates(); } \
             ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload##sub); \
 	    hits##sub &= hits##sub - 1; \
 	} \
