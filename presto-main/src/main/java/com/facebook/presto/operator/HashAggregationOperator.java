@@ -350,7 +350,13 @@ public class HashAggregationOperator
     @Override
     public boolean needsInput()
     {
-        if (finishing || outputPages != null) {
+        if (finishing) {
+            return false;
+        }
+        if (vectorizedAggregation != null) {
+            return true;
+        }
+        if (outputPages != null) {
             return false;
         }
         else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
@@ -476,7 +482,15 @@ public class HashAggregationOperator
             return null;
         }
         if (vectorizedAggregation != null) {
-            return vectorizedAggregation.getOutput();
+            if (!finishing) {
+                return null;
+            }
+            Page page = vectorizedAggregation.getOutput();
+            if (page == null) {
+                finished = true;
+                vectorizedAggregation.close();
+            }
+            return page;
         }
         
         // process unfinished work if one exists

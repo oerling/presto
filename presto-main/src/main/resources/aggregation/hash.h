@@ -133,10 +133,10 @@
 
 // index is the index of a 8 byte word
 #define LOAD_STATUS(dest, tablesub, index)                          \
-        dest = ByteArrays.getLong(status##tablesub[index >> (UNIT_SHIFT - 3)], ((index) * 8) & UNIT_MASK)
+        dest = UncheckedByteArrays.getLongUnchecked(status##tablesub[index >> (UNIT_SHIFT - 3)], ((index) * 8) & UNIT_MASK)
 
 #define LOAD_ENTRY(dest, tablesub, index) \
-  dest = ByteArrays.getLong(entries##tablesub[(index) >> (UNIT_SHIFT - 3)], ((index) * 8)& UNIT_MASK)
+  dest = UncheckedByteArrays.getLongUnchecked(entries##tablesub[(index) >> (UNIT_SHIFT - 3)], ((index) * 8)& UNIT_MASK)
 
 #define STORE_STATUS(tablesub, index, newValue)                     \
   ByteArrays.setLong(status##tablesub[index >> (UNIT_SHIFT - 3)], ((index) * 8) & UNIT_MASK, newValue)
@@ -151,7 +151,7 @@
 
 
 #define GETLONG(ptr, off) \
-  ByteArrays.getLong(ptr##Bytes, ptr##Offset + off)
+  UncheckedByteArrays.getLongUnchecked(ptr##Bytes, ptr##Offset + off)
 
 #define SETLONG(ptr, off, value)                              \
   ByteArrays.setLong(ptr##Bytes, ptr##Offset + off, value)
@@ -184,11 +184,11 @@
 #define GET_NEW_ROW(ptr, encodedPtr, shard)          \
   { ptr##Bytes = shard.slabs[shard.lastAllocSlabIndex]; \
     ptr##Offset = shard.lastAllocOffset;                                \
-    encodedPtr = shard.lastAllocOffset + (shard.lastAllocSlabIndex << ENTRY_SHIFT); }
+    encodedPtr = shard.lastAllocOffset + ((long) shard.lastAllocSlabIndex << ENTRY_SHIFT); }
 
 
 #define ENCODE_PTR(entryIndex, offset) \
-  (((entryIndex) << ENTRY_SHIFT) + (offset))
+  (((long) (entryIndex) << ENTRY_SHIFT) + (offset))
 
 #endif
 

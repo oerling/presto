@@ -64,7 +64,7 @@ import static java.util.Objects.requireNonNull;
 
 public class VectorizedAggregation
 {
-    private final VectorizedHashTable groupByHash;
+    private VectorizedHashTable groupByHash;
     private final List<Aggregator> aggregators;
     private final OperatorContext operatorContext;
     private final boolean partial;
@@ -154,9 +154,11 @@ public class VectorizedAggregation
 
     public void close()
     {
-        groupByHash.close();
-        updateMemory(0);
-
+        if (groupByHash != null) {
+            groupByHash.close();
+        }
+            updateMemory(0);
+        groupByHash = null;
     }
 
     public void addInput(Page page)
@@ -208,7 +210,7 @@ public class VectorizedAggregation
 
     public Page getOutput()
     {
-        return null;
+        return groupByHash.getOutput();
     }
 
     public List<Type> buildTypes()
