@@ -226,8 +226,8 @@ public class VectorizedHashTable {
             if (block instanceof LongArrayBlock) {
               LongArrayBlock typedBlock = (LongArrayBlock) block;
               int base = typedBlock.getOffsetBase();
-              byte[] rowBytes;
-              int rowOffset;
+              byte[] rowBytes = null;
+              int rowOffset = -1;
               ;
               for (int i = 0; i < numInput; i++) {
                 int rowIndex = rowIndices[i];
@@ -352,8 +352,8 @@ public class VectorizedHashTable {
       for (int columnIndex = 0; columnIndex < numKeys; columnIndex++) {
         Column key = columns.get(columnIndex);
         int offset = key.offset;
-        byte[] rowBytes;
-        int rowOffset;
+        byte[] rowBytes = null;
+        int rowOffset = -1;
         ;
         byte[][] slabs0 = slabs;
         for (int i = 0; i < numRows; i++) {
@@ -482,8 +482,8 @@ public class VectorizedHashTable {
         long hits0;
         int hash0;
         int row0;
-        byte[] payload0Bytes;
-        int payload0Offset;
+        byte[] payload0Bytes = null;
+        int payload0Offset = -1;
         ;;
         long entry1 = -1;
         long field1;
@@ -491,8 +491,8 @@ public class VectorizedHashTable {
         long hits1;
         int hash1;
         int row1;
-        byte[] payload1Bytes;
-        int payload1Offset;
+        byte[] payload1Bytes = null;
+        int payload1Offset = -1;
         ;;
         long entry2 = -1;
         long field2;
@@ -500,8 +500,8 @@ public class VectorizedHashTable {
         long hits2;
         int hash2;
         int row2;
-        byte[] payload2Bytes;
-        int payload2Offset;
+        byte[] payload2Bytes = null;
+        int payload2Offset = -1;
         ;;
         long entry3 = -1;
         long field3;
@@ -509,8 +509,8 @@ public class VectorizedHashTable {
         long hits3;
         int hash3;
         int row3;
-        byte[] payload3Bytes;
-        int payload3Offset;
+        byte[] payload3Bytes = null;
+        int payload3Offset = -1;
         ;;
         if (unroll) {
           for (; currentProbe + 4 < numCandidates; currentProbe += 4) {
@@ -564,22 +564,12 @@ public class VectorizedHashTable {
             hits0 &= 0x8080808080808080L ^ empty0;
             if (hits0 != 0) {
               int pos = Long.numberOfTrailingZeros(hits0) >> 3;
-              hits0 &= hits0 - 1;
               encodedPayload =
                   UncheckedByteArrays.getLongUnchecked(
                       entries0[(hash0 * 8 + pos) >> (16 - 3)], ((hash0 * 8 + pos) * 8) & 0xffff);
               {
                 payload0Bytes = slabs0[(int) (encodedPayload >> 24)];
                 payload0Offset = (int) encodedPayload & 0xffffff;
-              }
-              ;
-              firstWord[numHitCandidates] =
-                  UncheckedByteArrays.getLongUnchecked(
-                      payload0Bytes, payload0Offset + firstKeyOffset);
-              {
-                hitCandidateBytes[numHitCandidates] = payload0Bytes;
-                hitCandidateOffset[numHitCandidates] = payload0Offset;
-                hitCandidatePositions[numHitCandidates++] = row0;
               }
               ;
             }
@@ -590,22 +580,12 @@ public class VectorizedHashTable {
             hits1 &= 0x8080808080808080L ^ empty1;
             if (hits1 != 0) {
               int pos = Long.numberOfTrailingZeros(hits1) >> 3;
-              hits1 &= hits1 - 1;
               encodedPayload =
                   UncheckedByteArrays.getLongUnchecked(
                       entries0[(hash1 * 8 + pos) >> (16 - 3)], ((hash1 * 8 + pos) * 8) & 0xffff);
               {
                 payload1Bytes = slabs0[(int) (encodedPayload >> 24)];
                 payload1Offset = (int) encodedPayload & 0xffffff;
-              }
-              ;
-              firstWord[numHitCandidates] =
-                  UncheckedByteArrays.getLongUnchecked(
-                      payload1Bytes, payload1Offset + firstKeyOffset);
-              {
-                hitCandidateBytes[numHitCandidates] = payload1Bytes;
-                hitCandidateOffset[numHitCandidates] = payload1Offset;
-                hitCandidatePositions[numHitCandidates++] = row1;
               }
               ;
             }
@@ -616,22 +596,12 @@ public class VectorizedHashTable {
             hits2 &= 0x8080808080808080L ^ empty2;
             if (hits2 != 0) {
               int pos = Long.numberOfTrailingZeros(hits2) >> 3;
-              hits2 &= hits2 - 1;
               encodedPayload =
                   UncheckedByteArrays.getLongUnchecked(
                       entries0[(hash2 * 8 + pos) >> (16 - 3)], ((hash2 * 8 + pos) * 8) & 0xffff);
               {
                 payload2Bytes = slabs0[(int) (encodedPayload >> 24)];
                 payload2Offset = (int) encodedPayload & 0xffffff;
-              }
-              ;
-              firstWord[numHitCandidates] =
-                  UncheckedByteArrays.getLongUnchecked(
-                      payload2Bytes, payload2Offset + firstKeyOffset);
-              {
-                hitCandidateBytes[numHitCandidates] = payload2Bytes;
-                hitCandidateOffset[numHitCandidates] = payload2Offset;
-                hitCandidatePositions[numHitCandidates++] = row2;
               }
               ;
             }
@@ -642,7 +612,6 @@ public class VectorizedHashTable {
             hits3 &= 0x8080808080808080L ^ empty3;
             if (hits3 != 0) {
               int pos = Long.numberOfTrailingZeros(hits3) >> 3;
-              hits3 &= hits3 - 1;
               encodedPayload =
                   UncheckedByteArrays.getLongUnchecked(
                       entries0[(hash3 * 8 + pos) >> (16 - 3)], ((hash3 * 8 + pos) * 8) & 0xffff);
@@ -651,17 +620,20 @@ public class VectorizedHashTable {
                 payload3Offset = (int) encodedPayload & 0xffffff;
               }
               ;
+            }
+            ;
+            if (hits0 != 0) {
+              hits0 &= hits0 - 1;
               firstWord[numHitCandidates] =
                   UncheckedByteArrays.getLongUnchecked(
-                      payload3Bytes, payload3Offset + firstKeyOffset);
+                      payload0Bytes, payload0Offset + firstKeyOffset);
               {
-                hitCandidateBytes[numHitCandidates] = payload3Bytes;
-                hitCandidateOffset[numHitCandidates] = payload3Offset;
-                hitCandidatePositions[numHitCandidates++] = row3;
+                hitCandidateBytes[numHitCandidates] = payload0Bytes;
+                hitCandidateOffset[numHitCandidates] = payload0Offset;
+                hitCandidatePositions[numHitCandidates++] = row0;
               }
               ;
             }
-            ;
             bucketLoop0:
             for (; ; ) {
               while (hits0 != 0) {
@@ -699,6 +671,18 @@ public class VectorizedHashTable {
               hits0 &= 0x8080808080808080L ^ empty0;
             }
             ;
+            if (hits1 != 0) {
+              hits1 &= hits1 - 1;
+              firstWord[numHitCandidates] =
+                  UncheckedByteArrays.getLongUnchecked(
+                      payload1Bytes, payload1Offset + firstKeyOffset);
+              {
+                hitCandidateBytes[numHitCandidates] = payload1Bytes;
+                hitCandidateOffset[numHitCandidates] = payload1Offset;
+                hitCandidatePositions[numHitCandidates++] = row1;
+              }
+              ;
+            }
             bucketLoop1:
             for (; ; ) {
               while (hits1 != 0) {
@@ -736,6 +720,18 @@ public class VectorizedHashTable {
               hits1 &= 0x8080808080808080L ^ empty1;
             }
             ;
+            if (hits2 != 0) {
+              hits2 &= hits2 - 1;
+              firstWord[numHitCandidates] =
+                  UncheckedByteArrays.getLongUnchecked(
+                      payload2Bytes, payload2Offset + firstKeyOffset);
+              {
+                hitCandidateBytes[numHitCandidates] = payload2Bytes;
+                hitCandidateOffset[numHitCandidates] = payload2Offset;
+                hitCandidatePositions[numHitCandidates++] = row2;
+              }
+              ;
+            }
             bucketLoop2:
             for (; ; ) {
               while (hits2 != 0) {
@@ -773,6 +769,18 @@ public class VectorizedHashTable {
               hits2 &= 0x8080808080808080L ^ empty2;
             }
             ;
+            if (hits3 != 0) {
+              hits3 &= hits3 - 1;
+              firstWord[numHitCandidates] =
+                  UncheckedByteArrays.getLongUnchecked(
+                      payload3Bytes, payload3Offset + firstKeyOffset);
+              {
+                hitCandidateBytes[numHitCandidates] = payload3Bytes;
+                hitCandidateOffset[numHitCandidates] = payload3Offset;
+                hitCandidatePositions[numHitCandidates++] = row3;
+              }
+              ;
+            }
             bucketLoop3:
             for (; ; ) {
               while (hits3 != 0) {
@@ -830,7 +838,6 @@ public class VectorizedHashTable {
           hits0 &= 0x8080808080808080L ^ empty0;
           if (hits0 != 0) {
             int pos = Long.numberOfTrailingZeros(hits0) >> 3;
-            hits0 &= hits0 - 1;
             encodedPayload =
                 UncheckedByteArrays.getLongUnchecked(
                     entries0[(hash0 * 8 + pos) >> (16 - 3)], ((hash0 * 8 + pos) * 8) & 0xffff);
@@ -839,6 +846,10 @@ public class VectorizedHashTable {
               payload0Offset = (int) encodedPayload & 0xffffff;
             }
             ;
+          }
+          ;
+          if (hits0 != 0) {
+            hits0 &= hits0 - 1;
             firstWord[numHitCandidates] =
                 UncheckedByteArrays.getLongUnchecked(
                     payload0Bytes, payload0Offset + firstKeyOffset);
@@ -849,7 +860,6 @@ public class VectorizedHashTable {
             }
             ;
           }
-          ;
           bucketLoop0:
           for (; ; ) {
             while (hits0 != 0) {
@@ -928,8 +938,8 @@ public class VectorizedHashTable {
         case DOUBLE_TYPE:
           {
             long[] array = new long[to - from];
-            byte[] ptrBytes;
-            int ptrOffset;
+            byte[] ptrBytes = null;
+            int ptrOffset = -1;
             ;
             for (int i = from; i < to; i++) {
               {
@@ -950,8 +960,8 @@ public class VectorizedHashTable {
 
     void nextBatch() {
       TableShard shard = shards[currentShard];
-      byte[] ptrBytes;
-      int ptrOffset;
+      byte[] ptrBytes = null;
+      int ptrOffset = -1;
       ;
       numOutput = 0;
       while (true) {
@@ -1092,8 +1102,8 @@ public class VectorizedHashTable {
         continue;
       }
       insertBloom[bloomIndex] |= bloomMask;
-      byte[] newRowBytes;
-      int newRowOffset;
+      byte[] newRowBytes = null;
+      int newRowOffset = -1;
       ;
       long encodedNewRow;
       shard.newRow(fixedRowSize);
@@ -1122,8 +1132,8 @@ public class VectorizedHashTable {
     int statusMask0 = shard0.statusMask;
     byte[][] entries0 = shard0.entries;
     byte[][] slabs0 = shard0.slabs;
-    byte[] ptrBytes;
-    int ptrOffset;
+    byte[] ptrBytes = null;
+    int ptrOffset = -1;
     ;
     for (int columnIndex = 0; columnIndex < keys.size(); columnIndex++) {
       int offset = columns.get(columnIndex).offset;
@@ -1228,8 +1238,8 @@ public class VectorizedHashTable {
       long[] maskWords) {
     int blockBase = block.getOffsetBase();
     int columnOffset = column.offset;
-    byte[] rowBytes;
-    int rowOffset;
+    byte[] rowBytes = null;
+    int rowOffset = -1;
     ;
     for (int base = 0; base < numHits; base += 64) {
       int end = Math.min(numHits, base + 64);

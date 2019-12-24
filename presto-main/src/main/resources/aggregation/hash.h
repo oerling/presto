@@ -127,8 +127,8 @@
   byte[][] slabs##sub = shard##sub.slabs
 
 #define DECL_PTR(name) \
-  byte[] name##Bytes; \
-  int name##Offset;
+  byte[] name##Bytes = null; \
+  int name##Offset = -1;
   
 
 // index is the index of a 8 byte word
@@ -223,16 +223,18 @@
 	hits##sub &= 0x8080808080808080L ^ empty##sub; \
 	if (hits##sub != 0) { \
 	    int pos = Long.numberOfTrailingZeros(hits##sub) >> 3; \
-	    hits##sub &= hits##sub - 1; \
             LOAD_ENTRY(encodedPayload, tablesub, hash##sub * 8 + pos); \
             DECODE_ENTRY(payload##sub, tablesub, encodedPayload);             \
-            firstWord[numHitCandidates] = GETLONG(payload##sub, firstKeyOffset); \
-            ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload##sub);  \
 }
 
 
 #define FULL_PROBE(sub, tablesub)  \
-	bucketLoop##sub: \
+  if (hits##sub != 0) { \
+    hits##sub &= hits##sub - 1;                                         \
+    firstWord[numHitCandidates] = GETLONG(payload##sub, firstKeyOffset); \
+    ADD_ROW(hitCandidate, row##sub, numHitCandidates, payload##sub);    \
+  }                                                                     \
+bucketLoop##sub:                 \
 	for (;;) {		 \
 	while (hits##sub != 0) { \
 	    int pos = Long.numberOfTrailingZeros(hits##sub) >> 3; \
