@@ -202,7 +202,13 @@ public class SimpleNodeSelector
             Object path = ((Map) info).get("path");
             if (path instanceof String) {
                 int hash = ((String) path).hashCode();
-                return ImmutableList.of(workers.get((hash & 0xffffff) % workers.size()));
+                int numWorkers = workers.size();
+                InternalNode first = workers.get((hash & 0xffffff) % numWorkers);
+                InternalNode second = workers.get(((hash + 1) & 0xffffff) % numWorkers);
+                InternalNode affinityNode = first; //balanceAffinity(first, second);
+                if (affinityNode != null) {
+                    return ImmutableList.of(affinityNode);
+                }
             }
         }
         return selectNodes(limit, candidates);

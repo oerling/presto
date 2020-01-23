@@ -990,4 +990,74 @@ public class SqlQueryScheduler
             return new StreamingSubPlan(fragment.withBucketToPartition(bucketToPartition), children);
         }
     }
+
+    /*
+    public static class QueryAsk
+    {
+        Map<PartitioningHandle, StageAsk> partitionAsks = new HashMap();
+        List            <StageAsk> stageAsks;
+
+        public class StageAsk
+        {
+            StageId stageId;
+            int numWorkers;
+            long workerBytes;
+
+            void addPlan()
+            {
+            }
+        }
+
+        void createStageAsks(
+                             StreamingSubPlan plan,
+Session session)
+        {
+            ImmutableList.Builder<StageAsk> stages = ImmutableList.builder();
+
+            PlanFragmentId fragmentId = plan.getFragment().getId();
+            StageId stageId = getStageId(fragmentId);
+
+
+            PartitioningHandle partitioningHandle = plan.getFragment().getPartitioning();
+            if (partitioningHandle.equals(SOURCE_DISTRIBUTION)) {
+            StageAsk ask = new StageAsk(stageId);
+            ask.addPlan(plan);
+            stageAsks.add(ask);
+            }
+            else if (partitioningHandle.equals(SCALED_WRITER_DISTRIBUTION)) {
+                ask = new StageAsk(stageId);
+                ask.setWriterAsk();
+                stageAsks.add(ask);
+            }
+            else {
+                ask = partitionAsks.get(partitioningHandle);
+                if (ask == null) {
+                    ask = new StageAsk(stageId);
+                    partitionAsks.put(partitioningHandle, ask);
+                    stageAsks.add(ask);
+                }
+                if (plan.getFragment().getRemoteSourceNodes().stream().allMatch(node -> node.getExchangeType() == REPLICATE)) {
+                        // no non-replicated remote source
+                    }
+
+                else {
+
+                        verify(!plan.getFragment().getStageExecutionDescriptor().isDynamicLifespanSchedule());
+                    }
+                    int maxWorkers = getMaxTasksPerStage(session);
+                    ask.addPlan(plan);
+                    ask.setWidth(maxWorkers);
+            }
+
+            ImmutableSet.Builder<TaskAsk> childStagesBuilder = ImmutableSet.builder();
+            for (StreamingSubPlan stagePlan : plan.getChildren()) {
+                List<TaskAsk> subTree = createTaskAsks(
+                                                       stagePlan, session);
+            }
+            stages.addAll(subTree);
+
+            return stages.build();
+        }
+    }
+    */
 }
