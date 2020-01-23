@@ -76,6 +76,8 @@ public class FileCache
     // True until being at capacity for the first time.
     private static boolean initializing = true;
     private static long lastWarnTime;
+    private static long freeMemoryTime;
+    private static long freeMemory;
 
     static {
         byteArrayPool = Caches.getByteArrayPool();
@@ -1027,7 +1029,7 @@ public class FileCache
             numLoops += 20;
             int startIndex = (clockHand & 0xffffff) % end;
             clockHand += 20;
-            boolean atCapacity = totalSize.get() + size > targetSize || freeMemory() < 200 << (1 << 20);
+            boolean atCapacity = totalSize.get() + size > targetSize || freeMemory(now) < 200 << (1 << 20);
             if (initializing && atCapacity) {
                 initializing = false;
             }
@@ -1128,9 +1130,14 @@ public class FileCache
         }
     }
 
-    private static long freeMemory()
+    private static long freeMemory(long now)
     {
-        return Runtime.getRuntime().freeMemory();
+
+        if (now - freeMemoryTime > 10000000000L) {
+            freeMemory = Runtime.getRuntime().freeMemory();
+            freeMemoryTime = now;
+        }
+        return freeMemory;
     }
 
     private static void updateEvictionThreshold(long now)
@@ -1493,7 +1500,7 @@ public class FileCache
                 result.append(line);
                 result.append("\n");
                 chars += line.length();
-                if (chars > 20000) {
+                if (chars > 18000) {
                     break;
                 }
             }
