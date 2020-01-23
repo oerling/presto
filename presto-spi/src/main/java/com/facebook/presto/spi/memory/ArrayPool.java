@@ -182,6 +182,9 @@ public class ArrayPool<T>
 
     public void release(T data)
     {
+        if (data == null) {
+            return;
+        }
         int index = getSizeIndex(allocator.getSize(data));
 
         if (index < arrayObjectSizes.length) {
