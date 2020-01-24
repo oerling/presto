@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -37,37 +38,38 @@ public final class OrcDataSourceUtils
     /**
      * Merge disk ranges that are closer than {@code maxMergeDistance}.
      */
-    public static List<DiskRange> mergeAdjacentDiskRanges(Collection<DiskRange> diskRanges, DataSize maxMergeDistance, DataSize maxReadSize)
+    public static List<DiskRange> mergeAdjacentDiskRanges(Collection<DiskRange> diskRanges, DataSize maxMergeDistance, DataSize maxReadSize, IntArrayList mergedRangeCounts)
     {
         // sort ranges by start offset
         List<DiskRange> ranges = new ArrayList<>(diskRanges);
-        Collections.sort(ranges, new Comparator<DiskRange>()
-        {
-            @Override
-            public int compare(DiskRange o1, DiskRange o2)
-            {
-                return Long.compare(o1.getOffset(), o2.getOffset());
-            }
-        });
+        Collections.sort(ranges, Comparator.comparingLong(DiskRange::getOffset));
 
         // merge overlapping ranges
         long maxReadSizeBytes = maxReadSize.toBytes();
         long maxMergeDistanceBytes = maxMergeDistance.toBytes();
         ImmutableList.Builder<DiskRange> result = ImmutableList.builder();
         DiskRange last = ranges.get(0);
+        if (mergedRangeCounts != null) {
+            mergedRangeCounts.add(1);
+        }
         for (int i = 1; i < ranges.size(); i++) {
             DiskRange current = ranges.get(i);
             DiskRange merged = last.span(current);
             if (merged.getLength() <= maxReadSizeBytes && last.getEnd() + maxMergeDistanceBytes >= current.getOffset()) {
                 last = merged;
+                if (mergedRangeCounts != null) {
+                    mergedRangeCounts.set(mergedRangeCounts.size() - 1, mergedRangeCounts.get(mergedRangeCounts.size() - 1) + 1);
+                }
             }
             else {
                 result.add(last);
                 last = current;
+                if (mergedRangeCounts != null) {
+                    mergedRangeCounts.add(1);
+                }
             }
         }
         result.add(last);
-
         return result.build();
     }
 

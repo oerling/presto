@@ -120,19 +120,6 @@ public class OrcReader
         }
     }
 
-    private void readFromCache(long position, byte[] buffer, int bufferOffset, int bufferLength)
-            throws IOException
-    {
-        if (orcDataSource.useCache()) {
-            try (FileCache.Entry entry = FileCache.get(orcDataSource, position, bufferLength, FileCache.getListener("footer"), 10000)) {
-                System.arraycopy(entry.getBuffer(), 0, buffer, bufferOffset, bufferLength);
-            }
-        }
-        else {
-            orcDataSource.readFully(position, buffer, bufferOffset, bufferLength);
-        }
-    }
-
     public List<String> getColumnNames()
     {
         return footer.getTypes().get(0).getFieldNames();

@@ -22,6 +22,7 @@ import io.airlift.slice.FixedLengthSliceInput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -166,16 +167,18 @@ public abstract class AbstractOrcDataSource
             return ImmutableMap.of();
         }
 
-        Iterable<DiskRange> mergedRanges = mergeAdjacentDiskRanges(diskRanges.values(), maxMergeDistance, effectiveBufferSize);
+        IntArrayList mergedRangeCounts = new IntArrayList();
+        Iterable<DiskRange> mergedRanges = mergeAdjacentDiskRanges(diskRanges.values(), maxMergeDistance, effectiveBufferSize, mergedRangeCounts);
 
         ImmutableMap.Builder<K, OrcDataSourceInput> slices = ImmutableMap.builder();
         if (lazyReadSmallRanges) {
+            int mergedRangeIndex = 0;
             for (DiskRange mergedRange : mergedRanges) {
-                if (useCache()) {
+                if (useCache() && tracker != null) {
                     for (Entry<K, DiskRange> diskRangeEntry : diskRanges.entrySet()) {
                         DiskRange diskRange = diskRangeEntry.getValue();
                         if (mergedRange.contains(diskRange)) {
-                            FixedLengthSliceInput sliceInput = new FileCacheInput(this, (StreamId) diskRangeEntry.getKey(), tracker, mergedRange.getOffset(), mergedRange.getLength(), toIntExact(diskRange.getOffset() - mergedRange.getOffset()), diskRange.getLength());
+                            FixedLengthSliceInput sliceInput = new FileCacheInput(this, (StreamId) diskRangeEntry.getKey(), tracker, mergedRange.getOffset(), mergedRange.getLength(), toIntExact(diskRange.getOffset() - mergedRange.getOffset()), diskRange.getLength(), mergedRangeCounts.get(mergedRangeIndex));
                             toClose.add(sliceInput);
                             slices.put(diskRangeEntry.getKey(), new OrcDataSourceInput(sliceInput, diskRange.getLength()));
                         }
@@ -192,6 +195,7 @@ public abstract class AbstractOrcDataSource
                     }
                 }
             }
+            mergedRangeIndex++;
         }
         else {
             Map<DiskRange, byte[]> buffers = new LinkedHashMap<>();
@@ -223,8 +227,8 @@ public abstract class AbstractOrcDataSource
             DiskRange diskRange = entry.getValue();
             int bufferSize = toIntExact(streamBufferSize.toBytes());
             FixedLengthSliceInput sliceInput;
-            if (useCache()) {
-                sliceInput = new FileCacheInput(this, (StreamId) entry.getKey(), tracker, diskRange.getOffset(), diskRange.getLength(), 0, diskRange.getLength());
+            if (useCache() && tracker != null) {
+                sliceInput = new FileCacheInput(this, (StreamId) entry.getKey(), tracker, diskRange.getOffset(), diskRange.getLength(), 0, diskRange.getLength(), 1);
                 toClose.add(sliceInput);
             }
             else {
