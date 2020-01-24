@@ -63,6 +63,7 @@ public final class SystemSessionProperties
     public static final String DISTRIBUTED_JOIN = "distributed_join";
     public static final String DISTRIBUTED_INDEX_JOIN = "distributed_index_join";
     public static final String HASH_PARTITION_COUNT = "hash_partition_count";
+    public static final String WORKER_AFFINITY_ENABLED = "worker_affinity_enabled";
     public static final String PARTITIONING_PROVIDER_CATALOG = "partitioning_provider_catalog";
     public static final String EXCHANGE_MATERIALIZATION_STRATEGY = "exchange_materialization_strategy";
     public static final String GROUPED_EXECUTION_FOR_AGGREGATION = "grouped_execution_for_aggregation";
@@ -394,6 +395,11 @@ public final class SystemSessionProperties
                 booleanProperty(
                         PLAN_WITH_TABLE_NODE_PARTITIONING,
                         "Experimental: Adapt plan to pre-partitioned tables",
+                        true,
+                        false),
+                booleanProperty(
+                                WORKER_AFFINITY_ENABLED,
+                        "Experimental: Prefer sending a split/bucket to the same worker",
                         true,
                         false),
                 booleanProperty(
@@ -884,6 +890,11 @@ public final class SystemSessionProperties
     public static boolean planWithTableNodePartitioning(Session session)
     {
         return session.getSystemProperty(PLAN_WITH_TABLE_NODE_PARTITIONING, Boolean.class);
+    }
+
+    public static boolean workerAffinityEnabled(Session session)
+    {
+        return session.getSystemProperty(WORKER_AFFINITY_ENABLED, Boolean.class);
     }
 
     public static boolean isFastInequalityJoin(Session session)

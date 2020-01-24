@@ -125,7 +125,7 @@ public class NodePartitioningManager
             ConnectorId connectorId = partitioningHandle.getConnectorId()
                     .orElseThrow(() -> new IllegalArgumentException("No connector ID for partitioning handle: " + partitioningHandle));
             bucketToNode = createArbitraryBucketToNode(
-                    nodeScheduler.createNodeSelector(connectorId).selectRandomNodes(getMaxTasksPerStage(session)),
+                                                       nodeScheduler.createNodeSelector(connectorId).selectRandomNodes(getMaxTasksPerStage(session)),
                     connectorBucketNodeMap.getBucketCount());
         }
 

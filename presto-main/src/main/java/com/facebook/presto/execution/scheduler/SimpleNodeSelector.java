@@ -29,18 +29,21 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.facebook.presto.execution.scheduler.NodeScheduler.calculateLowWatermark;
 import static com.facebook.presto.execution.scheduler.NodeScheduler.randomizedNodes;
+import static com.facebook.presto.execution.scheduler.NodeScheduler.recordSplitAssignment;
 import static com.facebook.presto.execution.scheduler.NodeScheduler.selectDistributionNodes;
 import static com.facebook.presto.execution.scheduler.NodeScheduler.selectExactNodes;
 import static com.facebook.presto.execution.scheduler.NodeScheduler.selectNodes;
 import static com.facebook.presto.execution.scheduler.NodeScheduler.toWhenHasSplitQueueSpaceFuture;
 import static com.facebook.presto.spi.StandardErrorCode.NO_NODES_AVAILABLE;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Sets.newHashSet;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
@@ -58,6 +61,7 @@ public class SimpleNodeSelector
     private final int maxSplitsPerNode;
     private final int maxPendingSplitsPerTask;
     private final int maxTasksPerStage;
+    private final boolean useAffinity;
 
     public SimpleNodeSelector(
             InternalNodeManager nodeManager,
@@ -67,7 +71,8 @@ public class SimpleNodeSelector
             int minCandidates,
             int maxSplitsPerNode,
             int maxPendingSplitsPerTask,
-            int maxTasksPerStage)
+            int maxTasksPerStage,
+            boolean useAffinity)
     {
         this.nodeManager = requireNonNull(nodeManager, "nodeManager is null");
         this.nodeTaskMap = requireNonNull(nodeTaskMap, "nodeTaskMap is null");
@@ -77,6 +82,7 @@ public class SimpleNodeSelector
         this.maxSplitsPerNode = maxSplitsPerNode;
         this.maxPendingSplitsPerTask = maxPendingSplitsPerTask;
         this.maxTasksPerStage = maxTasksPerStage;
+        this.useAffinity = useAffinity;
     }
 
     @Override
@@ -110,8 +116,13 @@ public class SimpleNodeSelector
         Multimap<InternalNode, Split> assignment = HashMultimap.create();
         NodeMap nodeMap = this.nodeMap.get().get();
         NodeAssignmentStats assignmentStats = new NodeAssignmentStats(nodeTaskMap, nodeMap, existingTasks);
-
         ResettableRandomizedIterator<InternalNode> randomCandidates = getRandomCandidates(maxTasksPerStage, nodeMap, existingTasks);
+        List<InternalNode> nodesForAffinity = null;
+        if (useAffinity) {
+            nodesForAffinity = nodeMap.getNodesByHostAndPort().values().stream()
+                .filter(node -> includeCoordinator || !nodeMap.getCoordinatorNodeIds().contains(node.getNodeIdentifier()))
+                .collect(toImmutableList());
+        }
         Set<InternalNode> blockedExactNodes = new HashSet<>();
         boolean splitWaitingForAnyNode = false;
         for (Split split : splits) {
@@ -120,6 +131,9 @@ public class SimpleNodeSelector
             List<InternalNode> candidateNodes;
             if (!split.isRemotelyAccessible()) {
                 candidateNodes = selectExactNodes(nodeMap, split.getAddresses(), includeCoordinator);
+            }
+            else if (useAffinity) {
+                candidateNodes = selectAffinityNodesForSplit(nodesForAffinity, split, minCandidates, randomCandidates);
             }
             else {
                 candidateNodes = selectNodes(minCandidates, randomCandidates);
@@ -132,6 +146,9 @@ public class SimpleNodeSelector
             InternalNode chosenNode = null;
             int min = Integer.MAX_VALUE;
 
+            if (!useAffinity) {
+                recordSplitAssignment(false, false);
+            }
             for (InternalNode node : candidateNodes) {
                 int totalSplitCount = assignmentStats.getTotalSplitCount(node);
                 if (totalSplitCount < min && totalSplitCount < maxSplitsPerNode) {
@@ -141,6 +158,11 @@ public class SimpleNodeSelector
             }
             if (chosenNode == null) {
                 // min is guaranteed to be MAX_VALUE at this line
+                if (useAffinity) {
+                    // The preferred node is busy, revert to random.
+                    recordSplitAssignment(true, true);
+                    candidateNodes = selectNodes(minCandidates, randomCandidates);
+                }
                 for (InternalNode node : candidateNodes) {
                     int totalSplitCount = assignmentStats.getQueuedSplitCountForStage(node);
                     if (totalSplitCount < min && totalSplitCount < maxPendingSplitsPerTask) {
@@ -152,6 +174,9 @@ public class SimpleNodeSelector
             if (chosenNode != null) {
                 assignment.put(chosenNode, split);
                 assignmentStats.addAssignedSplit(chosenNode);
+                if (useAffinity) {
+                    recordSplitAssignment(true, false);
+                }
             }
             else {
                 if (split.isRemotelyAccessible()) {
@@ -192,6 +217,20 @@ public class SimpleNodeSelector
         }
         verify(existingNodes.stream().allMatch(Objects::nonNull), "existingNodes list must not contain any nulls");
         return new ResettableRandomizedIterator<>(existingNodes);
+    }
+
+    private List<InternalNode> selectAffinityNodesForSplit(List<InternalNode> workers, Split split, int limit, ResettableRandomizedIterator<InternalNode> candidates)
+    {
+        Object info = split.getInfo();
+        // If we understand the info, we use a hash of file name, else we random nodes.
+        if (info instanceof Map) {
+            Object path = ((Map) info).get("path");
+            if (path instanceof String) {
+                int hash = ((String) path).hashCode();
+                return ImmutableList.of(workers.get((hash & 0xffffff) % workers.size()));
+            }
+        }
+        return selectNodes(limit, candidates);
     }
 
     @Override

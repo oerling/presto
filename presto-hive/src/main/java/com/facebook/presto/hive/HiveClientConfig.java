@@ -154,6 +154,8 @@ public class HiveClientConfig
     private boolean rangeFiltersOnSubscriptsEnabled;
     private boolean adaptiveFilterReorderingEnabled = true;
     private boolean zstdJniDecompressionEnabled;
+    private boolean blockCacheEnabled;
+    private DataSize blockCacheSize = new DataSize(10240, MEGABYTE);
 
     public int getMaxInitialSplits()
     {
@@ -1264,6 +1266,32 @@ public class HiveClientConfig
     public HiveClientConfig setAdaptiveFilterReorderingEnabled(boolean adaptiveFilterReorderingEnabled)
     {
         this.adaptiveFilterReorderingEnabled = adaptiveFilterReorderingEnabled;
+        return this;
+    }
+
+    public boolean isBlockCacheEnabled()
+    {
+        return blockCacheEnabled;
+    }
+
+    @Config("hive.block-cache-enabled")
+    @ConfigDescription("Experimental: Enable using file block cache in queries")
+    public HiveClientConfig setBlockCacheEnabled(boolean blockCacheEnabled)
+    {
+        this.blockCacheEnabled = blockCacheEnabled;
+        return this;
+    }
+
+    public DataSize getBlockCacheSize()
+    {
+        return blockCacheSize;
+    }
+
+    @Config("hive.block-cache-size")
+    @ConfigDescription("Experimental: Set file block cache size")
+    public HiveClientConfig setBlockCacheSize(DataSize blockCacheSize)
+    {
+        this.blockCacheSize = blockCacheSize;
         return this;
     }
 }

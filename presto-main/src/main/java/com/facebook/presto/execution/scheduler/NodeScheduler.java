@@ -30,6 +30,7 @@ import com.google.common.collect.ImmutableSetMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.units.Duration;
+import org.weakref.jmx.Managed;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
@@ -70,6 +71,10 @@ public class NodeScheduler
     private final NodeTaskMap nodeTaskMap;
     private final boolean useNetworkTopology;
     private final Duration nodeMapRefreshInterval;
+    private long numRandomSplits;
+    private long numAffinitySplits;
+    private long numRandomAffinitySplits;
+    private static NodeScheduler instance;
 
     @Inject
     public NodeScheduler(NetworkTopology networkTopology, InternalNodeManager nodeManager, NodeSchedulerConfig config, NodeTaskMap nodeTaskMap)
@@ -107,6 +112,7 @@ public class NodeScheduler
         }
         topologicalSplitCounters = builder.build();
         this.nodeMapRefreshInterval = requireNonNull(nodeMapRefreshInterval, "nodeMapRefreshInterval is null");
+        instance = this;
     }
 
     @PreDestroy
@@ -126,10 +132,15 @@ public class NodeScheduler
 
     public NodeSelector createNodeSelector(ConnectorId connectorId)
     {
-        return createNodeSelector(connectorId, Integer.MAX_VALUE);
+        return createNodeSelector(connectorId, Integer.MAX_VALUE, false);
     }
 
     public NodeSelector createNodeSelector(ConnectorId connectorId, int maxTasksPerStage)
+    {
+        return createNodeSelector(connectorId, maxTasksPerStage, false);
+    }
+
+    public NodeSelector createNodeSelector(ConnectorId connectorId, int maxTasksPerStage, boolean useAffinity)
     {
         // this supplier is thread-safe. TODO: this logic should probably move to the scheduler since the choice of which node to run in should be
         // done as close to when the the split is about to be scheduled
@@ -150,7 +161,7 @@ public class NodeScheduler
                     networkLocationCache);
         }
         else {
-            return new SimpleNodeSelector(nodeManager, nodeTaskMap, includeCoordinator, nodeMap, minCandidates, maxSplitsPerNode, maxPendingSplitsPerTask, maxTasksPerStage);
+            return new SimpleNodeSelector(nodeManager, nodeTaskMap, includeCoordinator, nodeMap, minCandidates, maxSplitsPerNode, maxPendingSplitsPerTask, maxTasksPerStage, useAffinity);
         }
     }
 
@@ -344,5 +355,36 @@ public class NodeScheduler
                 .map(remoteTask -> remoteTask.whenSplitQueueHasSpace(spaceThreshold))
                 .collect(toImmutableList());
         return whenAnyCompleteCancelOthers(stateChangeFutures);
+    }
+
+    public static void recordSplitAssignment(boolean affinity, boolean affinityOverflow)
+    {
+        if (!affinity) {
+            instance.numRandomSplits++;
+        }
+        else if (affinityOverflow) {
+            instance.numRandomAffinitySplits++;
+        }
+        else {
+            instance.numAffinitySplits++;
+        }
+    }
+
+    @Managed
+    public long getNumRandomSplits()
+    {
+        return numRandomSplits;
+    }
+
+    @Managed
+    public long getNumAffinitySplits()
+    {
+        return numAffinitySplits;
+    }
+
+    @Managed
+    public long getNumRandomAffinitySplits()
+    {
+        return numRandomAffinitySplits;
     }
 }

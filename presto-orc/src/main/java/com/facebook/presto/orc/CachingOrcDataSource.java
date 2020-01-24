@@ -64,6 +64,24 @@ public class CachingOrcDataSource
         return dataSource.getSize();
     }
 
+    @Override
+    public FileCache.FileToken getToken()
+    {
+        return dataSource.getToken();
+    }
+
+    @Override
+    public boolean useCache()
+    {
+        return dataSource.useCache();
+    }
+
+    @Override
+    public String getSplitLabel()
+    {
+        return dataSource.getSplitLabel();
+    }
+
     @VisibleForTesting
     void readCacheAt(long offset)
             throws IOException
@@ -101,7 +119,7 @@ public class CachingOrcDataSource
     }
 
     @Override
-    public <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges)
+    public <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException
     {
         ImmutableMap.Builder<K, OrcDataSourceInput> builder = ImmutableMap.builder();

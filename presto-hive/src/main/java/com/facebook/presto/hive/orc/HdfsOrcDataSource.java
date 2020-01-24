@@ -33,6 +33,8 @@ public class HdfsOrcDataSource
 {
     private final FSDataInputStream inputStream;
     private final FileFormatDataSourceStats stats;
+    private final boolean useCache;
+    private String splitLabel;
 
     public HdfsOrcDataSource(
             OrcDataSourceId id,
@@ -42,17 +44,36 @@ public class HdfsOrcDataSource
             DataSize streamBufferSize,
             boolean lazyReadSmallRanges,
             FSDataInputStream inputStream,
-            FileFormatDataSourceStats stats)
+            FileFormatDataSourceStats stats,
+            boolean useCache,
+            String splitLabel)
     {
         super(id, size, maxMergeDistance, maxReadSize, streamBufferSize, lazyReadSmallRanges);
         this.inputStream = requireNonNull(inputStream, "inputStream is null");
         this.stats = requireNonNull(stats, "stats is null");
+        this.useCache = useCache;
+        this.splitLabel = splitLabel;
+    }
+
+    public HdfsOrcDataSource(
+            OrcDataSourceId id,
+            long size,
+            DataSize maxMergeDistance,
+            DataSize maxReadSize,
+            DataSize streamBufferSize,
+            boolean lazyReadSmallRanges,
+            FSDataInputStream inputStream,
+            FileFormatDataSourceStats stats,
+            boolean useCache)
+    {
+        this(id, size, maxMergeDistance, maxReadSize, streamBufferSize, lazyReadSmallRanges, inputStream, stats, useCache, "");
     }
 
     @Override
     public void close()
             throws IOException
     {
+        super.close();
         inputStream.close();
     }
 
@@ -78,5 +99,17 @@ public class HdfsOrcDataSource
             }
             throw new PrestoException(HIVE_UNKNOWN_ERROR, message, e);
         }
+    }
+
+    @Override
+    public boolean useCache()
+    {
+        return useCache;
+    }
+
+    @Override
+    public String getSplitLabel()
+    {
+        return splitLabel;
     }
 }

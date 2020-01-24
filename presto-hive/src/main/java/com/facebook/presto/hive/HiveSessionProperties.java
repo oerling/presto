@@ -90,6 +90,7 @@ public final class HiveSessionProperties
     public static final String PUSHDOWN_FILTER_ENABLED = "pushdown_filter_enabled";
     public static final String RANGE_FILTERS_ON_SUBSCRIPTS_ENABLED = "range_filters_on_subscripts_enabled";
     public static final String ADAPTIVE_FILTER_REORDERING_ENABLED = "adaptive_filter_reordering_enabled";
+    public static final String BLOCK_CACHE_ENABLED = "block_cache_enabled";
     public static final String VIRTUAL_BUCKET_COUNT = "virtual_bucket_count";
     public static final String MAX_BUCKETS_FOR_GROUPED_EXECUTION = "max_buckets_for_grouped_execution";
     public static final String OFFLINE_DATA_DEBUG_MODE_ENABLED = "offline_data_debug_mode_enabled";
@@ -391,6 +392,11 @@ public final class HiveSessionProperties
                         "Experimental: enable adaptive filter reordering",
                         hiveClientConfig.isAdaptiveFilterReorderingEnabled(),
                         false),
+                booleanProperty(
+                        BLOCK_CACHE_ENABLED,
+                        "Experimental: enable file block caching",
+                        hiveClientConfig.isBlockCacheEnabled(),
+                        false),
                 integerProperty(
                         VIRTUAL_BUCKET_COUNT,
                         "Number of virtual bucket assigned for unbucketed tables",
@@ -683,6 +689,11 @@ public final class HiveSessionProperties
     public static boolean isAdaptiveFilterReorderingEnabled(ConnectorSession session)
     {
         return session.getProperty(ADAPTIVE_FILTER_REORDERING_ENABLED, Boolean.class);
+    }
+
+    public static boolean isBlockCacheEnabled(ConnectorSession session)
+    {
+        return session.getProperty(BLOCK_CACHE_ENABLED, Boolean.class);
     }
 
     public static int getVirtualBucketCount(ConnectorSession session)

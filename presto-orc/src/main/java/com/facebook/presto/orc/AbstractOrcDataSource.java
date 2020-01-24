@@ -23,9 +23,12 @@ import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Supplier;
@@ -34,6 +37,7 @@ import static com.facebook.presto.orc.OrcDataSourceUtils.getDiskRangeSlice;
 import static com.facebook.presto.orc.OrcDataSourceUtils.mergeAdjacentDiskRanges;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static io.airlift.units.DataSize.Unit.BYTE;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
@@ -44,10 +48,13 @@ public abstract class AbstractOrcDataSource
     private final long size;
     private final DataSize maxMergeDistance;
     private final DataSize maxBufferSize;
+    private DataSize effectiveBufferSize;
     private final DataSize streamBufferSize;
     private final boolean lazyReadSmallRanges;
     private long readTimeNanos;
     private long readBytes;
+    private final FileCache.FileToken token;
+    List<Closeable> toClose;
 
     public AbstractOrcDataSource(OrcDataSourceId id, long size, DataSize maxMergeDistance, DataSize maxBufferSize, DataSize streamBufferSize, boolean lazyReadSmallRanges)
     {
@@ -60,6 +67,7 @@ public abstract class AbstractOrcDataSource
         this.maxBufferSize = requireNonNull(maxBufferSize, "maxBufferSize is null");
         this.streamBufferSize = requireNonNull(streamBufferSize, "streamBufferSize is null");
         this.lazyReadSmallRanges = lazyReadSmallRanges;
+        this.token = FileCache.getFileToken(id.toString());
     }
 
     protected abstract void readInternal(long position, byte[] buffer, int bufferOffset, int bufferLength)
@@ -109,21 +117,27 @@ public abstract class AbstractOrcDataSource
     }
 
     @Override
-    public final <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges)
+    public final <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException
     {
         requireNonNull(diskRanges, "diskRanges is null");
 
+        closeCacheInputs();
         if (diskRanges.isEmpty()) {
             return ImmutableMap.of();
         }
-
+        if (useCache() && toClose == null) {
+            toClose = new ArrayList();
+        }
+        if (effectiveBufferSize == null) {
+            effectiveBufferSize = useCache() ? new DataSize(FileCacheInput.MAX_BUFFER_SIZE, BYTE) : maxBufferSize;
+        }
         //
         // Note: this code does not use the Java 8 stream APIs to avoid any extra object allocation
         //
 
         // split disk ranges into "big" and "small"
-        long maxReadSizeBytes = maxBufferSize.toBytes();
+        long maxReadSizeBytes = effectiveBufferSize.toBytes();
         ImmutableMap.Builder<K, DiskRange> smallRangesBuilder = ImmutableMap.builder();
         ImmutableMap.Builder<K, DiskRange> largeRangesBuilder = ImmutableMap.builder();
         for (Entry<K, DiskRange> entry : diskRanges.entrySet()) {
@@ -139,30 +153,42 @@ public abstract class AbstractOrcDataSource
 
         // read ranges
         ImmutableMap.Builder<K, OrcDataSourceInput> slices = ImmutableMap.builder();
-        slices.putAll(readSmallDiskRanges(smallRanges));
-        slices.putAll(readLargeDiskRanges(largeRanges));
+        slices.putAll(readSmallDiskRanges(smallRanges, tracker));
+        slices.putAll(readLargeDiskRanges(largeRanges, tracker));
 
         return slices.build();
     }
 
-    private <K> Map<K, OrcDataSourceInput> readSmallDiskRanges(Map<K, DiskRange> diskRanges)
+    private <K> Map<K, OrcDataSourceInput> readSmallDiskRanges(Map<K, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException
     {
         if (diskRanges.isEmpty()) {
             return ImmutableMap.of();
         }
 
-        Iterable<DiskRange> mergedRanges = mergeAdjacentDiskRanges(diskRanges.values(), maxMergeDistance, maxBufferSize);
+        Iterable<DiskRange> mergedRanges = mergeAdjacentDiskRanges(diskRanges.values(), maxMergeDistance, effectiveBufferSize);
 
         ImmutableMap.Builder<K, OrcDataSourceInput> slices = ImmutableMap.builder();
         if (lazyReadSmallRanges) {
             for (DiskRange mergedRange : mergedRanges) {
-                LazyBufferLoader mergedRangeLazyLoader = new LazyBufferLoader(mergedRange);
-                for (Entry<K, DiskRange> diskRangeEntry : diskRanges.entrySet()) {
-                    DiskRange diskRange = diskRangeEntry.getValue();
-                    if (mergedRange.contains(diskRange)) {
-                        FixedLengthSliceInput sliceInput = new LazySliceInput(diskRange.getLength(), new LazyMergedSliceLoader(diskRange, mergedRangeLazyLoader));
-                        slices.put(diskRangeEntry.getKey(), new OrcDataSourceInput(sliceInput, diskRange.getLength()));
+                if (useCache()) {
+                    for (Entry<K, DiskRange> diskRangeEntry : diskRanges.entrySet()) {
+                        DiskRange diskRange = diskRangeEntry.getValue();
+                        if (mergedRange.contains(diskRange)) {
+                            FixedLengthSliceInput sliceInput = new FileCacheInput(this, (StreamId) diskRangeEntry.getKey(), tracker, mergedRange.getOffset(), mergedRange.getLength(), toIntExact(diskRange.getOffset() - mergedRange.getOffset()), diskRange.getLength());
+                            toClose.add(sliceInput);
+                            slices.put(diskRangeEntry.getKey(), new OrcDataSourceInput(sliceInput, diskRange.getLength()));
+                        }
+                    }
+                }
+                else {
+                    LazyBufferLoader mergedRangeLazyLoader = new LazyBufferLoader(mergedRange);
+                    for (Entry<K, DiskRange> diskRangeEntry : diskRanges.entrySet()) {
+                        DiskRange diskRange = diskRangeEntry.getValue();
+                        if (mergedRange.contains(diskRange)) {
+                            FixedLengthSliceInput sliceInput = new LazySliceInput(diskRange.getLength(), new LazyMergedSliceLoader(diskRange, mergedRangeLazyLoader));
+                            slices.put(diskRangeEntry.getKey(), new OrcDataSourceInput(sliceInput, diskRange.getLength()));
+                        }
                     }
                 }
             }
@@ -186,7 +212,7 @@ public abstract class AbstractOrcDataSource
         return sliceStreams;
     }
 
-    private <K> Map<K, OrcDataSourceInput> readLargeDiskRanges(Map<K, DiskRange> diskRanges)
+    private <K> Map<K, OrcDataSourceInput> readLargeDiskRanges(Map<K, DiskRange> diskRanges, ReadTracker tracker)
     {
         if (diskRanges.isEmpty()) {
             return ImmutableMap.of();
@@ -196,7 +222,14 @@ public abstract class AbstractOrcDataSource
         for (Entry<K, DiskRange> entry : diskRanges.entrySet()) {
             DiskRange diskRange = entry.getValue();
             int bufferSize = toIntExact(streamBufferSize.toBytes());
-            FixedLengthSliceInput sliceInput = new LazySliceInput(diskRange.getLength(), new LazyChunkedSliceLoader(diskRange, bufferSize));
+            FixedLengthSliceInput sliceInput;
+            if (useCache()) {
+                sliceInput = new FileCacheInput(this, (StreamId) entry.getKey(), tracker, diskRange.getOffset(), diskRange.getLength(), 0, diskRange.getLength());
+                toClose.add(sliceInput);
+            }
+            else {
+                sliceInput = new LazySliceInput(diskRange.getLength(), new LazyChunkedSliceLoader(diskRange, bufferSize));
+            }
             slices.put(entry.getKey(), new OrcDataSourceInput(sliceInput, bufferSize));
         }
         return slices.build();
@@ -344,5 +377,29 @@ public abstract class AbstractOrcDataSource
         {
             return new ChunkedSliceInput(new ChunkedSliceLoader(diskRange), bufferSize);
         }
+    }
+
+    @Override
+    public FileCache.FileToken getToken()
+    {
+        return token;
+    }
+
+    private void closeCacheInputs()
+            throws IOException
+    {
+        if (toClose != null) {
+            for (Closeable input : toClose) {
+                input.close();
+            }
+            toClose.clear();
+        }
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        closeCacheInputs();
     }
 }
