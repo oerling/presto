@@ -27,6 +27,15 @@ public interface StripeMetadataSource
     Map<StreamId, OrcDataSourceInput> getInputs(
             OrcDataSource orcDataSource,
             StripeId stripeId,
-            Map<StreamId, DiskRange> diskRanges)
+            Map<StreamId, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException;
+
+    default Map<StreamId, OrcDataSourceInput> getInputs(
+            OrcDataSource orcDataSource,
+            StripeId stripeId,
+            Map<StreamId, DiskRange> diskRanges)
+            throws IOException
+    {
+	return getInputs(orcDataSource, stripeId, diskRanges, null);
+    }
 }

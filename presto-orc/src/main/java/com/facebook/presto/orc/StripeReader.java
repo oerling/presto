@@ -261,7 +261,7 @@ public class StripeReader
         //
 
         // read ranges
-        Map<StreamId, OrcDataSourceInput> streamsData = stripeMetadataSource.getInputs(orcDataSource, stripeId, diskRanges);
+        Map<StreamId, OrcDataSourceInput> streamsData = stripeMetadataSource.getInputs(orcDataSource, stripeId, diskRanges, tracker);
 
         if (orcDataSource.useCache()) {
             tracker.schedulePrefetch(diskRanges, orcDataSource);

@@ -34,7 +34,7 @@ public class StorageStripeMetadataSource
     }
 
     @Override
-    public Map<StreamId, OrcDataSourceInput> getInputs(OrcDataSource orcDataSource, StripeId stripeId, Map<StreamId, DiskRange> diskRanges)
+    public Map<StreamId, OrcDataSourceInput> getInputs(OrcDataSource orcDataSource, StripeId stripeId, Map<StreamId, DiskRange> diskRanges, ReadTracker tracker)
             throws IOException
     {
         //
@@ -50,6 +50,6 @@ public class StorageStripeMetadataSource
         diskRanges = diskRangesBuilder.build();
 
         // read ranges
-        return orcDataSource.readFully(diskRanges);
+        return orcDataSource.readFully(diskRanges, tracker);
     }
 }
