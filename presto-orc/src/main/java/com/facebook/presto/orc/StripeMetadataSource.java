@@ -36,6 +36,6 @@ public interface StripeMetadataSource
             Map<StreamId, DiskRange> diskRanges)
             throws IOException
     {
-	return getInputs(orcDataSource, stripeId, diskRanges, null);
+        return getInputs(orcDataSource, stripeId, diskRanges, null);
     }
 }
