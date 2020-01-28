@@ -170,7 +170,7 @@ public class FileCache
         long newSize = targetSize + bytes;
         if (newSize <= 0) {
             log.warn("Setting FileCache size to 0");
-            targetSize = 0;
+            targetSize = 2L << 30;
         }
         else if (bytes > free + (max - total) - (500 * (1014 * 1024))) {
             log.warn("Attempting to set FileCache size above free memory - 500M: Increase by " + bytes + " while " + (free + max - total) + "available. Total = " + total + " and max = " + max);
