@@ -21,12 +21,12 @@ import org.weakref.jmx.Managed;
 
 import javax.inject.Inject;
 
-public class CacheStats
+public class CacheStatistics
 {
     private static final FileCacheStats stats = new FileCacheStats();
 
     @Inject
-    CacheStats(HiveClientConfig hiveClientConfig)
+    CacheStatistics(HiveClientConfig hiveClientConfig)
     {
         FileCache.incrementTargetSize(hiveClientConfig.getBlockCacheSize().toBytes());
         FileCache.registerStats(stats);
