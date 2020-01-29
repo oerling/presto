@@ -267,7 +267,6 @@ public class StripeReader
             tracker.schedulePrefetch(diskRanges, orcDataSource);
         }
 
-        orcDataSource.readFully(diskRanges, tracker);
 
         // transform streams to OrcInputStream
         ImmutableMap.Builder<StreamId, OrcInputStream> streamsBuilder = ImmutableMap.builder();
