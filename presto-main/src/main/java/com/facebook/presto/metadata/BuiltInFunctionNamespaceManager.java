@@ -14,6 +14,7 @@
 package com.facebook.presto.metadata;
 
 import com.facebook.presto.common.CatalogSchemaName;
+import com.facebook.presto.common.Page;
 import com.facebook.presto.common.block.Block;
 import com.facebook.presto.common.block.BlockEncodingSerde;
 import com.facebook.presto.common.block.BlockSerdeUtil;
@@ -191,7 +192,6 @@ import com.facebook.presto.type.DateOperators;
 import com.facebook.presto.type.DateTimeOperators;
 import com.facebook.presto.type.DecimalOperators;
 import com.facebook.presto.type.DoubleOperators;
-import com.facebook.presto.type.EnumCasts;
 import com.facebook.presto.type.HyperLogLogOperators;
 import com.facebook.presto.type.IntegerOperators;
 import com.facebook.presto.type.IntervalDayTimeOperators;
@@ -199,7 +199,6 @@ import com.facebook.presto.type.IntervalYearMonthOperators;
 import com.facebook.presto.type.IpAddressOperators;
 import com.facebook.presto.type.IpPrefixOperators;
 import com.facebook.presto.type.LikeFunctions;
-import com.facebook.presto.type.LongEnumOperators;
 import com.facebook.presto.type.QuantileDigestOperators;
 import com.facebook.presto.type.RealOperators;
 import com.facebook.presto.type.SmallintOperators;
@@ -211,7 +210,6 @@ import com.facebook.presto.type.TimestampWithTimeZoneOperators;
 import com.facebook.presto.type.TinyintOperators;
 import com.facebook.presto.type.UnknownOperators;
 import com.facebook.presto.type.VarbinaryOperators;
-import com.facebook.presto.type.VarcharEnumOperators;
 import com.facebook.presto.type.VarcharOperators;
 import com.facebook.presto.type.khyperloglog.KHyperLogLogAggregationFunction;
 import com.facebook.presto.type.khyperloglog.KHyperLogLogFunctions;
@@ -239,6 +237,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import static com.facebook.presto.common.function.OperatorType.tryGetOperatorType;
 import static com.facebook.presto.common.type.TypeSignature.parseTypeSignature;
@@ -708,10 +707,7 @@ public class BuiltInFunctionNamespaceManager
                 .function(MergeTDigestFunction.MERGE)
                 .sqlInvokedScalar(MapNormalizeFunction.class)
                 .sqlInvokedScalars(ArrayArithmeticFunctions.class)
-                .scalar(DynamicFilterPlaceholderFunction.class)
-                .scalars(EnumCasts.class)
-                .scalars(LongEnumOperators.class)
-                .scalars(VarcharEnumOperators.class);
+                .scalar(DynamicFilterPlaceholderFunction.class);
 
         switch (featuresConfig.getRegexLibrary()) {
             case JONI:
@@ -847,6 +843,12 @@ public class BuiltInFunctionNamespaceManager
                     function.isDeterministic(),
                     function.isCalledOnNullInput());
         }
+    }
+
+    @Override
+    public final CompletableFuture<Block> executeFunction(FunctionHandle functionHandle, Page input, List<Integer> channels, TypeManager typeManager)
+    {
+        throw new IllegalStateException("Builtin function execution should be handled by the engine.");
     }
 
     public WindowFunctionSupplier getWindowFunctionImplementation(FunctionHandle functionHandle)

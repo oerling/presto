@@ -11,14 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.common.type;
+package com.facebook.presto.hive;
 
-import java.util.Map;
+import org.apache.hadoop.hive.metastore.api.Partition;
 
-public interface EnumType<T>
-        extends Type
+import java.util.Optional;
+
+public interface PartitionVersionFetcher
 {
-    Map<String, T> getEnumMap();
-
-    Type getValueType();
+    Optional<Integer> getPartitionVersion(Partition partition);
 }

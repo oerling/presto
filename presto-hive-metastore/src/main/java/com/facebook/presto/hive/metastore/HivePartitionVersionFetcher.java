@@ -11,11 +11,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.hive.parquet;
+package com.facebook.presto.hive.metastore;
 
-public enum ParquetValuesType
+import com.facebook.presto.hive.PartitionVersionFetcher;
+import org.apache.hadoop.hive.metastore.api.Partition;
+
+import javax.inject.Inject;
+
+import java.util.Optional;
+
+public class HivePartitionVersionFetcher
+        implements PartitionVersionFetcher
 {
-    REPETITION_LEVEL,
-    DEFINITION_LEVEL,
-    VALUES
+    @Inject
+    public HivePartitionVersionFetcher() {}
+
+    @Override
+    public Optional<Integer> getPartitionVersion(Partition partition)
+    {
+        return Optional.empty();
+    }
 }
