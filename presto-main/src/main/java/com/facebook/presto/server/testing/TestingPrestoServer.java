@@ -60,6 +60,7 @@ import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.Plugin;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.eventlistener.EventListener;
+import com.facebook.presto.spi.trace.Trace;
 import com.facebook.presto.split.PageSourceManager;
 import com.facebook.presto.split.SplitManager;
 import com.facebook.presto.sql.analyzer.FeaturesConfig;
@@ -334,6 +335,7 @@ public class TestingPrestoServer
         announcer = injector.getInstance(Announcer.class);
         requestBlocker = injector.getInstance(RequestBlocker.class);
 
+        updatePortsForProxy(announcer, nodeManager);
         // Announce Thrift server address
         DriftServer driftServer = injector.getInstance(DriftServer.class);
         driftServer.start();
@@ -608,6 +610,30 @@ public class TestingPrestoServer
         // update announcement and thrift port property
         Map<String, String> properties = new LinkedHashMap<>(announcement.getProperties());
         properties.put("thriftServerPort", String.valueOf(thriftPort));
+        announcer.removeServiceAnnouncement(announcement.getId());
+        announcer.addServiceAnnouncement(serviceAnnouncement(announcement.getType()).addProperties(properties).build());
+        announcer.forceAnnounce();
+
+        nodeManager.refreshNodes();
+    }
+
+    private static void updatePortsForProxy(Announcer announcer, InternalNodeManager nodeManager)
+    {
+        // get existing announcement
+        ServiceAnnouncement announcement = getPrestoAnnouncement(announcer.getServiceAnnouncements());
+        String proxyEnv = System.getenv("USE_PROXY");
+        if (proxyEnv == null || !proxyEnv.equals("y")) {
+            return;
+        }
+
+        Map<String, String> properties = new LinkedHashMap<>(announcement.getProperties());
+
+        String oldHttp = properties.get("http");
+        String oldExternalHttp = properties.get("http-external");
+        properties.put("http", Trace.setProxyPort(oldHttp));
+        properties.put("http-external", Trace.setProxyPort(oldExternalHttp));
+        System.out.println("Announcing " + properties.get("http") + " for " + oldHttp);
+        System.out.println("Announcing " + properties.get("http-external") + " for " + oldExternalHttp);
         announcer.removeServiceAnnouncement(announcement.getId());
         announcer.addServiceAnnouncement(serviceAnnouncement(announcement.getType()).addProperties(properties).build());
         announcer.forceAnnounce();

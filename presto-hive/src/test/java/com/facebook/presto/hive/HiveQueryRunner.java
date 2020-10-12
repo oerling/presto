@@ -377,7 +377,16 @@ public final class HiveQueryRunner
             baseDataDir = Optional.of(baseDataDirFile.toPath());
         }
 
-        DistributedQueryRunner queryRunner = createQueryRunner(TpchTable.getTables(), ImmutableMap.of("http-server.http.port", "8080"), baseDataDir);
+        DistributedQueryRunner queryRunner = createQueryRunner(TpchTable.getTables(),
+                ImmutableMap.of("http-server.http.port", "8080", "optimizer.optimize-hash-generation", "false"),
+                ImmutableMap.of("node-scheduler.include-coordinator", "true"),
+                "sql-standard",
+                ImmutableMap.of(),
+                Optional.of(10),
+                baseDataDir,
+                Optional.empty());
+
+        //DistributedQueryRunner queryRunner = createQueryRunner(TpchTable.getTables(), ImmutableMap.of("http-server.http.port", "8080"), baseDataDir);
         Thread.sleep(10);
         Logger log = Logger.get(DistributedQueryRunner.class);
         log.info("======== SERVER STARTED ========");
