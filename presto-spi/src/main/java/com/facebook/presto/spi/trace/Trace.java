@@ -25,7 +25,9 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static java.nio.file.StandardOpenOption.CREATE;
 
@@ -36,6 +38,7 @@ public class Trace
     private static BufferedWriter traceWriter;
     private static long openTimeMillis;
     private static boolean printTime;
+    private static Map<Integer, Integer> proxyPorts = new HashMap();
 
     private Trace() {}
 
@@ -130,6 +133,7 @@ public class Trace
                 traceWriter = null;
             }
         }
+        flushTrace();
     }
 
     public static void flushTrace()
@@ -207,6 +211,25 @@ public class Trace
             throw new IllegalArgumentException("Could not read tracing port");
         }
         int otherPort = Integer.valueOf(line);
+        int originPort = Integer.valueOf(url.substring(i + 1));
+        proxyPorts.put(originPort, otherPort);
         return url.substring(0, i + 1) + String.valueOf(otherPort);
+    }
+
+    public static String setProxyPortIfExists(String url)
+    {
+        if (proxyPorts.size() == 0) {
+            return url;
+        }
+        int i = url.lastIndexOf(":");
+        if (i < 0) {
+            throw new IllegalArgumentException("url has no port when setting proxy: " + url);
+        }
+        int originPort = Integer.valueOf(url.substring(i + 1));
+        Integer port = proxyPorts.get(originPort);
+        if (port == null) {
+            return url;
+        }
+        return url.substring(0, i + 1) + String.valueOf(port);
     }
 }

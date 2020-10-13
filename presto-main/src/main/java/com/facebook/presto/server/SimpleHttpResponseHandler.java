@@ -18,6 +18,7 @@ import com.facebook.presto.server.smile.BaseResponse;
 import com.facebook.presto.server.smile.JsonResponseWrapper;
 import com.facebook.presto.spi.ErrorCodeSupplier;
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.trace.Trace;
 import com.google.common.util.concurrent.FutureCallback;
 
 import java.net.URI;
@@ -51,6 +52,8 @@ public class SimpleHttpResponseHandler<T>
         stats.responseSize(response.getResponseSize());
         try {
             if (response.getStatusCode() == OK.code() && response.hasValue()) {
+                Trace.trace("Response to " + uri);
+                Trace.trace(response.getValue().toString());
                 callback.success(response.getValue());
             }
             else if (response.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE.code()) {

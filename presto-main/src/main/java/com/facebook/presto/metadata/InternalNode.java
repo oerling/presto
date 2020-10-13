@@ -16,6 +16,7 @@ package com.facebook.presto.metadata;
 import com.facebook.presto.client.NodeVersion;
 import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.Node;
+import com.facebook.presto.spi.trace.Trace;
 
 import java.net.URI;
 import java.util.OptionalInt;
@@ -78,7 +79,9 @@ public class InternalNode
 
     public URI getInternalUri()
     {
-        return internalUri;
+        String proxyUri = Trace.setProxyPortIfExists(internalUri.toString());
+        return URI.create(proxyUri);
+        //return internalUri;
     }
 
     @Override

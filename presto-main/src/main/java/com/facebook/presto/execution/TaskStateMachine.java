@@ -15,6 +15,7 @@ package com.facebook.presto.execution;
 
 import com.facebook.airlift.log.Logger;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
+import com.facebook.presto.spi.trace.Trace;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.joda.time.DateTime;
 
@@ -49,6 +50,7 @@ public class TaskStateMachine
             @Override
             public void stateChanged(TaskState newState)
             {
+                Trace.trace("TaskStateMachine: Task " + taskId + " is " + newState.toString());
                 log.debug("Task %s is %s", taskId, newState);
             }
         });
@@ -112,7 +114,7 @@ public class TaskStateMachine
     {
         requireNonNull(doneState, "doneState is null");
         checkArgument(doneState.isDone(), "doneState %s is not a done state", doneState);
-
+        Trace.trace("TaskStateMachine to done state " + doneState + Trace.stackTrace(10));
         taskState.setIf(doneState, currentState -> !currentState.isDone());
     }
 
