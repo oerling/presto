@@ -18,6 +18,7 @@ import com.facebook.presto.server.smile.BaseResponse;
 import com.facebook.presto.server.smile.JsonResponseWrapper;
 import com.facebook.presto.spi.ErrorCodeSupplier;
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.trace.Trace;
 import com.google.common.util.concurrent.FutureCallback;
 
 import java.net.URI;
@@ -68,6 +69,7 @@ public class SimpleHttpResponseHandler<T>
                     }
                 }
                 else {
+                    Trace.trace("json parse exception " + cause.toString());
                     cause = new PrestoException(errorCode, format("Unexpected response from %s", uri), cause);
                 }
                 callback.fatal(cause);
